@@ -67,6 +67,14 @@ jobs:
         run: |
           ./scripts/package-windows.ps1 -SkipBuild
           Copy-Item LICENSE, LICENSE-GPL-3.0, THIRD_PARTY.md, README.md dist/windows/
+          New-Item -ItemType Directory -Path dist/windows/licenses -Force | Out-Null
+          Copy-Item assets/fonts/OFL.txt dist/windows/licenses/Geist-OFL.txt
+          Copy-Item crates/dpdfnet/LICENSE-CEVA dist/windows/licenses/DPDFNet-Apache-2.0.txt
+          Copy-Item crates/dpdfnet/LICENSE-HUSHMIC dist/windows/licenses/HushMic-Apache-2.0.txt
+          Copy-Item crates/dpdfnet/NOTICE.md dist/windows/licenses/DPDFNet-NOTICE.md
+          Copy-Item crates/nvenc-sys/LICENSE dist/windows/licenses/NVENC-MIT.txt
+          Copy-Item crates/nvenc-sys/NOTICE.md dist/windows/licenses/NVENC-NOTICE.md
+          Copy-Item vendor/gpui-0.2.2/LICENSE-APACHE dist/windows/licenses/GPUI-Apache-2.0.txt
           $hash = (Get-FileHash dist/windows/rcr.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  rcr.exe" | Set-Content dist/windows/SHA256SUMS.txt
 
