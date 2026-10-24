@@ -1,0 +1,90 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows x64 release
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup show
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+          rustc --version
+          cargo --version
+
+      - name: Locate Windows shader compiler
+        run: |
+          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/fxc.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $fxc) { throw 'Windows SDK shader compiler (fxc.exe) is missing' }
+          "GPUI_FXC_PATH=$($fxc.FullName)" | Add-Content $env:GITHUB_ENV
+          $fxc.DirectoryName | Add-Content $env:GITHUB_PATH
+
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            target/release
+          key: windows-x64-release-v1-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      - name: Build release executable
+        run: |
+          cargo build --locked --release -p rcr-desktop --bin rcr-desktop -j1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release build failed' }
+
+      - name: Package application
+        run: |
+          ./scripts/package-windows.ps1 -SkipBuild
+          Copy-Item LICENSE, LICENSE-GPL-3.0, THIRD_PARTY.md, README.md dist/windows/
+          $hash = (Get-FileHash dist/windows/rcr.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  rcr.exe" | Set-Content dist/windows/SHA256SUMS.txt
+
+      - name: Upload Windows download
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rcr-windows-x64
+          path: dist/windows/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
+
+      - name: Link download in run summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          "### Windows x64 build" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "[Download rcr-windows-x64]($env:ARTIFACT_URL)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Extract the archive and run rcr.exe. Video editing requires FFmpeg/FFprobe on PATH." |
+            Add-Content $env:GITHUB_STEP_SUMMARY
