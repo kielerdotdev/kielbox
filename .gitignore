@@ -30,7 +30,7 @@ __pycache__/
 
 # Upstream UI screenshots contain personal paths or credential-shaped demo text.
 # Keep them locally; regenerate baselines with anonymized fixtures when needed.
-/vendor/ssx/crates/ssx-editor-ui/docs/*.png
-/vendor/ssx/crates/ssx-editor-ui/tests/snapshots/*.png
-/vendor/ssx/crates/ssx-settings-ui/docs/*.png
-/vendor/ssx/crates/ssx-settings-ui/tests/snapshots/*.png
+/crates/rcr-image-editor-ui/docs/*.png
+/crates/rcr-image-editor-ui/tests/snapshots/*.png
+/crates/rcr-toolkit-settings-ui/docs/*.png
+/crates/rcr-toolkit-settings-ui/tests/snapshots/*.png

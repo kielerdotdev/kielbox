@@ -8,12 +8,12 @@ license = "GPL-3.0-or-later"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ssx-core = { path = "../../vendor/ssx/crates/ssx-core" }
-ssx-services = { path = "../../vendor/ssx/crates/ssx-services" }
-ssx-editor = { path = "../../vendor/ssx/crates/ssx-editor" }
-ssx-types = { path = "../../vendor/ssx/crates/ssx-types" }
-ssx-imgfx = { path = "../../vendor/ssx/crates/ssx-imgfx" }
-ssx-hdr = { path = "../../vendor/ssx/crates/ssx-hdr" }
+rcr-workflows = { path = "../rcr-workflows" }
+rcr-toolkit-services = { path = "../rcr-toolkit-services" }
+rcr-image-editor = { path = "../rcr-image-editor" }
+rcr-image-types = { path = "../rcr-image-types" }
+rcr-image-effects = { path = "../rcr-image-effects" }
+rcr-hdr = { path = "../rcr-hdr" }
 tempfile = "3"
 toml = "0.9"
 rayon = "1"
@@ -28,8 +28,8 @@ rqrr = "0.10"
 windows = { workspace = true, features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
 
 [dev-dependencies]
-ssx-core = { path = "../../vendor/ssx/crates/ssx-core", features = ["testing"] }
-ssx-upload = { path = "../../vendor/ssx/crates/ssx-upload" }
+rcr-workflows = { path = "../rcr-workflows", features = ["testing"] }
+rcr-upload = { path = "../rcr-upload" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "macros"] }
 url = "2"

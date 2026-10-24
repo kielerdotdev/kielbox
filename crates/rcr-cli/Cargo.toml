@@ -1,0 +1,61 @@
+[package]
+name = "rcr-cli"
+description = "The `ssx` command-line tool: capture, upload, history, configuration, hotkeys, shell integration and diagnostics."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[lib]
+name = "rcr_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rcr-cli"
+path = "src/main.rs"
+
+[features]
+default = ["record", "ffmpeg"]
+# `ssx record` (GIF only without `ffmpeg`), recording workflows in `ssx run`, encoder probe in `ssx doctor`.
+record = ["rcr-toolkit-services/record"]
+# MP4 encoding through the system FFmpeg.
+ffmpeg = ["record", "rcr-toolkit-services/ffmpeg"]
+# MP4 encoding through a statically linked FFmpeg (release builds). Needs `--no-default-features`.
+ffmpeg-static = ["record", "rcr-toolkit-services/ffmpeg-static"]
+
+[dependencies]
+rcr-image-types.workspace = true
+rcr-workflows.workspace = true
+rcr-platform.workspace = true
+rcr-shell.workspace = true
+rcr-upload.workspace = true
+rcr-hotkeys.workspace = true
+rcr-ipc.workspace = true
+rcr-toolkit-services = { path = "../rcr-toolkit-services" }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+clap_complete = "4"
+clap_mangen = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+toml = "0.9"
+toml_edit = "0.23"
+ctrlc = { version = "3", features = ["termination"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+# `ssx daemon autostart` writes the HKCU Run value.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+x11rb = "0.14"
+
+[lints]
+workspace = true

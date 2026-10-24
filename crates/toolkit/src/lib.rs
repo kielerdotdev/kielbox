@@ -1,9 +1,9 @@
-//! Native application adapters for SSX screenshot, editor, upload and workflow engines.
-pub use ssx_core as core;
-pub use ssx_editor as annotation;
-pub use ssx_imgfx as effects;
-pub use ssx_services as services;
-pub use ssx_types as types;
+//! Toolkit adapters for RCR's native screenshot, annotation, upload and workflow crates.
+pub use rcr_workflows as core;
+pub use rcr_image_editor as annotation;
+pub use rcr_image_effects as effects;
+pub use rcr_toolkit_services as services;
+pub use rcr_image_types as types;
 pub mod disk_usage;
 pub mod image_editor;
 pub mod selection;

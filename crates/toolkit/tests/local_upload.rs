@@ -1,14 +1,9 @@
-//! Compile the actual vendored local uploader and its regression tests against
-//! RCR's dependency lockfile. The upstream workspace also resolves unrelated
-//! applications and its own, independently versioned development dependencies.
-pub use ssx_upload::{body, context, error, http, types, util};
-
-#[path = "../../../vendor/ssx/crates/ssx-upload/src/local.rs"]
-mod local;
+//! Exercise the native uploader's public API through the toolkit integration.
+use rcr_upload::local;
 
 #[tokio::test]
 async fn shared_folder_upload_preserves_existing_destination_and_source() {
-    use ssx_upload::{UploadContext, UploadKind, UploadRequest, Uploader};
+    use rcr_upload::{UploadContext, UploadKind, UploadRequest, Uploader};
     let directory = tempfile::tempdir().unwrap();
     let original = directory.path().join("source.png");
     let shared = directory.path().join("shared");
@@ -20,7 +15,7 @@ async fn shared_folder_upload_preserves_existing_destination_and_source() {
     let result = uploader
         .upload(
             &UploadRequest::from_path(&original, UploadKind::Image),
-            &UploadContext::new(ssx_upload::build_http_client().unwrap()),
+            &UploadContext::new(rcr_upload::build_http_client().unwrap()),
         )
         .await
         .unwrap();

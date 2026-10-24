@@ -9,7 +9,7 @@ This is a working development prototype. Windows capture, replay saving, separat
 Install the MSVC Rust toolchain, Visual Studio C++ build tools, and a current NVIDIA driver on a Windows desktop with an AV1-capable NVIDIA GPU. The repository pins Rust 1.99.1. An NVIDIA SDK or CUDA toolkit installation is not needed to run the recorder.
 
 ```powershell
-cargo build --workspace -j1
+cargo build -j1
 cargo run -p rcr-desktop -j1
 ```
 
@@ -198,7 +198,7 @@ Known missing pieces: Linux/PipeWire capture, AMD/Intel encoder implementations,
 The lightweight replay workflow takes inspiration from [ClipFlow](https://github.com/jaimitus/ClipFlow). This implementation uses GPUI and native Rust packet/muxing code; no ClipFlow source was copied. See [THIRD_PARTY.md](../THIRD_PARTY.md) for the vendored GPUI patch, NVENC binding provenance, and licenses.
 
 
-## Screenshot and sharing toolkit (SSX integration)
+## Screenshot and sharing toolkit
 
 The **Tools** tab embeds SSX's Rust capture, annotation, workflow, uploader, clipboard and SQLite history services into RCR. The original SSX egui applications and recording backend are not launched. Recording and instant replay remain on RCR's NVENC path.
 
@@ -231,4 +231,4 @@ Native rendering smoke check, using a synthetic image and hidden GPUI window:
 .\target\debug\rcr-desktop.exe --smoke-toolkit
 ```
 
-The combined `rcr-desktop` and `rcr-toolkit` packages are **GPL-3.0-or-later**, with SSX's notices preserved in `vendor/ssx`. Original RCR core packages retain Apache-2.0. See `LICENSE-GPL-3.0`, `LICENSE`, `THIRD_PARTY.md` and `vendor/ssx/RCR-UPSTREAM.md`.
+The combined `rcr-desktop` and `rcr-toolkit` packages are **GPL-3.0-or-later**, with the original screenshot-library notices preserved in source. Original RCR core packages retain Apache-2.0. See `LICENSE-GPL-3.0`, `LICENSE`, `THIRD_PARTY.md` and `docs/SCREENSHOT-PROVENANCE.md`.

@@ -10,9 +10,9 @@ Generated FFmpeg provenance is sanitized with
 locally under `.downloads`. Public component versions, hashes and copyright
 notices remain in the source tree.
 
-Vendored egui documentation screenshots and visual baselines are omitted because
+Optional egui documentation screenshots and visual baselines are omitted because
 they contained local paths or original demo account text. The matching fixtures
-use generic placeholders. See `vendor/ssx/RCR-UPSTREAM.md` for regeneration.
+use generic placeholders. See `docs/SCREENSHOT-PROVENANCE.md` for regeneration.
 
 The GitHub publication starts with a clean snapshot and a generic contributor
 identity. Older local history and other remotes are preserved locally; do not

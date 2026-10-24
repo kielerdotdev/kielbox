@@ -1,0 +1,16 @@
+[package]
+name = "rcr-screenshot"
+description = "Backend-agnostic screen-capture API: the CaptureBackend trait, options, errors and desktop compositing."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[dependencies]
+rcr-image-types.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

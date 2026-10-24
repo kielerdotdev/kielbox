@@ -1,0 +1,23 @@
+[package]
+name = "rcr-hdr"
+description = "CPU reference HDR (scRGB) to SDR (sRGB) conversion for ssx screenshots."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[dependencies]
+rcr-image-types.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+half.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

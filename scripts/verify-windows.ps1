@@ -4,8 +4,10 @@ Set-StrictMode -Version Latest
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Push-Location -LiteralPath $workspace
 try {
-    & cargo test --workspace -j1
-    if ($LASTEXITCODE -ne 0) { throw 'Workspace tests failed.' }
+    & cargo test --locked -j1
+    if ($LASTEXITCODE -ne 0) { throw 'Application workspace tests failed.' }
+    & cargo test --locked -p rcr-workflows -p rcr-image-editor -p rcr-image-effects -p rcr-upload -j1
+    if ($LASTEXITCODE -ne 0) { throw 'Screenshot and workflow tests failed.' }
     & cargo build -p rcr-windows -j1
     if ($LASTEXITCODE -ne 0) { throw 'Capture build failed.' }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'

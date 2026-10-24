@@ -757,7 +757,7 @@ impl Toolkit {
         let prompt = [
             "Open image or .ssxe project",
             "Import ShareX uploader (.sxcu)",
-            "Import SSX settings.toml",
+            "Import toolbox settings.toml",
             "Share files",
         ][kind];
         let workflow = if kind == 3 && self.pane == 1 {
@@ -933,9 +933,9 @@ impl Toolkit {
     }
     fn destinations(&self, cx: &mut Context<Self>) -> Div {
         let mut root=div().flex().flex_col().gap_4().child(div().text_size(px(22.)).child("Upload destinations"))
-            .child(muted("Import ShareX .sxcu uploaders or existing SSX settings for S3, Imgur and custom HTTP destinations."))
+            .child(muted("Import ShareX .sxcu uploaders or existing toolbox settings for S3, Imgur and custom HTTP destinations."))
             .child(div().flex().gap_2().child(button("import-sxcu","Import .sxcu").on_click(cx.listener(|this,_,w,cx|this.choose_files(1,w,cx))))
-                .child(button("import-ssx","Import SSX settings").on_click(cx.listener(|this,_,w,cx|this.choose_files(2,w,cx))))
+                .child(button("import-ssx","Import toolbox settings").on_click(cx.listener(|this,_,w,cx|this.choose_files(2,w,cx))))
                 .child(button("share-upload-files","Choose files to share").on_click(cx.listener(|this,_,w,cx|this.choose_files(3,w,cx)))));
         if let Some(snapshot) = &self.snapshot {
             root = root.child(mono(format!(
@@ -1047,9 +1047,9 @@ impl Toolkit {
                     let selected=cx.prompt_for_paths(PathPromptOptions{files:false,directories:true,multiple:false,prompt:Some("Save screenshots here".into())});
                     cx.spawn_in(window,async move|view,cx|{if let Ok(Ok(Some(paths)))=selected.await&&let Some(path)=paths.into_iter().next(){let _=view.update(cx,|this,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.save_dir=Some(path);this.save(settings,cx);}});}}).detach();
                 }))))
-                .child(panel().child("HDR tone mapping").child(muted("SSX converts each HDR display before stitching it with SDR displays."))
+                .child(panel().child("HDR tone mapping").child(muted("RCR converts each HDR display before stitching it with SDR displays."))
                     .child(button("toggle-highlight-preservation",if snapshot.settings.capture.hdr.knee>=0.99{"Faithful SDR whites"}else{"Preserve highlight detail"}).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.hdr=if settings.capture.hdr.knee>=0.99{rcr_toolkit::core::settings::HdrConfig::preserve_highlights()}else{rcr_toolkit::core::settings::HdrConfig::faithful()};this.save(settings,cx);}}))))
-                .child(panel().child("Advanced SSX configuration").child(muted("All imported uploader, workflow, naming and post-upload settings remain available in this file. Secrets use the SSX system keyring."))
+                .child(panel().child("Advanced toolbox configuration").child(muted("All imported uploader, workflow, naming and post-upload settings remain available in this file. Secrets use the system keyring."))
                     .child(button("open-toolkit-config","Edit settings.toml").on_click({let path=snapshot.config_path.clone();move|_,_,_|{let _=std::process::Command::new("notepad.exe").arg(&path).spawn();}}))
                     .child(button("reload-toolkit-config","Reload settings").on_click(cx.listener(|this,_,_,cx|{this.submit(Action::Refresh,cx);}))));
         }

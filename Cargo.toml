@@ -1,14 +1,46 @@
 [workspace]
-members = ["crates/media-core", "crates/media-io", "crates/editor-core", "crates/dpdfnet", "crates/nvenc-sys", "crates/windows-capture", "crates/desktop", "crates/toolkit"]
-exclude = ["vendor/gpui-0.2.2", "vendor/ssx"]
-resolver = "2"
+members = ["crates/*"]
+default-members = ["crates/media-core", "crates/media-io", "crates/editor-core", "crates/dpdfnet", "crates/nvenc-sys", "crates/windows-capture", "crates/desktop", "crates/toolkit"]
+exclude = ["vendor/gpui-0.2.2"]
+resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+rust-version = "1.99"
+repository = "https://github.com/kielerdotdev/rcr"
 
 [workspace.dependencies]
+rcr-screenshot-app = { path = "crates/rcr-screenshot-app" }
+rcr-screenshot = { path = "crates/rcr-screenshot" }
+rcr-screenshot-portal = { path = "crates/rcr-screenshot-portal" }
+rcr-screenshot-wayland = { path = "crates/rcr-screenshot-wayland" }
+rcr-screenshot-windows = { path = "crates/rcr-screenshot-windows" }
+rcr-screenshot-x11 = { path = "crates/rcr-screenshot-x11" }
+rcr-cli = { path = "crates/rcr-cli" }
+rcr-workflows = { path = "crates/rcr-workflows" }
+rcr-image-editor = { path = "crates/rcr-image-editor" }
+rcr-image-editor-ui = { path = "crates/rcr-image-editor-ui" }
+rcr-image-gpu = { path = "crates/rcr-image-gpu" }
+rcr-hdr = { path = "crates/rcr-hdr" }
+rcr-hotkeys = { path = "crates/rcr-hotkeys" }
+rcr-image-effects = { path = "crates/rcr-image-effects" }
+rcr-ipc = { path = "crates/rcr-ipc" }
+rcr-screenshot-overlay = { path = "crates/rcr-screenshot-overlay" }
+rcr-platform = { path = "crates/rcr-platform" }
+rcr-recording-tools = { path = "crates/rcr-recording-tools" }
+rcr-toolkit-services = { path = "crates/rcr-toolkit-services" }
+rcr-toolkit-settings-ui = { path = "crates/rcr-toolkit-settings-ui" }
+rcr-shell = { path = "crates/rcr-shell" }
+rcr-image-types = { path = "crates/rcr-image-types" }
+rcr-upload = { path = "crates/rcr-upload" }
+thiserror = "2"
+tracing = "0.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
+half = "2"
+rayon = "1"
+
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -42,12 +74,12 @@ opt-level = 2
 # Screenshot raster kernels must run at production speed in desktop development builds.
 [profile.dev.package.rcr-toolkit]
 opt-level = 3
-[profile.dev.package.ssx-editor]
+[profile.dev.package.rcr-image-editor]
 opt-level = 3
-[profile.dev.package.ssx-imgfx]
+[profile.dev.package.rcr-image-effects]
 opt-level = 3
 # Screenshot alpha normalization and channel conversion touch every desktop pixel.
-[profile.dev.package.ssx-types]
+[profile.dev.package.rcr-image-types]
 opt-level = 3
 [profile.dev.package.tiny-skia]
 opt-level = 3
@@ -69,3 +101,27 @@ codegen-units = 1
 
 [patch.crates-io]
 gpui = { path = "vendor/gpui-0.2.2" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pragmatic pedantic exceptions: image/pixel maths casts constantly and intentionally.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+return_self_not_must_use = "allow"
+needless_pass_by_value = "allow"
+missing_fields_in_debug = "allow"
+struct_excessive_bools = "allow"
+many_single_char_names = "allow"

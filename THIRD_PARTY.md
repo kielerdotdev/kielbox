@@ -43,17 +43,18 @@ Exact dependency versions are recorded in `Cargo.lock`; each dependency retains 
 The HTML is a visual reference. Its bundled JavaScript and mock recording data are not executed or distributed with the application. `assets/icons` contains locally authored monochrome SVG icons.
 
 
-## SSX
+## Screenshot and workflow code origin
 
-Source: https://github.com/kielerdotdev/ssx
+The screenshot, annotation, workflow and upload libraries originated in
+[SSX](https://github.com/kielerdotdev/ssx), revision
+`bd8edc6f56b22becaaca15d2e0b226a5d967cb4c`, under GPL-3.0-or-later.
+They are now maintained directly as RCR workspace crates under `crates/`.
+There is no vendored SSX workspace or external SSX application dependency.
+Original notices are preserved in source and `LICENSE-GPL-3.0`.
 
-Vendored revision: `bd8edc6f56b22becaaca15d2e0b226a5d967cb4c`.
-
-The original source and notices are retained in `vendor/ssx`, including its GPL-3.0-or-later license (`vendor/ssx/LICENSE`, also copied to `LICENSE-GPL-3.0`). The combined desktop application and integration crate use GPL-3.0-or-later. Its standalone egui executables, recording engine and binaries are not embedded. The GPUI integration uses the SSX core, services, types, editor, image effects and HDR libraries. Each transitive dependency retains its own license.
-
-The local GPUI Windows fork also uses the native popup style and skips custom titlebar insets for popup windows. This lets the capture overlay use its complete physical client area without an invisible frame.
-
-Local SSX renderer optimizations copy opaque base-image regions directly at native scale and avoid redundant output allocations. See `vendor/ssx/RCR-UPSTREAM.md`. RCR adds dirty-tile preview caching outside the vendored renderer.
+See [screenshot source provenance](docs/SCREENSHOT-PROVENANCE.md) for the migration
+and retained compatibility identifiers. RCR's GPUI interface uses these native
+libraries; the optional standalone tools are separate workspace packages.
 
 ## Utility libraries and references
 
