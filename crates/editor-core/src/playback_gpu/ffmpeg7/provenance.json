@@ -1,0 +1,1945 @@
+{
+  "schema": 1,
+  "inputs": {
+    "schema": 1,
+    "target": "x86_64-pc-windows-msvc",
+    "root": "<workspace>",
+    "ffmpeg_release": "7.0.2",
+    "provider_release": "https://github.com/GyanD/codexffmpeg/releases/tag/7.0.2",
+    "source_commit": "e3a61e9103",
+    "source_reference": "https://github.com/FFmpeg/FFmpeg/commit/e3a61e9103",
+    "archive_url": "https://github.com/GyanD/codexffmpeg/releases/download/7.0.2/ffmpeg-7.0.2-full_build-shared.zip",
+    "archive_path": "<tooling>/ffmpeg7-bindings/archives/ffmpeg-7.0.2-full_build-shared.zip",
+    "archive_sha256": "216feea30258c17628f666e20a2536da7bb50171e6e583a768968e11ceafc8a3",
+    "wheel_url": "https://files.pythonhosted.org/packages/0b/2d/3f480b1e1d31eb3d6de5e3ef641954e5c67430d5ac93b7fa7e07589576c7/libclang-18.1.1-py2.py3-none-win_amd64.whl",
+    "wheel_path": "<tooling>/ffmpeg7-bindings/archives/libclang-18.1.1-py2.py3-none-win_amd64.whl",
+    "wheel_sha256": "4dd2d3b82fab35e2bf9ca717d7b63ac990a3519c7e312f19fa8e86dcc712f7fb",
+    "include_directory": "<tooling>/ffmpeg7-bindings/inputs-<id>/include",
+    "headers": [
+      {
+        "relative": "libavcodec\\ac3_parser.h",
+        "sha256": "200c6d2e96975196e8ba5f5716223dc9dda999d51578dabce2fca93175a05252",
+        "bytes": 1207
+      },
+      {
+        "relative": "libavcodec\\adts_parser.h",
+        "sha256": "d466583a8dc1260b015e588adbe3abd45f3f8ca0e43722f3088b472e80492a15",
+        "bytes": 1354
+      },
+      {
+        "relative": "libavcodec\\avcodec.h",
+        "sha256": "df26f16844b73aab987c1630fdf4e11a08c637df353c15001ead93589edad1b7",
+        "bytes": 112853
+      },
+      {
+        "relative": "libavcodec\\avdct.h",
+        "sha256": "7c125edc1985ec078f99abb1c9044c4fc76b06a03eb02c026cb968fb9d41fcca",
+        "bytes": 2726
+      },
+      {
+        "relative": "libavcodec\\avfft.h",
+        "sha256": "81bb6c5359f57de53b0e39766591404b632d15e700d313c97ded234d63d4e393",
+        "bytes": 4081
+      },
+      {
+        "relative": "libavcodec\\bsf.h",
+        "sha256": "cc26676aa44638fa5cbef953d967e19e2084b46aaa100f0a35ba2d34b302301c",
+        "bytes": 11540
+      },
+      {
+        "relative": "libavcodec\\codec_desc.h",
+        "sha256": "4c1a8d02398cc82c1913487405c483f4d74ec71ed3e666ed7e7570f581c8f479",
+        "bytes": 3974
+      },
+      {
+        "relative": "libavcodec\\codec_id.h",
+        "sha256": "432c0fb54d868034e4c696b2fa60c3c5d0f17c2b1b89e7e2980e54a24ce44b0f",
+        "bytes": 18010
+      },
+      {
+        "relative": "libavcodec\\codec_par.h",
+        "sha256": "73b787e33b009eee85e62cc91ae6b58ba23565dc1909da98912ffe9104ef1e51",
+        "bytes": 7727
+      },
+      {
+        "relative": "libavcodec\\codec.h",
+        "sha256": "c88336e3f9a1491681b2796703addf6d263aeee1d3cb3974ac861f8ec11453a8",
+        "bytes": 13211
+      },
+      {
+        "relative": "libavcodec\\d3d11va.h",
+        "sha256": "0a5b324124f3dd67942bac8d8288aba152215fb0ef2dede40d492198e0989346",
+        "bytes": 2610
+      },
+      {
+        "relative": "libavcodec\\defs.h",
+        "sha256": "0bb9d7049499d252c75f1fe15fced5022ebb30d1966d47217848236eb021604a",
+        "bytes": 12358
+      },
+      {
+        "relative": "libavcodec\\dirac.h",
+        "sha256": "09fd1f670422ee61713568abd90fdf371b30e6fe35bc6fb8213f1ad32b45cf56",
+        "bytes": 4126
+      },
+      {
+        "relative": "libavcodec\\dv_profile.h",
+        "sha256": "19f59e0b20ac583de4bfd76d18889d334bf0b6cdf7b5356723a33f3874738466",
+        "bytes": 3694
+      },
+      {
+        "relative": "libavcodec\\dxva2.h",
+        "sha256": "3a603c2cf8bc00d0c9df6cc80a5f0ed091d48d20303713baac1c7e432619f0bb",
+        "bytes": 2128
+      },
+      {
+        "relative": "libavcodec\\jni.h",
+        "sha256": "f98405ffb7ba26665cde92daef33bc4371c91aa6c85b522b36864ed289600ebc",
+        "bytes": 2263
+      },
+      {
+        "relative": "libavcodec\\mediacodec.h",
+        "sha256": "1f64544000dd2f2ec94604d5fcf7c2a6d26d32d085264356084a4b53a7f0c3f0",
+        "bytes": 3570
+      },
+      {
+        "relative": "libavcodec\\packet.h",
+        "sha256": "89a21705ec3a7d05c33752cba5de6a59d290ea700571b2a042dbaf11618e88ec",
+        "bytes": 29718
+      },
+      {
+        "relative": "libavcodec\\qsv.h",
+        "sha256": "e45780237ab0e9ea9ec11aab9f62dfb8b059138f846632ecacdc024db16dfb1b",
+        "bytes": 3844
+      },
+      {
+        "relative": "libavcodec\\vdpau.h",
+        "sha256": "297fe70bc1aa3b308fcda98ab4b144059364bbc880794ceebe44399d3c1f5b2f",
+        "bytes": 5411
+      },
+      {
+        "relative": "libavcodec\\version_major.h",
+        "sha256": "895fd0ddac413b66b20affb5186c4371ca38a7680c7e1e67cb8032aba763b92e",
+        "bytes": 2031
+      },
+      {
+        "relative": "libavcodec\\version.h",
+        "sha256": "7b0da66aa9b24c14598f34566fa3dc5090f8ead27d37aff9a44b3f0696958128",
+        "bytes": 1619
+      },
+      {
+        "relative": "libavcodec\\videotoolbox.h",
+        "sha256": "b182be72a4404f99dc761680193f647c47c2a792ab50d975f6d8b75984c6f5b9",
+        "bytes": 2445
+      },
+      {
+        "relative": "libavcodec\\vorbis_parser.h",
+        "sha256": "57077b2e1d28d42636cab0f69e4b92b1ad64ac2eaa2843c270a6afaf308a76ae",
+        "bytes": 2285
+      },
+      {
+        "relative": "libavdevice\\avdevice.h",
+        "sha256": "017157246e4e2a4a6ae8d23b57ad93621f201ac7a39ec8b4e2e04663f2b87ee3",
+        "bytes": 13506
+      },
+      {
+        "relative": "libavdevice\\version_major.h",
+        "sha256": "78fcc341d15205d6086df697702f32dc558d6893b5aa446f2116dba2c7b31c43",
+        "bytes": 1556
+      },
+      {
+        "relative": "libavdevice\\version.h",
+        "sha256": "8e58aa03551c966dfe9c0b98b26e7dba02131c2285c11f63d867724556a07a04",
+        "bytes": 1624
+      },
+      {
+        "relative": "libavfilter\\avfilter.h",
+        "sha256": "042099eed984101fd2c6852a272bbd22750fec87877947e1ef1c4c726b1fb39c",
+        "bytes": 54769
+      },
+      {
+        "relative": "libavfilter\\buffersink.h",
+        "sha256": "ab5fe19d11f039ba40d97bc40855d3ffc3df4c8a2d91be6efb141304510c8f34",
+        "bytes": 6923
+      },
+      {
+        "relative": "libavfilter\\buffersrc.h",
+        "sha256": "b4e8e39bcd4179934064572a40fba7d0830f615dbee3c53859addb28bf2d487a",
+        "bytes": 6747
+      },
+      {
+        "relative": "libavfilter\\version_major.h",
+        "sha256": "7a8bf18dba3ba32195c213a29a5779e21949c43b41a7c2a7c28f2822e69be9e5",
+        "bytes": 1288
+      },
+      {
+        "relative": "libavfilter\\version.h",
+        "sha256": "1d28c68ba748c758e96e2819b2651a1734ee34e3c5f6b9301f461cd84d3cbb69",
+        "bytes": 1653
+      },
+      {
+        "relative": "libavformat\\avformat.h",
+        "sha256": "3b74f2d3660620567230cbab01f000c0b928577ee3289c61ffd0563f0de2ea6f",
+        "bytes": 118041
+      },
+      {
+        "relative": "libavformat\\avio.h",
+        "sha256": "b1a25f1465b87b62bf2797870c39fbbf81d2e1b4513ac34a66d57963e8facb6f",
+        "bytes": 31142
+      },
+      {
+        "relative": "libavformat\\version_major.h",
+        "sha256": "ff9df3ee2fb79950645acaa7811e3bcb7d284431d70a7e89a3276784cfdda0cd",
+        "bytes": 2021
+      },
+      {
+        "relative": "libavformat\\version.h",
+        "sha256": "f1ebc3e8bbb873a87c426aa33ea36bdb649477b6ddd901387c0a2520c663a9e9",
+        "bytes": 1652
+      },
+      {
+        "relative": "libavutil\\adler32.h",
+        "sha256": "f21a861957bf4b1812ed67fdc528890f9cff1bb483facf0f5109e4a51932fe3b",
+        "bytes": 1696
+      },
+      {
+        "relative": "libavutil\\aes_ctr.h",
+        "sha256": "fbbb94888bfab2ea7141e7e1afa5872de099e7ee57baea17632c3d4fdd2cba3f",
+        "bytes": 2443
+      },
+      {
+        "relative": "libavutil\\aes.h",
+        "sha256": "0a86ebeaf9ed33548bf0f92359f7047e521d4d80fe6b0ef1c8ef9505e38b6d28",
+        "bytes": 1912
+      },
+      {
+        "relative": "libavutil\\ambient_viewing_environment.h",
+        "sha256": "00135de08089f8c711bb113588f80575a1d26e86d50b6dac5928a27a0ff9a8c7",
+        "bytes": 2585
+      },
+      {
+        "relative": "libavutil\\attributes.h",
+        "sha256": "1f51258ba39861e08cbc8d407ec37a8d0fd28669aa7306c1365cb9c675fa1d76",
+        "bytes": 4850
+      },
+      {
+        "relative": "libavutil\\audio_fifo.h",
+        "sha256": "3c513ca46927346c0673cd9db302afe62dbbf976844f36da0307fd10f7f47bfd",
+        "bytes": 5966
+      },
+      {
+        "relative": "libavutil\\avassert.h",
+        "sha256": "39dfe16f0790daa5d6b9b1bad3167c3c9e638c72452e0acdaf2d163c9c75ea40",
+        "bytes": 2408
+      },
+      {
+        "relative": "libavutil\\avconfig.h",
+        "sha256": "975611ad5eba15212d9e1d5fca9d4fdf0daec6d2269b2fcab8e29af8667164bc",
+        "bytes": 180
+      },
+      {
+        "relative": "libavutil\\avstring.h",
+        "sha256": "ac51462bf55ff62da39db4b15c7a6b9b783387709f06879196a065691b34edbf",
+        "bytes": 14940
+      },
+      {
+        "relative": "libavutil\\avutil.h",
+        "sha256": "c4bc464c1f6b85e08141772a3f07cdaad00b46d9a970f374f171f2b2b810eb90",
+        "bytes": 9495
+      },
+      {
+        "relative": "libavutil\\base64.h",
+        "sha256": "81ac13d23f3744fe85ea2651ce903e201cd55fc63fcdd899d2cfe5560d50ef3d",
+        "bytes": 2285
+      },
+      {
+        "relative": "libavutil\\blowfish.h",
+        "sha256": "b955a63c60c8b3be0203ec6c3973f9084d848cf884fe56cd56088301aeef7992",
+        "bytes": 2394
+      },
+      {
+        "relative": "libavutil\\bprint.h",
+        "sha256": "5e3800d797fb8f67ffa7917420d3710c759afaca6f84b655fb64bf4dfa4650d2",
+        "bytes": 8818
+      },
+      {
+        "relative": "libavutil\\bswap.h",
+        "sha256": "855e138f6d8c7947553b1c63a7bab06bcb71362f03c72b761fd9ed61820d71aa",
+        "bytes": 2903
+      },
+      {
+        "relative": "libavutil\\buffer.h",
+        "sha256": "f16742d574216434580573a2b09f56fc5b66b7dda1960d4f02ba59e3269ba548",
+        "bytes": 11998
+      },
+      {
+        "relative": "libavutil\\camellia.h",
+        "sha256": "1db30753e71c73f1937e807850069e8215cdf37a1bc3ff89d3a6370a719c1fde",
+        "bytes": 2139
+      },
+      {
+        "relative": "libavutil\\cast5.h",
+        "sha256": "05b2e13aecaa0adbb470081a689f45baffb8e03a71997c31f37a22ea4e383a60",
+        "bytes": 2561
+      },
+      {
+        "relative": "libavutil\\channel_layout.h",
+        "sha256": "db35d237fe7433e21b0883dcb439b8c22e4c3c724f54db9003d6262d0e5495c3",
+        "bytes": 32445
+      },
+      {
+        "relative": "libavutil\\common.h",
+        "sha256": "a3a225eb40ca007d28d6ac33ad62281744cd138d2b2ff3de3e1aeacc57867c85",
+        "bytes": 17130
+      },
+      {
+        "relative": "libavutil\\cpu.h",
+        "sha256": "37c4ccea939e19b463a2a3e4c101ff8dd03c98847fc045395d28ba0c9db8b662",
+        "bytes": 6320
+      },
+      {
+        "relative": "libavutil\\crc.h",
+        "sha256": "5728cf65705a46723ea28b4f6c8361aad82b76a90e859943efe8af0edb79ec86",
+        "bytes": 3259
+      },
+      {
+        "relative": "libavutil\\csp.h",
+        "sha256": "7969fd662f31cf3180403510a6784a14af60d7f9bf3a569dde84585a696dff09",
+        "bytes": 4927
+      },
+      {
+        "relative": "libavutil\\des.h",
+        "sha256": "15ebdda1af65d91c4607a3444c5f749d5e9757ff5d7f4b04213b3194603f74d9",
+        "bytes": 2514
+      },
+      {
+        "relative": "libavutil\\detection_bbox.h",
+        "sha256": "8f5817d77af243a52e905947aa5ae73c218d68dba909040b2f63bd2ca6f93922",
+        "bytes": 3524
+      },
+      {
+        "relative": "libavutil\\dict.h",
+        "sha256": "c95cba1829e7886e31469f4e058bb9af3c8f215619c7ffddbc2045c9039f0554",
+        "bytes": 9374
+      },
+      {
+        "relative": "libavutil\\display.h",
+        "sha256": "b9c78c80aa9331b945802b6bcd1db4ecc9ec4f9fad41993cc82b880c0dec2576",
+        "bytes": 3472
+      },
+      {
+        "relative": "libavutil\\dovi_meta.h",
+        "sha256": "3a67a422676c5b6e2dfd59b3e6a8e3f816b0602f5d73332c0b1d8e6b43644077",
+        "bytes": 7641
+      },
+      {
+        "relative": "libavutil\\downmix_info.h",
+        "sha256": "2fc23ad8f0750d82fcd6aa3b653998e2ea9721f9d1664df7b6cb80e93d7fa3aa",
+        "bytes": 3235
+      },
+      {
+        "relative": "libavutil\\encryption_info.h",
+        "sha256": "ccc3a4a889b8a3c5aaf37b9fb2407bcdf23a065487c7cba718518a517c463b18",
+        "bytes": 7056
+      },
+      {
+        "relative": "libavutil\\error.h",
+        "sha256": "f90feec75a317e491618e06ce14d19218e5b0257c885155613b704002a9d5bda",
+        "bytes": 5489
+      },
+      {
+        "relative": "libavutil\\eval.h",
+        "sha256": "68efeaa9b6600ec47dae9031d1f0869818c88083b24fb133de3c2cf73f8adf1f",
+        "bytes": 6600
+      },
+      {
+        "relative": "libavutil\\executor.h",
+        "sha256": "0c949cf5269ad933ed1a200ece06a3998db10147e1403629a398b7be52459cdc",
+        "bytes": 1885
+      },
+      {
+        "relative": "libavutil\\ffversion.h",
+        "sha256": "f0682527d385b320b9c50c1f759ff58d7cdd1b4f0214b873769607703bca5f56",
+        "bytes": 208
+      },
+      {
+        "relative": "libavutil\\fifo.h",
+        "sha256": "87480aa06ef179828c76c67bfee7013f992b776c109ee3eb0619c8fdc80eeb75",
+        "bytes": 8553
+      },
+      {
+        "relative": "libavutil\\file.h",
+        "sha256": "e49f8517062101650f612424a76f301a9a5d18cd6981091f73a0cb8a47a25147",
+        "bytes": 2246
+      },
+      {
+        "relative": "libavutil\\film_grain_params.h",
+        "sha256": "c3ec8dae0205e62ee5c79f7425760d42761fcf6248a92757e05bd742e51e4d86",
+        "bytes": 10259
+      },
+      {
+        "relative": "libavutil\\frame.h",
+        "sha256": "dd96fd2ca945bf655c36ad6fb4fd84a66a4e95025b69f2f35e1ed341347b2c71",
+        "bytes": 38049
+      },
+      {
+        "relative": "libavutil\\hash.h",
+        "sha256": "b0896571267220736679eea28c454783795a02a0f1aef008ebe7c40489a75fdd",
+        "bytes": 8457
+      },
+      {
+        "relative": "libavutil\\hdr_dynamic_metadata.h",
+        "sha256": "0d64ba1388d67453ee677cd50227d4b3bedf3cda6e4572f3517b2331e7a8d017",
+        "bytes": 14385
+      },
+      {
+        "relative": "libavutil\\hdr_dynamic_vivid_metadata.h",
+        "sha256": "9f50e471376bc9e8ca504a338cfe74ef634b8f2c242ccefed2e4da67197112de",
+        "bytes": 10004
+      },
+      {
+        "relative": "libavutil\\hmac.h",
+        "sha256": "d14d625a897d6bba0668acdf33dc597bb0050237c5c1a5f7e568fe36822782e7",
+        "bytes": 2865
+      },
+      {
+        "relative": "libavutil\\hwcontext_cuda.h",
+        "sha256": "4878f46347271bc7a9ff26bb1573449a99cc81447684e1034a3edd4b0ff91d9a",
+        "bytes": 1843
+      },
+      {
+        "relative": "libavutil\\hwcontext_d3d11va.h",
+        "sha256": "d99c1b5c5dab94c23709d4ce6cf489c2a0b4f4bd57bb04e2196371277dca5af7",
+        "bytes": 6669
+      },
+      {
+        "relative": "libavutil\\hwcontext_d3d12va.h",
+        "sha256": "1c52b82625e39a61d595aa74361843731b6b326d0591d6a2bcaa12a2653ac0c4",
+        "bytes": 3934
+      },
+      {
+        "relative": "libavutil\\hwcontext_drm.h",
+        "sha256": "b598f37f40cf1342f923c0b97784a6f2830b543868eccee046375e096fbd5f24",
+        "bytes": 4673
+      },
+      {
+        "relative": "libavutil\\hwcontext_dxva2.h",
+        "sha256": "73a0333b65e99675834dcb1b63a5e9339638ccc619f1a2fcba85cdd0e179ade0",
+        "bytes": 2411
+      },
+      {
+        "relative": "libavutil\\hwcontext_mediacodec.h",
+        "sha256": "8c602859ebca906ba6e43ea548ff28821cf2886b4500b2be1deaaf2d552496d4",
+        "bytes": 1988
+      },
+      {
+        "relative": "libavutil\\hwcontext_opencl.h",
+        "sha256": "ad521fa2fd015cb1aba962468ca4ac176f5fc6b2c4b7be28f05e1c03d89e1b31",
+        "bytes": 3097
+      },
+      {
+        "relative": "libavutil\\hwcontext_qsv.h",
+        "sha256": "4986f86340b8162ef2724f0e77a380b5133aaa0612749cfb836c38b4c166d20d",
+        "bytes": 1960
+      },
+      {
+        "relative": "libavutil\\hwcontext_vaapi.h",
+        "sha256": "6f6c6a5250dd0f901cdc7de8b9b3db26102719b7e056cd17500009096bfd9b39",
+        "bytes": 3787
+      },
+      {
+        "relative": "libavutil\\hwcontext_vdpau.h",
+        "sha256": "6c96373d9e5deb2c500004f3f55ee1d2cea0f76cdfaeabaf5a3ad3e4938e8252",
+        "bytes": 1360
+      },
+      {
+        "relative": "libavutil\\hwcontext_videotoolbox.h",
+        "sha256": "116a7249f95d3f9c47bbf3319850fa1487beea8e4b5edf7e9e2cd56b1d6d9b21",
+        "bytes": 3492
+      },
+      {
+        "relative": "libavutil\\hwcontext_vulkan.h",
+        "sha256": "74067b6224e8a9d60969f192fdc17f97a12ff073274f5047c380543647026760",
+        "bytes": 11412
+      },
+      {
+        "relative": "libavutil\\hwcontext.h",
+        "sha256": "828cc9ed7e8c7a6d0a706fde2a16a0ec09d36e7c37d4ccdfd452ff1594f34614",
+        "bytes": 24079
+      },
+      {
+        "relative": "libavutil\\iamf.h",
+        "sha256": "000b89a31047af13b2d17487a08d3134a484ac552eb1700366947432a024e4c5",
+        "bytes": 21054
+      },
+      {
+        "relative": "libavutil\\imgutils.h",
+        "sha256": "8e0055fd86fb10b7c9e435e9375736b6db201cb9930a38fb4ff1e1a1da8e0cff",
+        "bytes": 16326
+      },
+      {
+        "relative": "libavutil\\intfloat.h",
+        "sha256": "3a29e4eebc8c269cfd867b96de91d8231773d392c12a8820e46eaba96d2b4ca1",
+        "bytes": 1726
+      },
+      {
+        "relative": "libavutil\\intreadwrite.h",
+        "sha256": "85cad3a1d5f874ee607a5119fae6e15dca0ab34e7f0b4a3c110e36c90f97f9c7",
+        "bytes": 18627
+      },
+      {
+        "relative": "libavutil\\lfg.h",
+        "sha256": "c3bc1533172fe74870df8e37f168f28b0ff2e21bdb6a519b6555ec72710c910f",
+        "bytes": 2541
+      },
+      {
+        "relative": "libavutil\\log.h",
+        "sha256": "8555ad5d41f5f2fa1c7dd0dc65f2145b0517c0a414654575aade8b3968e4c408",
+        "bytes": 12766
+      },
+      {
+        "relative": "libavutil\\lzo.h",
+        "sha256": "61e89928dee9d83030adececac06aa6c1ae2aada06c5682fde52c52015c53556",
+        "bytes": 2048
+      },
+      {
+        "relative": "libavutil\\macros.h",
+        "sha256": "b63b3a268b096f0eed1e91b821714cff334e5dc5bb34365148704393ae15321e",
+        "bytes": 2304
+      },
+      {
+        "relative": "libavutil\\mastering_display_metadata.h",
+        "sha256": "9d5743a42306ac0158e26248a1281ae8be9ebfeb02e67f14e0e6ae770a543a65",
+        "bytes": 3944
+      },
+      {
+        "relative": "libavutil\\mathematics.h",
+        "sha256": "64fac2eb3a42fd3788f5585ac8e65c7d5cd82711730d1f030042ba0a62fe1a62",
+        "bytes": 9563
+      },
+      {
+        "relative": "libavutil\\md5.h",
+        "sha256": "5b42de1758d289f78b4d20c47686f443e4ea8a5a6411c0deb357f709d2ef34d7",
+        "bytes": 2092
+      },
+      {
+        "relative": "libavutil\\mem.h",
+        "sha256": "bf9a1d8c218c38b333efb16be076c5778d31d66a0691bdd6175f171c08283d7c",
+        "bytes": 20457
+      },
+      {
+        "relative": "libavutil\\motion_vector.h",
+        "sha256": "dc0b0a15a638c8b91df95a418c5951ee5e787d518f22b6e3d70094922536e8bb",
+        "bytes": 1770
+      },
+      {
+        "relative": "libavutil\\murmur3.h",
+        "sha256": "649258a51c4737fa19a025a489e2ac9e9b06a96eafa802f2765178c684382887",
+        "bytes": 3507
+      },
+      {
+        "relative": "libavutil\\opt.h",
+        "sha256": "5c6785ff0f38f76af14dc48cf4e501481a22ca3913001fbf71e4e896419fa55f",
+        "bytes": 39585
+      },
+      {
+        "relative": "libavutil\\parseutils.h",
+        "sha256": "e8efed69396851f429a8258d50e9c4f0431f921687a7c31bf6db13d14f7482c3",
+        "bytes": 7888
+      },
+      {
+        "relative": "libavutil\\pixdesc.h",
+        "sha256": "5e5b269eae685c54a3f9aa2ff6ab3749e6237a5dfee5bfad1d2c4aef6171a66a",
+        "bytes": 16165
+      },
+      {
+        "relative": "libavutil\\pixelutils.h",
+        "sha256": "339cd6ffb6460d06401801c5dfb91ca66b9bdc028e1acc9ff4a0f447cfd3785c",
+        "bytes": 2051
+      },
+      {
+        "relative": "libavutil\\pixfmt.h",
+        "sha256": "c955c9965380ab3b3a869d8fc0f40610569d57b753016e6c87f8cd92524f8b82",
+        "bytes": 41797
+      },
+      {
+        "relative": "libavutil\\random_seed.h",
+        "sha256": "4490fd79919aadb18f765caac0c210d22cafa4d63cddcf9275e6f5bf66e2fdea",
+        "bytes": 1889
+      },
+      {
+        "relative": "libavutil\\rational.h",
+        "sha256": "53ffdee193af035deb3cc0576e441a479da6294d416da098b122a9eac8d9ffb9",
+        "bytes": 6286
+      },
+      {
+        "relative": "libavutil\\rc4.h",
+        "sha256": "4ea0fbee43677721ad0d846f703a785aaf9881794d1cca0bcb210241b260fc26",
+        "bytes": 2003
+      },
+      {
+        "relative": "libavutil\\replaygain.h",
+        "sha256": "4ec82edbdc4e5493fba3cae6a27566f0f15d1399ccf16e25073ffd50ba8187ea",
+        "bytes": 1607
+      },
+      {
+        "relative": "libavutil\\ripemd.h",
+        "sha256": "df9ef8c29ee31e5bd8ea299b03d51bd25fe937583793a994db53d1df2b316620",
+        "bytes": 2158
+      },
+      {
+        "relative": "libavutil\\samplefmt.h",
+        "sha256": "e844d8b4a691256238d10de762a6a536ffe52995705166aee0d7f01ce79778a9",
+        "bytes": 10301
+      },
+      {
+        "relative": "libavutil\\sha.h",
+        "sha256": "91280db6995b1b99b9e5aad0aa211a3177dc4d2841da2fea097f54964b7891fd",
+        "bytes": 2368
+      },
+      {
+        "relative": "libavutil\\sha512.h",
+        "sha256": "da265152798b221706d7fe95293a0e8cd18fa2b5087bf32504a8120f10e7658f",
+        "bytes": 2413
+      },
+      {
+        "relative": "libavutil\\spherical.h",
+        "sha256": "18b8e559f69a9c93b251c9d3956b2aba7f47ba46ef5a7fa01f8ae858967b73da",
+        "bytes": 7997
+      },
+      {
+        "relative": "libavutil\\stereo3d.h",
+        "sha256": "5ece3ffb6baafd288f9f2d8747cae92b1b3985e6693fa2de6bc200173a1981b6",
+        "bytes": 5224
+      },
+      {
+        "relative": "libavutil\\tea.h",
+        "sha256": "3c1e93c566630bb4eeedad3ef3c8719bd6050081ac1c764b1fde81aba4969076",
+        "bytes": 2035
+      },
+      {
+        "relative": "libavutil\\threadmessage.h",
+        "sha256": "9bb242d7adc48662b947726843108aff7c34547d7a4a0d0e6f58f54a00fc4c9f",
+        "bytes": 3910
+      },
+      {
+        "relative": "libavutil\\time.h",
+        "sha256": "40e11fa242e0585996753affb054443e78be25919b7c3063042d0aaff1656760",
+        "bytes": 1800
+      },
+      {
+        "relative": "libavutil\\timecode.h",
+        "sha256": "20936b639afa89e7a356bd5f5317b33745b1f4c3d467486ad043cb9b5d51527a",
+        "bytes": 7843
+      },
+      {
+        "relative": "libavutil\\timestamp.h",
+        "sha256": "dfd2e2071577f04ddc3cae200abd96ba0fb7d38f53359025af319d4b902f1947",
+        "bytes": 2726
+      },
+      {
+        "relative": "libavutil\\tree.h",
+        "sha256": "2f8e906917612a05c138036dea7ed9f8faee5899413a523fdad4eb51711bc1e5",
+        "bytes": 5408
+      },
+      {
+        "relative": "libavutil\\twofish.h",
+        "sha256": "b71714336821e1c606b65620ba4b1ea47e431666be41f3174facbc51047fd814",
+        "bytes": 2245
+      },
+      {
+        "relative": "libavutil\\tx.h",
+        "sha256": "34f83ae31d074847e46579f25e3367210fbbfe1832b5315883cf4a28980ef101",
+        "bytes": 7140
+      },
+      {
+        "relative": "libavutil\\uuid.h",
+        "sha256": "e669ce76a6b987e189b4d7ff62d0fd9ad6e334fa4967076cc6d912976574b646",
+        "bytes": 4895
+      },
+      {
+        "relative": "libavutil\\version.h",
+        "sha256": "e1698379e9ff1b32428b8531cda6c6e2ad94e604a8e6bc7c7cce3c47f0197675",
+        "bytes": 4335
+      },
+      {
+        "relative": "libavutil\\video_enc_params.h",
+        "sha256": "f287486c4f828f82e579f93ea98fccb98749129544f660decfa56da6f818fd57",
+        "bytes": 5991
+      },
+      {
+        "relative": "libavutil\\video_hint.h",
+        "sha256": "7c8b7768ffd03af5034a13274d1ca0cc6206b9f2c0c478400aba8a6c79ad5359",
+        "bytes": 3586
+      },
+      {
+        "relative": "libavutil\\xtea.h",
+        "sha256": "2eb91f780cc4ad86095e4ebbce453475d40f4e9b8737d52bdf20a068dfafcdf0",
+        "bytes": 2834
+      },
+      {
+        "relative": "libpostproc\\postprocess.h",
+        "sha256": "ec3300d8249687df6b9503af1d437bf5453eb41bb30df180328e102a367db481",
+        "bytes": 3025
+      },
+      {
+        "relative": "libpostproc\\version_major.h",
+        "sha256": "be43dd4b9c49745501a6b657ee8f03d1b48866e5519611e67eff987017cdb080",
+        "bytes": 978
+      },
+      {
+        "relative": "libpostproc\\version.h",
+        "sha256": "eabefa4a01158860d02eaf6dbfdbb3385726a1ee5983d963abe5560afdc961fb",
+        "bytes": 1633
+      },
+      {
+        "relative": "libswresample\\swresample.h",
+        "sha256": "c9929a31a5ef9bd6a044343fcd0482aacc9d108bf7202e4723cbb8e55e16f0a7",
+        "bytes": 22340
+      },
+      {
+        "relative": "libswresample\\version_major.h",
+        "sha256": "4f3cd666405bb77606ff623440127ae0037eb7919e60dc55d423d812b162bbe2",
+        "bytes": 1015
+      },
+      {
+        "relative": "libswresample\\version.h",
+        "sha256": "ef5335ca64942dfab264b956bd7c7953a10fb20a8a99dbcd44e5dd346c8ab6cb",
+        "bytes": 1707
+      },
+      {
+        "relative": "libswscale\\swscale.h",
+        "sha256": "1000849033998ae3573e64089c0b92dadfd5efb25b2862a9e0b7e5470c6607a5",
+        "bytes": 16073
+      },
+      {
+        "relative": "libswscale\\version_major.h",
+        "sha256": "59377e8cf1cf5243456f800078d2d32d654552682ebfcae3c0a90b82a950fc56",
+        "bytes": 1175
+      },
+      {
+        "relative": "libswscale\\version.h",
+        "sha256": "0208d01663f257985dd57b60952aeffa2785986cf52a7264a3539598389c7b90",
+        "bytes": 1589
+      }
+    ],
+    "components": [
+      {
+        "name": "avutil-59.dll",
+        "runtime_path": "<ffmpeg-runtime>",
+        "archive_entry": "ffmpeg-7.0.2-full_build-shared/bin/avutil-59.dll",
+        "sha256": "002cd1845b3fb67055d3e352c3cfee705b57e28a5a9c3f05f2b757ace926d5e0"
+      },
+      {
+        "name": "avcodec-61.dll",
+        "runtime_path": "<ffmpeg-runtime>",
+        "archive_entry": "ffmpeg-7.0.2-full_build-shared/bin/avcodec-61.dll",
+        "sha256": "8bb548bdcc93e5970acdefd2a082dd6afd6204a5fa07886ce681efa25171fbbc"
+      },
+      {
+        "name": "avformat-61.dll",
+        "runtime_path": "<ffmpeg-runtime>",
+        "archive_entry": "ffmpeg-7.0.2-full_build-shared/bin/avformat-61.dll",
+        "sha256": "8c3cb6776cee21b6a02be8be91b47cf8ee48a4303b4163bfde6caadbe5c948f1"
+      },
+      {
+        "name": "swscale-8.dll",
+        "runtime_path": "<ffmpeg-runtime>",
+        "archive_entry": "ffmpeg-7.0.2-full_build-shared/bin/swscale-8.dll",
+        "sha256": "2e979e6b56fa292405b6c1c89c6bcbaaa01f076f7f5eaacbe1390320272ac6c6"
+      }
+    ],
+    "libclang_dll": "<tooling>/ffmpeg7-bindings/inputs-<id>/libclang/libclang.dll",
+    "libclang_sha256": "b13ec96d9a036d6c6c36dd09e00415ead7acc7fcfd40e721bf33ea86b3490f9d",
+    "runtime_directory": "<ffmpeg-runtime>",
+    "licenses_directory": "<tooling>/ffmpeg7-bindings/inputs-<id>/licenses",
+    "note": "Public headers/licenses only; DLL entries hashed directly in archive. No runtime installation or generated avconfig."
+  },
+  "generation": {
+    "allowlisted_types": [
+      "AVCodecContext",
+      "AVCodec",
+      "AVCodecHWConfig",
+      "AVCodecParameters",
+      "AVFrame",
+      "AVPacket",
+      "AVBufferRef",
+      "AVHWDeviceContext",
+      "AVHWFramesContext",
+      "AVD3D11VADeviceContext",
+      "AVD3D11VAFramesContext",
+      "AVD3D11FrameDescriptor",
+      "AVFormatContext",
+      "AVStream",
+      "AVRational",
+      "AVIOInterruptCB",
+      "AVPixelFormat",
+      "AVHWDeviceType",
+      "AVColorSpace",
+      "AVColorRange",
+      "AVColorPrimaries",
+      "AVColorTransferCharacteristic",
+      "AVFieldOrder",
+      "ID3D11Device",
+      "ID3D11DeviceContext",
+      "ID3D11VideoDevice",
+      "ID3D11VideoContext",
+      "ID3D11Texture2D"
+    ],
+    "bindgen": "0.71.1",
+    "clang_args": [
+      "--target=x86_64-pc-windows-msvc",
+      "-x",
+      "c",
+      "-std=c11",
+      "-fms-extensions",
+      "-fms-compatibility",
+      "-fms-compatibility-version=19.41",
+      "-nostdinc",
+      "-DWIN32_LEAN_AND_MEAN",
+      "-DNOMINMAX",
+      "-DCINTERFACE",
+      "-I<tooling>/ffmpeg7-bindings/inputs-<id>/include",
+      "-isystem",
+      "<msvc-include>",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/ucrt",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/shared",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/um",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/winrt"
+    ],
+    "compiled_c_bridge": false,
+    "formatter": "rustfmt",
+    "included_files": [
+      "<windows-sdk-include>/10.0.22621.0/shared/DriverSpecs.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/SpecStrings.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/apiset.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/apisetcconv.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/basetsd.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/driverspecs.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/dxgi.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/dxgicommon.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/dxgiformat.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/dxgitype.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/guiddef.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/kernelspecs.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/ktmtypes.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/minwindef.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/poppack.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/pshpack1.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/pshpack2.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/pshpack4.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/pshpack8.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpc.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcasync.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcdce.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcdcep.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcndr.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcnterr.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/rpcsal.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/sdkddkver.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/sdv_driverspecs.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/specstrings.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/specstrings_strict.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/specstrings_undef.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/stralign.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/tvout.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/winapifamily.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/windef.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/winerror.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/winpackagefamily.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/wnnc.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/wtypes.h",
+      "<windows-sdk-include>/10.0.22621.0/shared/wtypesbase.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_malloc.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_math.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_memcpy_s.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_memory.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_search.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_stdio_config.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wctype.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstdio.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstdlib.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstring.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/ctype.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/errno.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/inttypes.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/math.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/stddef.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/stdio.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/stdlib.h",
+      "<windows-sdk-include>/10.0.22621.0/ucrt/string.h",
+      "<windows-sdk-include>/10.0.22621.0/um/OAIdl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/OCIdl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/apiquery2.h",
+      "<windows-sdk-include>/10.0.22621.0/um/cguid.h",
+      "<windows-sdk-include>/10.0.22621.0/um/combaseapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/coml2api.h",
+      "<windows-sdk-include>/10.0.22621.0/um/consoleapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/consoleapi2.h",
+      "<windows-sdk-include>/10.0.22621.0/um/consoleapi3.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10_1.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10_1shader.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10effect.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10misc.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10sdklayers.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d10shader.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d11.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3d11sdklayers.h",
+      "<windows-sdk-include>/10.0.22621.0/um/d3dcommon.h",
+      "<windows-sdk-include>/10.0.22621.0/um/datetimeapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/debugapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/enclaveapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/errhandlingapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/fibersapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/fileapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/fileapifromapp.h",
+      "<windows-sdk-include>/10.0.22621.0/um/handleapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/heapapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/ime_cmodes.h",
+      "<windows-sdk-include>/10.0.22621.0/um/imm.h",
+      "<windows-sdk-include>/10.0.22621.0/um/interlockedapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/ioapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/jobapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/jobapi2.h",
+      "<windows-sdk-include>/10.0.22621.0/um/libloaderapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/mcx.h",
+      "<windows-sdk-include>/10.0.22621.0/um/memoryapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/minwinbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/msxml.h",
+      "<windows-sdk-include>/10.0.22621.0/um/namedpipeapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/namespaceapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/oaidl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/objbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/objidl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/objidlbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/ocidl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/ole2.h",
+      "<windows-sdk-include>/10.0.22621.0/um/oleauto.h",
+      "<windows-sdk-include>/10.0.22621.0/um/oleidl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/processenv.h",
+      "<windows-sdk-include>/10.0.22621.0/um/processthreadsapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/processtopologyapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/profileapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/propidl.h",
+      "<windows-sdk-include>/10.0.22621.0/um/propidlbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/realtimeapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/reason.h",
+      "<windows-sdk-include>/10.0.22621.0/um/rpcnsi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/rpcnsip.h",
+      "<windows-sdk-include>/10.0.22621.0/um/securityappcontainer.h",
+      "<windows-sdk-include>/10.0.22621.0/um/securitybaseapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/servprov.h",
+      "<windows-sdk-include>/10.0.22621.0/um/stringapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/synchapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/sysinfoapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/systemtopologyapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/threadpoolapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/threadpoollegacyapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/timezoneapi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/unknwn.h",
+      "<windows-sdk-include>/10.0.22621.0/um/unknwnbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/urlmon.h",
+      "<windows-sdk-include>/10.0.22621.0/um/utilapiset.h",
+      "<windows-sdk-include>/10.0.22621.0/um/verrsrc.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winbase.h",
+      "<windows-sdk-include>/10.0.22621.0/um/wincon.h",
+      "<windows-sdk-include>/10.0.22621.0/um/wincontypes.h",
+      "<windows-sdk-include>/10.0.22621.0/um/windows.h",
+      "<windows-sdk-include>/10.0.22621.0/um/wingdi.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winnetwk.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winnls.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winnt.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winreg.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winsvc.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winuser.h",
+      "<windows-sdk-include>/10.0.22621.0/um/winver.h",
+      "<windows-sdk-include>/10.0.22621.0/um/wow64apiset.h",
+      "<msvc-include>/concurrencysal.h",
+      "<msvc-include>/excpt.h",
+      "<msvc-include>/limits.h",
+      "<msvc-include>/sal.h",
+      "<msvc-include>/stdarg.h",
+      "<msvc-include>/stdint.h",
+      "<msvc-include>/vadefs.h",
+      "<msvc-include>/vcruntime.h",
+      "<msvc-include>/vcruntime_string.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/avcodec.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_id.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_par.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/defs.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/packet.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version_major.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_desc.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_id.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_par.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/defs.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/packet.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version_major.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/avformat.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version_major.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/avio.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version_major.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/attributes.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avconfig.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avutil.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/buffer.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/channel_layout.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/dict.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/frame.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/hwcontext.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/hwcontext_d3d11va.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/log.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/pixfmt.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/rational.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/samplefmt.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/version.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/attributes.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avutil.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/buffer.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/channel_layout.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/common.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/dict.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/error.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/frame.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/intfloat.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/log.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/macros.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/mathematics.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/mem.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/pixfmt.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/rational.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/samplefmt.h",
+      "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/version.h"
+    ],
+    "input_record": "<tooling>/ffmpeg7-bindings/inputs-<id>/inputs.json",
+    "layout_tests": true,
+    "libclang": "clang version 18.1.1 (https://github.com/llvm/llvm-project.git dba2a75e9c7ef81fe84774ba5eee5e67e01d801a)",
+    "opaque_com": true,
+    "production_integration": false,
+    "runtime_versions": {
+      "avcodec-61.dll": {
+        "integer": 3998564,
+        "path": "<local-path>/avcodec-61.dll",
+        "version": [
+          61,
+          3,
+          100
+        ]
+      },
+      "avformat-61.dll": {
+        "integer": 3998052,
+        "path": "<local-path>/avformat-61.dll",
+        "version": [
+          61,
+          1,
+          100
+        ]
+      },
+      "avutil-59.dll": {
+        "integer": 3868772,
+        "path": "<local-path>/avutil-59.dll",
+        "version": [
+          59,
+          8,
+          100
+        ]
+      },
+      "swscale-8.dll": {
+        "integer": 524644,
+        "path": "<local-path>/swscale-8.dll",
+        "version": [
+          8,
+          1,
+          100
+        ]
+      }
+    },
+    "schema": 1,
+    "target": "x86_64-pc-windows-msvc",
+    "wrapper": "<tooling>/ffmpeg7-bindings/generation-<id>/generator/wrapper.h"
+  },
+  "configuration": {
+    "wrapper": "<tooling>/ffmpeg7-bindings/generation-<id>/generator/wrapper.h",
+    "output": "<tooling>/ffmpeg7-bindings/generation-<id>/output",
+    "runtime_directory": "<ffmpeg-runtime>",
+    "libclang_dll": "<tooling>/ffmpeg7-bindings/inputs-<id>/libclang/libclang.dll",
+    "input_record": "<tooling>/ffmpeg7-bindings/inputs-<id>/inputs.json",
+    "clang_args": [
+      "--target=x86_64-pc-windows-msvc",
+      "-x",
+      "c",
+      "-std=c11",
+      "-fms-extensions",
+      "-fms-compatibility",
+      "-fms-compatibility-version=19.41",
+      "-nostdinc",
+      "-DWIN32_LEAN_AND_MEAN",
+      "-DNOMINMAX",
+      "-DCINTERFACE",
+      "-I<tooling>/ffmpeg7-bindings/inputs-<id>/include",
+      "-isystem",
+      "<msvc-include>",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/ucrt",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/shared",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/um",
+      "-isystem",
+      "<windows-sdk-include>/10.0.22621.0/winrt"
+    ]
+  },
+  "msvc_include": "<msvc-include>",
+  "windows_sdk_include": "<windows-sdk-include>/10.0.22621.0",
+  "actual_included_headers": [
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/DriverSpecs.h",
+      "sha256": "9cf7e9e1c9b55c7c351e87ff5a98e362b6ffdb511c3309ab9cf46b62b0dace42"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/SpecStrings.h",
+      "sha256": "e95241ca676285fec2d1ab71f8eabf94afdfcc758b4fd4c528de695b825859b6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/apiset.h",
+      "sha256": "e984e20681fd3de73ce14ab09d759d5b4faf03f7d66a78602da2ac9234b24df4"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/apisetcconv.h",
+      "sha256": "1093683104f97c8c9725bb2e7539dca22722dc8c5618cd846287e9458698abfe"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/basetsd.h",
+      "sha256": "d35b73f885d7ef7dfd27fce3762c190c1c952a21e10a3945bcb3d1860c673b12"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/driverspecs.h",
+      "sha256": "9cf7e9e1c9b55c7c351e87ff5a98e362b6ffdb511c3309ab9cf46b62b0dace42"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/dxgi.h",
+      "sha256": "4b983ac75717296191a5faef4a87ff0b02b0e8d6202cd5af85bf75accea2cbbe"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/dxgicommon.h",
+      "sha256": "10b795959eef2771c5f4d20c49b20d56353cf9439e49667c391f32b9e74b09f6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/dxgiformat.h",
+      "sha256": "c2f87bc991ca8e0b4ccc6f65b9154c57e61513c1c6d69f8ebd49523a193b618d"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/dxgitype.h",
+      "sha256": "1fd2510bb1b5ee2fc240a9505e0ff5fee603cb80ccc576a7c03780f23337effa"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/guiddef.h",
+      "sha256": "0c08463fbc5a23a8862e57699e2f30dd14cd3db4a40903e4fca9392a57942dae"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/kernelspecs.h",
+      "sha256": "e844c7726c42736df74445b36351dc01e29bccee7d57ea208f77f61aa4c2b191"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/ktmtypes.h",
+      "sha256": "68d2848d00ae33282fb265880f8166f2b5dc60cd7a26db652450a5b44d44ee11"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/minwindef.h",
+      "sha256": "a9cf08be8407a196104124d5ade2308e204e47d3252bcd2ad20d0f2137843d62"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/poppack.h",
+      "sha256": "a50d0ef5cfe96d634a41ee9a97749c147165f8656cdfed5df53bc24c8adb1210"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/pshpack1.h",
+      "sha256": "dee27f2712b9e72ca78a404834735303d16bdb21c8aa3addaca7dbca22664529"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/pshpack2.h",
+      "sha256": "971d19074639cb36134bb40776cb2f817c53cbd05d748b52468f571932bbcc49"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/pshpack4.h",
+      "sha256": "1cb4d07a218ec43c7935b431b16146fc0f3d29d43bd192f12959051d62c48d57"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/pshpack8.h",
+      "sha256": "47f3972a1211e3a5ac32b18fae1a824db087dc7dc562d152e9ccab9b297faef0"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpc.h",
+      "sha256": "063bd35df91c85b029064abe19d635d985e414c9733c60ee8ca8ce937c98d6d5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcasync.h",
+      "sha256": "5e91801cee17b175a397cc56ff08790783d4fcdbc8d52fe7bb7461ccfa369a85"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcdce.h",
+      "sha256": "991883893134c8ecbe6af8335df0781bfb779c11684b3367def514136241b866"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcdcep.h",
+      "sha256": "df032ed7952b84113857284d86e7365b158cc57f955a5c0580e57e96c6df5ba2"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcndr.h",
+      "sha256": "8738c312962f5817f8fc9551ecbca02eebd70823683d4a22f36fba497f676f23"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcnterr.h",
+      "sha256": "9d94281cbd9272e02a39b51e19367df2a87f3756b85b5c848bee38828e0cdc23"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/rpcsal.h",
+      "sha256": "c15959eb632ab0f27d2bcb3b6873cd2873bdd5669069409d936ef993dcb1c108"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/sdkddkver.h",
+      "sha256": "fddc5258acaff69cb697bdaf07f1755509983e923518d7b1f1b2e70a38412f1a"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/sdv_driverspecs.h",
+      "sha256": "99fd81f9464150f56963c3bbafaa95f93b837c221c4237e6e399a85e00ea9f39"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/specstrings.h",
+      "sha256": "e95241ca676285fec2d1ab71f8eabf94afdfcc758b4fd4c528de695b825859b6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/specstrings_strict.h",
+      "sha256": "49b12898b42bcf53e5f8fb75e6db1a5d3ffb7a9f394e50df3351e0824d4a8b42"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/specstrings_undef.h",
+      "sha256": "6aba76eabbec627edadba5ab29304d9e2ff4eb9da165fd81a9095c851f405a01"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/stralign.h",
+      "sha256": "70ad1126003b54743cb8d19d30e68db6dcfc4bdfbf2303143536b166e6ba1f93"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/tvout.h",
+      "sha256": "8c359d2dff894d546f3eced2fe9463dfa4824bffc6c8c71ecd8feef02e7eae21"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/winapifamily.h",
+      "sha256": "bda507d14f2e40023d344cb943cbd98af26de8a47f3b0f5fac694d2025711af1"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/windef.h",
+      "sha256": "040535b19a60264e5fe6971f7cb13cbf24be17abeeaa8acd21e44f5d7dfe8d22"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/winerror.h",
+      "sha256": "241f475c7c52085f1c9fcc9b851a9fa53484c7c8a7c0841caf3f28f01d7efb3a"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/winpackagefamily.h",
+      "sha256": "8f74e254896094a3884e6975fd24b3493846514065f47d2666df53cdea45b8ea"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/wnnc.h",
+      "sha256": "fb3aaeef324b5d00ce0a6ae11702dcc3c1de65fa0a10caaab4336b97d3adf493"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/wtypes.h",
+      "sha256": "71417094369493700ce385e32c63002ed651dd70b5d7f7d8a6f64c9e9a0939db"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/shared/wtypesbase.h",
+      "sha256": "597427222e872fe6f168178ae9f7267f2dbdcc86f69f0dcdefb634a8a3f56d44"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt.h",
+      "sha256": "ddb4f8a4b4a7b30d4ff1593941f59279606c76b6d958eb4c30ecc7dca01d9f07"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_malloc.h",
+      "sha256": "44bd1bb518e730ba0be045f44a4735869e08f7d54ab85c298270770812fcff80"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_math.h",
+      "sha256": "a2f563f7b2e2a2559b98d2cadebdfaf69c99f155f783139b14ef8e5494527d47"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_memcpy_s.h",
+      "sha256": "f2e091841c3efe2f187fe703a0f562cce654ca82e68c343698b06ec67f9ba039"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_memory.h",
+      "sha256": "18ca520416579183bc369c0a8e555914db5c7577075b9359173fc6bc45595560"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_search.h",
+      "sha256": "f14c6d9c88e674fc4c61103c32c57054b712b2aca791ee2a62e85e415f39a71e"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_stdio_config.h",
+      "sha256": "a7e100624320a8e0123890c5008bcb2281c1273ca7ce5bb1d297f987fdbe79a0"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wctype.h",
+      "sha256": "b622b24cbda842a1736987f38c9deb5076e51af018630842a127bebd9104076e"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstdio.h",
+      "sha256": "a10bbf4667b3aada380a6b80df853f9fbddc3cc691ca57389b3b6759f119e515"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstdlib.h",
+      "sha256": "98b62ac5fb4291961c19ecf5c1b2e641b437f9042054f1a56ebdfd0deb71eca1"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/corecrt_wstring.h",
+      "sha256": "63c623a827f102bf51019aa1f6b744add483cd66ed247802e93b5dbc6a7adf12"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/ctype.h",
+      "sha256": "6a10e9f0505b896d356d986d671c939b7fb0602012e463314ff7bfd0182a861f"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/errno.h",
+      "sha256": "c64e8df96f057fdebc0474bd765cee3ae17de34a2b1fc9d197597321f2d1e447"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/inttypes.h",
+      "sha256": "615bcc64d5945d41c67608ad674e4ade389d90d4d68268370cf8b914f13dabac"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/math.h",
+      "sha256": "fb747990091c8c6e4ed8b4cfb40ed14eadd37547153607459e9ddef71c64edff"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/stddef.h",
+      "sha256": "3f1f7eeefad270928749c89a2a2094ccc3f38829b1d8c197f6ce7483ead2284c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/stdio.h",
+      "sha256": "06cbab3a501306fdd9176a00a83e5bb92ea4d7863cfd666355743527cf99edc6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/stdlib.h",
+      "sha256": "1576fdb40eb225dff53489db2fd52e41c7bb24f1e621e4a95c2c7f4a7216949c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/ucrt/string.h",
+      "sha256": "796b2226809790078984b919542d818ce74190d2110b119f93c2a7c3882b5de5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/OAIdl.h",
+      "sha256": "6432dc84174c12d5d3764b83fb4a21c5aed38b6a839c968133eca2920ee702fb"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/OCIdl.h",
+      "sha256": "442c0879df95ec8dc0e8762902d338191a25df7d31ec2a0338da5694088b4bf5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/apiquery2.h",
+      "sha256": "8ac6d7aabafe5b3a5e58f3a3707240d9b6da8da40778bc9157ca8ca0cf08c104"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/cguid.h",
+      "sha256": "36eaed76fe65e7dc5382761439bc9f22a66701d0259001943bfbe35f257aa6e2"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/combaseapi.h",
+      "sha256": "38fdbdd80127d4a450e5079180b51c3052a228ace1070b33e38f9400704e2abb"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/coml2api.h",
+      "sha256": "ad67b31a3b91cebf8f0fa6b0c17d543f88e9f57ac4a7cd0dc34b99bacfe5ed8f"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/consoleapi.h",
+      "sha256": "464c48454256e01a648e77e3d3f577c9a5bd0053c17a16bb72d322849b4a736f"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/consoleapi2.h",
+      "sha256": "4507bf49a004370ce01767cc9fd3fc85cee32f79cd8890b06cd5ab8d05b94408"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/consoleapi3.h",
+      "sha256": "1e734c1d2625e719a4547a6e4f647a888d804d2cfef5ee3a85c83119421d9cf1"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10.h",
+      "sha256": "f9dcc6bff7dd27d1f09218357c55fdc67817e232b2eba8a4ab7c4c0b13d4f8cc"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10_1.h",
+      "sha256": "3396254b8ccede56bc818b1ce45ac2a8ecfb2088baae9581cbd8bd6e14f916fd"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10_1shader.h",
+      "sha256": "626c38bf5241987078979c5e5ff22a48918aeaadf854546e9d89e5211e3f218c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10effect.h",
+      "sha256": "d06d472c22ebd3b359f5dbf837d1f6d60f27726d1261d3ea1d9bcda581cd6dfe"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10misc.h",
+      "sha256": "eee2a28b9ff8407a56d6a174b7c1d7d30cbef58144ed86237d90a51dda3981ef"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10sdklayers.h",
+      "sha256": "021024155ea5481eb1cc238ceb6c94d77ba53e07cc93dbd153e0b397143a4749"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d10shader.h",
+      "sha256": "e80066f050a3fb5c4108b2a73f7cbfbcff00830d120fa63219276b35647fcb3a"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d11.h",
+      "sha256": "b2c0caa561cc1f422f31c44ca38c861c43a8fa135ccef476ee2f3e47dca99e2d"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3d11sdklayers.h",
+      "sha256": "95f0719d6d562de1ab144b4e0bcb793b40272aaf1a5eb7e2bb75567e32121122"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/d3dcommon.h",
+      "sha256": "62f7bf1a5f17a02834b2ce0ca892ea204edd037aea970b4961b04c74e426b4bc"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/datetimeapi.h",
+      "sha256": "9b6ebd7fb7b32fe7ea6b3ce76f7c26ed9466821c2461fb71707ac2e2946c075c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/debugapi.h",
+      "sha256": "36fd04ba37aacf404cb82effb9a38634b502996f079a0121aeea5191f5f424fb"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/enclaveapi.h",
+      "sha256": "8d76135ff40140c6d64a09d173e1276fefb96a2db9073b5ab26f250c4733f999"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/errhandlingapi.h",
+      "sha256": "7d71b7e051c9c52ece96c1e78fe799bbfc03e7b220cb89e8887b7ca10ef1a404"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/fibersapi.h",
+      "sha256": "e56b73efacb2aab359621e97a81c82b7df71f557aec48cadaf39fee09b7390c5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/fileapi.h",
+      "sha256": "8318076677fba276e494edc39aaac11fbd9bc61ca2d36bb68bdcccd260ece977"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/fileapifromapp.h",
+      "sha256": "d07110e7f7989aeef7eed77d5f584f3ee60ff2ce58bc1a374d70151a18b4a664"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/handleapi.h",
+      "sha256": "72d7104c848446047353e765a541e1802b4510c7a74985e7d9973004f4602fac"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/heapapi.h",
+      "sha256": "22b606b0a4096295272bcae6fc353c4f159f0cdfc90b5f1a9a712b2fff50b53f"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/ime_cmodes.h",
+      "sha256": "27904e900938749c12a4d1e741afd564198a57a24724c1ddd36cd3302224df26"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/imm.h",
+      "sha256": "942d0b80eb7d186ee935fce8064ccdcdea3a49b39bcc03f55208b7c37e289779"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/interlockedapi.h",
+      "sha256": "4b0d3bc138eaab8dc9dd40bfb109f5fea4cbd2caaf92d63a4cf60a8edcfb0e3a"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/ioapiset.h",
+      "sha256": "7c3f659f98b3f1748a314bd64106583d01649333e0419b66232b4f64b3f85b0c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/jobapi.h",
+      "sha256": "08ddff85ec80f12b156837bbce4f969480fea0e32a08dade7cc16acecb0892d1"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/jobapi2.h",
+      "sha256": "398ef4f8277a1edb58e41c5e8233e8dce7744522ba8e989d904e93991a254c71"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/libloaderapi.h",
+      "sha256": "8f48062aa6d707bf8c63d8fb3e6956f331217be7309d38ac523951af51cb3224"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/mcx.h",
+      "sha256": "4ee416b2d24e45cfc5d35ce5b34833b64b34fd9a39957c66d75509f6d3b8f972"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/memoryapi.h",
+      "sha256": "c76ab8a5631a323eb0b19dee4bdad1c5f75db13c2df49a22917766fed85b3f41"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/minwinbase.h",
+      "sha256": "1d12fdda2ca73ce287ab4c18e598916d03b91a67aac124901a86386010d422b6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/msxml.h",
+      "sha256": "001de8d9f111a4449dffbd9c2640f92eb329ff43fff9e6b46c1a10a6bcddc16b"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/namedpipeapi.h",
+      "sha256": "e0f99e5f4319426325ddbf4a6d4e23298eed9b0806ef49ed6c95ad9dece70d82"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/namespaceapi.h",
+      "sha256": "3257ad8af53c5809be4d5d17ed0ffd8b49451d3f27c1fd747ffde3e0a7a81583"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/oaidl.h",
+      "sha256": "6432dc84174c12d5d3764b83fb4a21c5aed38b6a839c968133eca2920ee702fb"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/objbase.h",
+      "sha256": "14d465a8f602f2394c5455f67f129756fc525b26ad9c3099d3f6d943cafb5007"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/objidl.h",
+      "sha256": "f8e062af64b1146f27d8afe6442466782443571e5c2b8be0fc84dd25dfb54280"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/objidlbase.h",
+      "sha256": "50ab3671890ee76c4c11b96a4ef258eb5d1a3964102f99a259c5255fbe5c18c8"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/ocidl.h",
+      "sha256": "442c0879df95ec8dc0e8762902d338191a25df7d31ec2a0338da5694088b4bf5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/ole2.h",
+      "sha256": "ff6645d2ba037df3835689ca7efa3fa4990c229bc98e195e500145a6b1344ce6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/oleauto.h",
+      "sha256": "b90f37a54db78812b45ca2bfe57efb61a65a853a90418b4204ddb8623db87cae"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/oleidl.h",
+      "sha256": "d9e6028b3447ad94b01d0676047355d8eebf6ff11afa8529904dfc11b941359d"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/processenv.h",
+      "sha256": "1f1e38cf7aabee42bbf203beee0b9cde392243006444bdd2ed47566d355442f8"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/processthreadsapi.h",
+      "sha256": "a692be0b6e83ad600dccf2ca09131f1c1b599ad1c8073afdc1620d1c23703a1a"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/processtopologyapi.h",
+      "sha256": "4507a5e0c4f41d19a80d1543833f1a9d90277bc376441b277884bb043be24ba5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/profileapi.h",
+      "sha256": "cfa8e3626dba11689997d8fcd65b5dfbf4bcef8de09dd7e4e881769d48d165a2"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/propidl.h",
+      "sha256": "07200a21ea1247b97a91f2e28991c2de475b03cf890155a4de3d0990a2b70066"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/propidlbase.h",
+      "sha256": "637483de9f1d2d3d40c966e8daa9ed238a4469cb07fe168bac7c685e0cf1e1fd"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/realtimeapiset.h",
+      "sha256": "00c874b981a1242ee4ebc21e6ae96a69d7aa70662d820ceffbabcfea859b03e4"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/reason.h",
+      "sha256": "30540eb35daa79c7a5cb98059430df480e86b549b7980247288da8a2801add1d"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/rpcnsi.h",
+      "sha256": "f49466a31875d34a6e5c02f301d81b7a78f25cb947f3d6e6ea712ab356b42c8e"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/rpcnsip.h",
+      "sha256": "7c8138b43e028724e0fd143be29c40de5b5650a3e0f87356662a77dbad186712"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/securityappcontainer.h",
+      "sha256": "85cc13ed7028960bd7f97c91f98b96825b46f4b8bc386aed2f2a6a9bccbe4083"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/securitybaseapi.h",
+      "sha256": "81971187b82b27df42477761e562d883d24b2e81f50f2a8cef4ec067c348f8a5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/servprov.h",
+      "sha256": "5f25310cfbfb07bfb737b37c04bb74cd6c713505fdb9c8c4954f76bccd86dea4"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/stringapiset.h",
+      "sha256": "08bd9c295ce9ffdaca185512a2b318b47027b02157b492104230efc821fba23b"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/synchapi.h",
+      "sha256": "8cc114ec995beb8a5d4f0f4e66293286a3856670f89f85889c2f8199f803ce9c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/sysinfoapi.h",
+      "sha256": "fd617c293368bb322511bb64c3d32f4e5fa06443f2b30c725fcd390c12819518"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/systemtopologyapi.h",
+      "sha256": "8bfd1a78cc30b6d33c88e3f61ae2ac6468cee0607352ee8d096ba5375b4d401c"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/threadpoolapiset.h",
+      "sha256": "e91d7dee4d22ca848e3110a4c55f32e1918dc865479343896aec9ab653ee5110"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/threadpoollegacyapiset.h",
+      "sha256": "87c1630abf7dc4ed7978f2c4dbacf418f6bcf94cb946e277cb7250770bd44200"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/timezoneapi.h",
+      "sha256": "621c0252a8a831813592c4a95e183a2e7ae55efbbd7b8ad886af7d8871fc4d50"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/unknwn.h",
+      "sha256": "d0bbc6a30fa025fa3e5c198c68c638dec855b27b3ec34c9d404a95f890dd6a53"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/unknwnbase.h",
+      "sha256": "7fc28ae112c678a18567387fdbb43c615af6253429c9c1a8037cd0861f7568b6"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/urlmon.h",
+      "sha256": "a69ff621172bda7dcbd26b92f209e0bd7a7b00bad74e2ef375c2b6a8ec8b6f2f"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/utilapiset.h",
+      "sha256": "a8e0f6001c784b3ad9feb44c61d96b58c57366c473832ca8b2ea5de05877b470"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/verrsrc.h",
+      "sha256": "ff9bee8ee5b7aa81eaf79a1eab0e93bd307601e87d3b80a73f24984e9c951c61"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winbase.h",
+      "sha256": "adf591f6ce176a190c2d1ac90739399993d7fe3da016389fc1daa5b1eeefa3d5"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/wincon.h",
+      "sha256": "98e33720f9ec8fded808ab94f111b8335d0ba2fd2246a5adab3aab2ce05503d9"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/wincontypes.h",
+      "sha256": "209e79fdbbb30971740e59b2da2d6c86e27c0e9dd02bee9cbc21736fbd2426ad"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/windows.h",
+      "sha256": "b337d661d03a4abefb7b86a2742ce1ad5d19b57cd8b858bd13e7bbcc1dbeeaaa"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/wingdi.h",
+      "sha256": "d3a5e8bffbf9aaab40886705212949459373c90c3b70755980270669e3c06e21"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winnetwk.h",
+      "sha256": "7c7412df502fb6ea390c96d7c9f805a2a211609b95b8fdb4740540f789d9c4ce"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winnls.h",
+      "sha256": "e47861762a4b51a2689c8a99798a1a7e68335573e03c857e545172b095c5c829"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winnt.h",
+      "sha256": "2c8a4932205b4d41a03a8112e6f95d5a337044a393511e17a3324ea96e801cce"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winreg.h",
+      "sha256": "814c7b462a7db0894ed5676ceb6f86a897bdfca702abcea11c97782c8858609e"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winsvc.h",
+      "sha256": "8108fe3f099960014f36d1b2da425a8382e9d839de3477eb06f181289a0685c8"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winuser.h",
+      "sha256": "a0ef5ea3f5f2587aa6b84fb6c845b3ce866a0f09fa0a5898ed1b153072a09c0b"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/winver.h",
+      "sha256": "c60e137e7ff88582f72e50fe74904f5773502d229f78234ea83abb2688f6e8ae"
+    },
+    {
+      "path": "<windows-sdk-include>/10.0.22621.0/um/wow64apiset.h",
+      "sha256": "5de0da90ca805c29b82636d0c10d2a7e109d7fd1a7265981cbb6ad11b8cee926"
+    },
+    {
+      "path": "<msvc-include>/concurrencysal.h",
+      "sha256": "1ea9a2e32a6ff298ad7904610cc71028caa9b172399a579ca90a120d1b1aec12"
+    },
+    {
+      "path": "<msvc-include>/excpt.h",
+      "sha256": "191ab83e320a5e9712fe483257fecae14cb0c158a4517b620f3fddb1aa6ef23b"
+    },
+    {
+      "path": "<msvc-include>/limits.h",
+      "sha256": "2ed583abdb8a052b919d4652b10839e28a6fadbe63674108dcc65f719c9ff51c"
+    },
+    {
+      "path": "<msvc-include>/sal.h",
+      "sha256": "cda06459ca38681800ce5e98703c66534c74a803aa652bd4bc2b3407dd45ed46"
+    },
+    {
+      "path": "<msvc-include>/stdarg.h",
+      "sha256": "5d61d0b6734ef0832c30064800e8d01b3f12d29d24c8b1bd07b3ece3b72a9330"
+    },
+    {
+      "path": "<msvc-include>/stdint.h",
+      "sha256": "29fb6d4ba5e311e06877609c20a1bc49c6cdfb730f56dd0f9c53a6241c40ab5c"
+    },
+    {
+      "path": "<msvc-include>/vadefs.h",
+      "sha256": "200b49c2efd26bc7a92e9dfa3b847cc612b237dff5c7291d9f901d39b4a5e52e"
+    },
+    {
+      "path": "<msvc-include>/vcruntime.h",
+      "sha256": "c91d0fea907236fe8f1cab5a9c01d4d542b03529039705521feef775e0f59a7d"
+    },
+    {
+      "path": "<msvc-include>/vcruntime_string.h",
+      "sha256": "b05204f6814d1d7b7ca729b41d4192d0e47722f162c0b1d322f994bf9650af63"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/avcodec.h",
+      "sha256": "df26f16844b73aab987c1630fdf4e11a08c637df353c15001ead93589edad1b7"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec.h",
+      "sha256": "c88336e3f9a1491681b2796703addf6d263aeee1d3cb3974ac861f8ec11453a8"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_id.h",
+      "sha256": "432c0fb54d868034e4c696b2fa60c3c5d0f17c2b1b89e7e2980e54a24ce44b0f"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_par.h",
+      "sha256": "73b787e33b009eee85e62cc91ae6b58ba23565dc1909da98912ffe9104ef1e51"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/defs.h",
+      "sha256": "0bb9d7049499d252c75f1fe15fced5022ebb30d1966d47217848236eb021604a"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/packet.h",
+      "sha256": "89a21705ec3a7d05c33752cba5de6a59d290ea700571b2a042dbaf11618e88ec"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version_major.h",
+      "sha256": "895fd0ddac413b66b20affb5186c4371ca38a7680c7e1e67cb8032aba763b92e"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec.h",
+      "sha256": "c88336e3f9a1491681b2796703addf6d263aeee1d3cb3974ac861f8ec11453a8"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_desc.h",
+      "sha256": "4c1a8d02398cc82c1913487405c483f4d74ec71ed3e666ed7e7570f581c8f479"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_id.h",
+      "sha256": "432c0fb54d868034e4c696b2fa60c3c5d0f17c2b1b89e7e2980e54a24ce44b0f"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/codec_par.h",
+      "sha256": "73b787e33b009eee85e62cc91ae6b58ba23565dc1909da98912ffe9104ef1e51"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/defs.h",
+      "sha256": "0bb9d7049499d252c75f1fe15fced5022ebb30d1966d47217848236eb021604a"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/packet.h",
+      "sha256": "89a21705ec3a7d05c33752cba5de6a59d290ea700571b2a042dbaf11618e88ec"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version.h",
+      "sha256": "7b0da66aa9b24c14598f34566fa3dc5090f8ead27d37aff9a44b3f0696958128"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavcodec/version_major.h",
+      "sha256": "895fd0ddac413b66b20affb5186c4371ca38a7680c7e1e67cb8032aba763b92e"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/avformat.h",
+      "sha256": "3b74f2d3660620567230cbab01f000c0b928577ee3289c61ffd0563f0de2ea6f"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version.h",
+      "sha256": "f1ebc3e8bbb873a87c426aa33ea36bdb649477b6ddd901387c0a2520c663a9e9"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version_major.h",
+      "sha256": "ff9df3ee2fb79950645acaa7811e3bcb7d284431d70a7e89a3276784cfdda0cd"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/avio.h",
+      "sha256": "b1a25f1465b87b62bf2797870c39fbbf81d2e1b4513ac34a66d57963e8facb6f"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavformat/version_major.h",
+      "sha256": "ff9df3ee2fb79950645acaa7811e3bcb7d284431d70a7e89a3276784cfdda0cd"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/attributes.h",
+      "sha256": "1f51258ba39861e08cbc8d407ec37a8d0fd28669aa7306c1365cb9c675fa1d76"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avconfig.h",
+      "sha256": "975611ad5eba15212d9e1d5fca9d4fdf0daec6d2269b2fcab8e29af8667164bc"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avutil.h",
+      "sha256": "c4bc464c1f6b85e08141772a3f07cdaad00b46d9a970f374f171f2b2b810eb90"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/buffer.h",
+      "sha256": "f16742d574216434580573a2b09f56fc5b66b7dda1960d4f02ba59e3269ba548"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/channel_layout.h",
+      "sha256": "db35d237fe7433e21b0883dcb439b8c22e4c3c724f54db9003d6262d0e5495c3"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/dict.h",
+      "sha256": "c95cba1829e7886e31469f4e058bb9af3c8f215619c7ffddbc2045c9039f0554"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/frame.h",
+      "sha256": "dd96fd2ca945bf655c36ad6fb4fd84a66a4e95025b69f2f35e1ed341347b2c71"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/hwcontext.h",
+      "sha256": "828cc9ed7e8c7a6d0a706fde2a16a0ec09d36e7c37d4ccdfd452ff1594f34614"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/hwcontext_d3d11va.h",
+      "sha256": "d99c1b5c5dab94c23709d4ce6cf489c2a0b4f4bd57bb04e2196371277dca5af7"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/log.h",
+      "sha256": "8555ad5d41f5f2fa1c7dd0dc65f2145b0517c0a414654575aade8b3968e4c408"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/pixfmt.h",
+      "sha256": "c955c9965380ab3b3a869d8fc0f40610569d57b753016e6c87f8cd92524f8b82"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/rational.h",
+      "sha256": "53ffdee193af035deb3cc0576e441a479da6294d416da098b122a9eac8d9ffb9"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/samplefmt.h",
+      "sha256": "e844d8b4a691256238d10de762a6a536ffe52995705166aee0d7f01ce79778a9"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/version.h",
+      "sha256": "e1698379e9ff1b32428b8531cda6c6e2ad94e604a8e6bc7c7cce3c47f0197675"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/attributes.h",
+      "sha256": "1f51258ba39861e08cbc8d407ec37a8d0fd28669aa7306c1365cb9c675fa1d76"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/avutil.h",
+      "sha256": "c4bc464c1f6b85e08141772a3f07cdaad00b46d9a970f374f171f2b2b810eb90"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/buffer.h",
+      "sha256": "f16742d574216434580573a2b09f56fc5b66b7dda1960d4f02ba59e3269ba548"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/channel_layout.h",
+      "sha256": "db35d237fe7433e21b0883dcb439b8c22e4c3c724f54db9003d6262d0e5495c3"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/common.h",
+      "sha256": "a3a225eb40ca007d28d6ac33ad62281744cd138d2b2ff3de3e1aeacc57867c85"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/dict.h",
+      "sha256": "c95cba1829e7886e31469f4e058bb9af3c8f215619c7ffddbc2045c9039f0554"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/error.h",
+      "sha256": "f90feec75a317e491618e06ce14d19218e5b0257c885155613b704002a9d5bda"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/frame.h",
+      "sha256": "dd96fd2ca945bf655c36ad6fb4fd84a66a4e95025b69f2f35e1ed341347b2c71"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/intfloat.h",
+      "sha256": "3a29e4eebc8c269cfd867b96de91d8231773d392c12a8820e46eaba96d2b4ca1"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/log.h",
+      "sha256": "8555ad5d41f5f2fa1c7dd0dc65f2145b0517c0a414654575aade8b3968e4c408"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/macros.h",
+      "sha256": "b63b3a268b096f0eed1e91b821714cff334e5dc5bb34365148704393ae15321e"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/mathematics.h",
+      "sha256": "64fac2eb3a42fd3788f5585ac8e65c7d5cd82711730d1f030042ba0a62fe1a62"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/mem.h",
+      "sha256": "bf9a1d8c218c38b333efb16be076c5778d31d66a0691bdd6175f171c08283d7c"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/pixfmt.h",
+      "sha256": "c955c9965380ab3b3a869d8fc0f40610569d57b753016e6c87f8cd92524f8b82"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/rational.h",
+      "sha256": "53ffdee193af035deb3cc0576e441a479da6294d416da098b122a9eac8d9ffb9"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/samplefmt.h",
+      "sha256": "e844d8b4a691256238d10de762a6a536ffe52995705166aee0d7f01ce79778a9"
+    },
+    {
+      "path": "<tooling>/ffmpeg7-bindings/inputs-<id>/include/libavutil/version.h",
+      "sha256": "e1698379e9ff1b32428b8531cda6c6e2ad94e604a8e6bc7c7cce3c47f0197675"
+    }
+  ],
+  "rust_toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "binary: rustc",
+    "commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67",
+    "commit-date: 2026-10-13",
+    "host: x86_64-pc-windows-msvc",
+    "release: 1.99.1",
+    "LLVM version: 23.1.1"
+  ],
+  "rustfmt": "rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)",
+  "bindings_sha256": "ed7b8654fe0ee9ca46a0277da983b271a8dba528cbcac1da14bc9c8ab77f8d00",
+  "helper_lock_sha256": "2411bf451ba52e4611ba47f974d7391c582ab3e05716f9f760cf9eace1c59947",
+  "wrapper_sha256": "6ef45ebfded21db04fece0f9601f2521f6fee86e1ed3d5bbc702cb905c44c285",
+  "generator_sha256": "d63441030534f5a2873387b9d2d599edc5089da2a319b00ac8b7e37423baf57c",
+  "generated_rust_layout_check": "passed",
+  "media_or_decoder_execution": false
+}

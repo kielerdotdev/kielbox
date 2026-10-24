@@ -1,0 +1,499 @@
+name: Release
+
+# Builds installable archives for Linux and Windows.
+#
+#   * Push a tag `vX.Y.Z` (must equal `version` in Cargo.toml): builds, smoke-tests, and publishes
+#     a GitHub Release with the archives and SHA256SUMS. A tag with a suffix (v1.0.0-rc.1) is
+#     published as a pre-release.
+#   * Run manually (Actions -> Release -> Run workflow): builds and uploads the archives as
+#     workflow artifacts only; nothing is published.
+#
+# Variants
+#   linux   dynamic  FFmpeg from the distribution, linked dynamically. Verified recipe (built,
+#                    packaged and smoke-tested locally). The binaries need exactly the FFmpeg 6.x
+#                    shared libraries (libavcodec.so.60, libavformat.so.60, ...): Ubuntu 24.04 and
+#                    its derivatives. It will NOT start on distributions with another FFmpeg major
+#                    version (Debian 12 has 5.1, Debian 13 and Ubuntu 25.04 have 7.1); those need
+#                    the static variant.
+#   linux   static   FFmpeg built from source and embedded (crates/ssx-record/build). Required.
+#                    The job proves the embedding by failing if any binary still links
+#                    libav*/x264/x265/vpx/opus, and a probe step checks every static codec in the
+#                    prefix links with the toolchain's lld before the long cargo build starts.
+#   windows lite     no FFmpeg: screenshots, editor, uploads, GIF recording; MP4/WebM recording is
+#                    unavailable. Required.
+#   windows full     FFmpeg from vcpkg, statically linked. Required.
+#
+# All four builds run on GitHub's runners and pass their smoke tests there: the archive's installer
+# installs and uninstalls, `--version` runs, and on Linux a real capture under Xvfb is asserted.
+# On Windows `doctor` runs but is informational (a hosted runner has no real desktop), so no
+# capture, HDR or tray run on a real Windows desktop has been verified.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The five programs a release ships. Keep in sync with BINARIES in packaging/package.py.
+  PACKAGES: "-p ssx-cli -p ssx-app -p ssx-overlay -p ssx-editor-ui -p ssx-settings-ui"
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_version="$(python3 - <<'PY'
+          import re, pathlib
+          text = pathlib.Path("Cargo.toml").read_text()
+          m = re.search(r'\[workspace\.package\][^\[]*?^version\s*=\s*"([^"]+)"', text, re.S | re.M)
+          print(m.group(1) if m else "")
+          PY
+          )"
+          [ -n "$cargo_version" ] || { echo "::error::cannot read [workspace.package] version from Cargo.toml"; exit 1; }
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            if [ "$version" != "$cargo_version" ] && [ "${version%%-*}" != "$cargo_version" ]; then
+              echo "::error::tag $tag does not match version $cargo_version in Cargo.toml; bump it (and Cargo.lock) first"
+              exit 1
+            fi
+            case "$version" in *-*) pre=true ;; *) pre=false ;; esac
+          else
+            version="${cargo_version}-dev.${GITHUB_SHA::8}"
+            pre=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+          echo "Building version $version (prerelease=$pre)"
+
+  package-tests:
+    name: Packaging scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 packaging/test_package.py
+
+  linux:
+    name: Linux (${{ matrix.variant }})
+    needs: [version, package-tests]
+    # Ubuntu 24.04 has FFmpeg 6.1, the version the dynamic variant is developed and tested against.
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: dynamic
+            experimental: false
+          - variant: static
+            experimental: false
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      FFMPEG_PREFIX: ${{ github.workspace }}/ffmpeg-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: "1.94.1" }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.variant }}
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev cmake nasm yasm git \
+            libwayland-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev libxcb-xfixes0-dev \
+            libxcb-shape0-dev libxi-dev libxrandr-dev libxcursor-dev libgl-dev libegl-dev \
+            libpulse-dev libasound2-dev libpipewire-0.3-dev libxdo-dev \
+            xvfb xclip dbus-x11 mesa-vulkan-drivers libvulkan1
+
+      - name: FFmpeg development packages (dynamic)
+        if: matrix.variant == 'dynamic'
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            libavfilter-dev libavdevice-dev
+
+      - name: Codec development packages (static)
+        if: matrix.variant == 'static'
+        run: |
+          # Only the libraries FFmpeg talks to at run time (VA-API) come from the distribution.
+          # x264, opus, libvpx and SVT-AV1 are built from source into the prefix by
+          # build-ffmpeg.sh; installing the distribution's -dev packages as well would put a second,
+          # older ABI of them in /usr/lib where the linker finds it first (x264_encoder_open_164 vs
+          # the _165 FFmpeg was compiled against).
+          sudo apt-get install -y --no-install-recommends libva-dev libdrm-dev
+
+      - name: Restore the embedded FFmpeg
+        id: ffcache
+        if: matrix.variant == 'static'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.FFMPEG_PREFIX }}
+          key: ffmpeg-static-linux-${{ hashFiles('crates/ssx-record/build/build-ffmpeg.sh') }}
+
+      - name: Build FFmpeg from source (static)
+        if: matrix.variant == 'static' && steps.ffcache.outputs.cache-hit != 'true'
+        env:
+          # Portable code: never -march=native in a release artefact.
+          EXTRA_CFLAGS: "-march=x86-64-v2"
+        run: crates/ssx-record/build/build-ffmpeg.sh "$FFMPEG_PREFIX"
+
+      # Saved here, not at the end of the job: the later cargo build may fail while the FFmpeg
+      # prefix is perfectly good, and the default post-job save is skipped on failure.
+      - name: Save the embedded FFmpeg
+        if: matrix.variant == 'static' && steps.ffcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.FFMPEG_PREFIX }}
+          key: ffmpeg-static-linux-${{ hashFiles('crates/ssx-record/build/build-ffmpeg.sh') }}
+
+      # Fast failure (seconds, not the ~9 minutes of the cargo build): every static codec library in
+      # the prefix must be linkable by lld, which is what rustc uses, and must export its symbols.
+      - name: Verify the embedded FFmpeg prefix
+        if: matrix.variant == 'static'
+        run: |
+          set +e
+          fail=0
+          # Link the way rustc does: through cc, with the lld that ships with the Rust toolchain.
+          lld_dir="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld"
+          check() { # library symbol
+            printf 'extern int %s();\nint main(void) { return %s(); }\n' "$2" "$2" > probe.c
+            if cc -B"$lld_dir" -fuse-ld=lld probe.c -L"$FFMPEG_PREFIX/lib" -l"$1" -lpthread -lm -ldl -lstdc++ -o probe 2> probe.err; then
+              echo "ok: -l$1 provides $2"
+            else
+              echo "::error::-l$1 does not provide $2 for lld"; cat probe.err; fail=1
+              echo "--- members: $(ar t "$FFMPEG_PREFIX/lib/lib$1.a" | wc -l); defined (nm, first matches):"
+              nm -g --defined-only "$FFMPEG_PREFIX/lib/lib$1.a" 2>&1 | grep -m5 "$2" || echo "none"
+              echo "--- LTO sections in the first member:"
+              first=$(ar t "$FFMPEG_PREFIX/lib/lib$1.a" | head -1)
+              (cd "$(mktemp -d)" && ar x "$FFMPEG_PREFIX/lib/lib$1.a" "$first" && readelf -S "$first" | grep -c gnu.lto)
+            fi
+          }
+          check SvtAv1Enc svt_av1_enc_init_handle
+          check x264 x264_encoder_encode
+          check opus opus_encoder_create
+          check vpx vpx_codec_version
+          exit "$fail"
+
+      - name: Build (dynamic FFmpeg)
+        if: matrix.variant == 'dynamic'
+        run: |
+          # shellcheck disable=SC2086  # $PACKAGES is a list of -p flags; splitting is intended
+          cargo build --release --locked $PACKAGES
+
+      - name: Build (embedded FFmpeg)
+        if: matrix.variant == 'static'
+        env:
+          FFMPEG_DIR: ${{ env.FFMPEG_PREFIX }}
+          PKG_CONFIG_PATH: ${{ env.FFMPEG_PREFIX }}/lib/pkgconfig:${{ env.FFMPEG_PREFIX }}/lib/x86_64-linux-gnu/pkgconfig:${{ env.FFMPEG_PREFIX }}/lib64/pkgconfig
+        run: |
+          # GitHub's default shell runs with -e: without this the failing build would exit before
+          # the diagnostics below get printed.
+          set +e
+          set -u
+          # The static FFmpeg archives do not carry their own link dependencies, so hand the linker
+          # exactly what FFmpeg's pkg-config files say they need (codec libraries built into the
+          # prefix, zlib, ...). VA-API and X11 stay dynamic on purpose: VA-API loads the
+          # distribution's driver stack at run time. cmake on Ubuntu installs into a multiarch
+          # subdirectory (lib/x86_64-linux-gnu), so every library directory of the prefix is on the
+          # search path. --error-limit=0 lists every unresolved symbol.
+          pkgs=""
+          for p in libavcodec libavformat libavutil libswscale libswresample libavfilter libavdevice; do
+            if pkg-config --exists "$p"; then pkgs="$pkgs $p"; fi
+          done
+          link_args=""
+          # The prefix first, so its static codec libraries win over anything in /usr/lib.
+          for d in lib lib/x86_64-linux-gnu lib64; do
+            if [ -d "$FFMPEG_PREFIX/$d" ]; then link_args="$link_args -L native=$FFMPEG_PREFIX/$d -C link-arg=-L$FFMPEG_PREFIX/$d"; fi
+          done
+          # shellcheck disable=SC2046,SC2086  # splitting $pkgs and pkg-config output into words is intended
+          for flag in $(pkg-config --static --libs $pkgs); do
+            link_args="$link_args -C link-arg=$flag"
+          done
+          link_args="$link_args -C link-arg=-lva -C link-arg=-lva-drm -C link-arg=-lva-x11"
+          link_args="$link_args -C link-arg=-lX11 -C link-arg=-ldrm -C link-arg=-Wl,--error-limit=0"
+          export RUSTFLAGS="$link_args"
+          echo "RUSTFLAGS=$RUSTFLAGS"
+          # shellcheck disable=SC2086  # $PACKAGES is a list of -p flags; splitting is intended
+          cargo build --release --locked --no-default-features $PACKAGES \
+            --features ssx-cli/ffmpeg-static,ssx-app/ffmpeg-static,ssx-app/file-dialog,ssx-settings-ui/ffmpeg-static \
+            2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # Printed last so it is what the end of the log shows (the full linker output is huge).
+            echo "=== LINK DIAGNOSTICS ==="
+            echo "--- RUSTFLAGS: $RUSTFLAGS"
+            echo "--- codec libraries outside the prefix (these must not shadow it):"
+            find /usr/lib /usr/local/lib -maxdepth 2 \( -name 'libx264*' -o -name 'libx265*' -o -name 'libvpx*' -o -name 'libopus*' -o -name 'libSvt*' \) 2>/dev/null | sort | head -30
+            echo "--- library files in the prefix:"
+            find "$FFMPEG_PREFIX" -name '*.a' -o -name '*.so*' | sed "s|$FFMPEG_PREFIX/||" | sort | head -60
+            echo "--- pkg-config --static --libs:"
+            # shellcheck disable=SC2086  # splitting $pkgs into package names is intended
+            pkg-config --static --libs $pkgs
+            echo "--- libavcodec.pc requirements:"
+            grep -E '^(Requires|Libs)' "$FFMPEG_PREFIX/lib/pkgconfig/libavcodec.pc" || true
+            echo "--- unresolved symbols grouped by name prefix:"
+            grep -oE 'undefined symbol: [A-Za-z0-9_]+' build.log | sed -E 's/undefined symbol: //' \
+              | sed -E 's/^(svt|opus|vpx|x264|x265|va|X|inflate|deflate|compress|uncompress|crc32|adler32|lzma|bz|BZ|drm|pthread|dl|clock|sin|cos|log|exp|pow).*/\1*/' \
+              | sort | uniq -c | sort -rn | head -40
+          fi
+          exit "$rc"
+
+      - name: Package
+        run: |
+          forbid=()
+          if [ "${{ matrix.variant }}" = "static" ]; then
+            for lib in libavcodec libavformat libavutil libswscale libswresample libavfilter \
+                       libavdevice libx264 libx265 libvpx libopus; do
+              forbid+=(--forbid-lib "$lib")
+            done
+          fi
+          python3 packaging/package.py --os linux --version "$VERSION" \
+            --variant "${{ matrix.variant }}" --out dist "${forbid[@]}"
+          ls -l dist
+
+      - name: Smoke test the packaged archive
+        run: |
+          set -euo pipefail
+          mkdir smoke && tar -xzf dist/*.tar.gz -C smoke
+          dir="$(echo smoke/ssx-*)"
+          # The archive's own installer, into a throwaway prefix, then run what it installed.
+          "$dir/install.sh" --prefix "$PWD/smoke/prefix"
+          ssx="$PWD/smoke/prefix/bin/ssx"
+          out="$("$ssx" --version)"
+          echo "$out"
+          case "$out" in *"${VERSION%%-*}"*) ;; *) echo "::error::ssx --version does not mention ${VERSION%%-*}"; exit 1 ;; esac
+          "$PWD/smoke/prefix/bin/ssx-app" --version
+          # Real capture under a virtual X server: the core promise of the tool.
+          export SSX_BACKEND=x11 SSX_EDITOR_UI=none SSX_OVERLAY=none SSX_CONFIG_DIR="$PWD/smoke/cfg"
+          # shellcheck disable=SC2016  # $0 must reach the inner shell unexpanded: it is "$ssx"
+          xvfb-run -a sh -c '
+            "$0" doctor --json > smoke/doctor.json || true
+            "$0" capture fullscreen -o smoke/shot.png
+          ' "$ssx"
+          python3 - <<'PY'
+          import json
+          d = json.load(open("smoke/doctor.json"))
+          assert d["capture"]["ok"], d["capture"]
+          print("doctor: backend", d["capture"]["backend"], "| recorder built in:", d["recorder"]["built_in"])
+          PY
+          test -s smoke/shot.png
+          "$dir/uninstall.sh" --prefix "$PWD/smoke/prefix"
+          test ! -e "$PWD/smoke/prefix/bin/ssx"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssx-linux-${{ matrix.variant }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows (${{ matrix.variant }})
+    needs: [version, package-tests]
+    runs-on: windows-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lite
+            experimental: false
+            features: ssx-cli/record,ssx-app/record,ssx-app/file-dialog,ssx-settings-ui/record
+            link_flags: ""
+          - variant: full
+            experimental: false
+            features: ssx-cli/ffmpeg-static,ssx-app/ffmpeg-static,ssx-app/file-dialog,ssx-settings-ui/ffmpeg-static
+            # FFmpeg's Media Foundation encoder references GUIDs that live in these import
+            # libraries; vcpkg's static avcodec.lib does not pull them in by itself.
+            link_flags: "-C link-arg=mfuuid.lib -C link-arg=strmiids.lib"
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      VCPKGRS_TRIPLET: x64-windows-static-md
+      VCPKG_FFMPEG: "ffmpeg[x264,x265,vpx,opus,nvcodec,amf,avcodec,avformat,swscale,swresample,gpl]"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: "1.94.1" }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.variant }}
+
+      - name: Restore vcpkg FFmpeg
+        id: vcpkgcache
+        if: matrix.variant == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-ffmpeg-${{ env.VCPKGRS_TRIPLET }}-v3
+
+      - name: FFmpeg from vcpkg (static, x264/x265/vpx/opus, NVENC and AMF)
+        id: vcpkg1
+        if: matrix.variant == 'full' && steps.vcpkgcache.outputs.cache-hit != 'true'
+        # A failure here is retried below: the usual cause is a source download whose hash changed.
+        continue-on-error: true
+        run: >
+          "C:/vcpkg/vcpkg.exe" install "${VCPKG_FFMPEG}:${VCPKGRS_TRIPLET}" --clean-after-build
+
+      # vcpkg's x264 port downloads a GitLab-generated archive and checks its SHA-512; GitLab
+      # regenerates those archives, so the download can suddenly "have an unexpected hash". Retry
+      # with the same x264 commit fetched through git, which is verified by commit id instead.
+      - name: FFmpeg from vcpkg, retry with x264 from git
+        if: matrix.variant == 'full' && steps.vcpkgcache.outputs.cache-hit != 'true' && steps.vcpkg1.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $overlay = Join-Path $env:RUNNER_TEMP 'vcpkg-overlay'
+          $dest = Join-Path $overlay 'x264'
+          Remove-Item $overlay -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory $overlay | Out-Null
+          Copy-Item 'C:\vcpkg\ports\x264' $dest -Recurse
+          $portfile = Join-Path $dest 'portfile.cmake'
+          $text = Get-Content $portfile -Raw
+          $m = [regex]::Match($text, '(?s)vcpkg_from_gitlab\((.*?)\r?\n\)')
+          if (-not $m.Success) { throw 'the x264 port no longer uses vcpkg_from_gitlab: update this workaround' }
+          $ref = [regex]::Match($m.Groups[1].Value, '\bREF\s+(\S+)').Groups[1].Value
+          if ($ref -notmatch '^[0-9a-f]{40}$') { throw "the x264 port's REF is not a commit id: '$ref'" }
+          $patches = [regex]::Matches($m.Groups[1].Value, '\S+\.(?:patch|diff)')
+          $new = "vcpkg_from_git(`n    OUT_SOURCE_PATH SOURCE_PATH`n    URL https://code.videolan.org/videolan/x264.git`n    REF $ref"
+          if ($patches.Count -gt 0) {
+            $new += "`n    PATCHES`n" + (($patches | ForEach-Object { '        ' + $_.Value }) -join "`n")
+          }
+          $new += "`n)"
+          Set-Content $portfile $text.Replace($m.Value, $new) -NoNewline
+          Write-Host "--- overlay x264 portfile:"
+          Get-Content $portfile | Select-Object -First 40 | Write-Host
+          & 'C:/vcpkg/vcpkg.exe' install "$($env:VCPKG_FFMPEG):$($env:VCPKGRS_TRIPLET)" --clean-after-build --overlay-ports=$overlay
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed with exit code $LASTEXITCODE" }
+
+      # Saved right after the 40-minute install, not at the end of the job: a later build failure
+      # must not throw the installed FFmpeg away (the default post-job save is skipped on failure).
+      - name: Save vcpkg FFmpeg
+        if: matrix.variant == 'full' && steps.vcpkgcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-ffmpeg-${{ env.VCPKGRS_TRIPLET }}-v3
+
+      - name: Build
+        env:
+          VCPKG_ROOT: C:\vcpkg
+          RUSTFLAGS: ${{ matrix.link_flags }}
+        run: |
+          # shellcheck disable=SC2086  # $PACKAGES is a list of -p flags; splitting is intended
+          cargo build --release --locked --no-default-features $PACKAGES \
+            --features "${{ matrix.features }}"
+
+      - name: Package
+        run: >
+          python packaging/package.py --os windows --version "$VERSION"
+          --variant "${{ matrix.variant }}" --out dist
+
+      - name: Smoke test the packaged archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem dist\*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath smoke
+          $dir = Get-ChildItem smoke -Directory | Select-Object -First 1
+          $prefix = Join-Path $PWD 'smoke\prefix'
+
+          function Assert-Ok([string]$What) {
+            if ($LASTEXITCODE -ne 0) { throw "$What failed with exit code $LASTEXITCODE" }
+          }
+
+          # The installer must at least parse and dry-run; then install for real into a temp prefix.
+          & "$($dir.FullName)\install.ps1" -Prefix $prefix -DryRun
+          & "$($dir.FullName)\install.ps1" -Prefix $prefix
+          & "$prefix\ssx.exe" --version;     Assert-Ok 'ssx --version'
+          & "$prefix\ssx-app.exe" --version; Assert-Ok 'ssx-app --version'
+
+          # Informational: a hosted runner has no real display, so capture may legitimately
+          # fail there. What matters is that the program starts and reports why.
+          $env:SSX_CONFIG_DIR = Join-Path $PWD 'smoke\cfg'
+          & "$prefix\ssx.exe" doctor 2>&1 | Write-Host
+          Write-Host "doctor exit code: $LASTEXITCODE (informational)"
+
+          & "$($dir.FullName)\install.ps1" -Prefix $prefix -Uninstall
+          if (Test-Path "$prefix\ssx.exe") { throw 'uninstall left ssx.exe behind' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssx-windows-${{ matrix.variant }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Any failing build blocks publishing (experimental variants, if any are added, are just absent).
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd artifacts
+          ls -l
+          # One sums file for the whole release; the per-archive .sha256 files stay alongside.
+          sha256sum -- *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          cat > notes.md <<'EOF'
+          ## Downloads
+
+          | Platform | Archive | Notes |
+          |---|---|---|
+          | Windows x64 | `ssx-*-windows-*-full.zip` | Recommended: MP4/WebM/GIF recording with FFmpeg built in |
+          | Windows x64 | `ssx-*-windows-*-lite.zip` | No FFmpeg: screenshots, editor, uploads and GIF recording only |
+          | Linux x86_64 | `ssx-*-linux-*-static.tar.gz` | FFmpeg and codecs built in, no system FFmpeg needed (built on Ubuntu 24.04: needs glibc 2.39 or newer) |
+          | Linux x86_64 | `ssx-*-linux-*-dynamic.tar.gz` | Uses the system FFmpeg 6.x (Ubuntu 24.04 and derivatives) |
+
+          Unpack the archive and run `install.ps1` (Windows, PowerShell) or `./install.sh` (Linux), or run the
+          programs from `bin/` directly. `SHA256SUMS` lists the checksum of every archive.
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A release (or draft) was already created for this tag in the web UI: attach the files
+            # to it and leave its title and notes alone.
+            gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --notes-file notes.md \
+              --title "ssx ${TAG#v}" "${flags[@]}"
+          fi

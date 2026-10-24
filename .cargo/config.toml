@@ -1,0 +1,3 @@
+[build]
+# Keep compiler memory pressure modest on the development machine.
+jobs = 1

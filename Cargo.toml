@@ -1,0 +1,71 @@
+[workspace]
+members = ["crates/media-core", "crates/media-io", "crates/editor-core", "crates/dpdfnet", "crates/nvenc-sys", "crates/windows-capture", "crates/desktop", "crates/toolkit"]
+exclude = ["vendor/gpui-0.2.2", "vendor/ssx"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+windows = { version = "0.61.3", features = [
+    "Foundation", "Graphics_Capture", "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi",
+    "Win32_System_Threading", "Win32_System_Performance", "Win32_System_Com", "Win32_System_Com_StructuredStorage",
+    "Win32_Security", "Win32_System_Variant", "Win32_Media_Audio", "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Time",
+    "Win32_System_DataExchange", "Win32_System_Memory"
+] }
+
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.dev.package.rcr-dpdfnet]
+opt-level = 3
+
+[profile.dev.package.rustfft]
+opt-level = 3
+
+# The normal development desktop is used for interactive verification. Keep UI
+# layout and scene construction optimized without optimizing the entire workspace.
+[profile.dev.package.gpui]
+opt-level = 2
+[profile.dev.package.taffy]
+opt-level = 2
+
+# Screenshot raster kernels must run at production speed in desktop development builds.
+[profile.dev.package.rcr-toolkit]
+opt-level = 3
+[profile.dev.package.ssx-editor]
+opt-level = 3
+[profile.dev.package.ssx-imgfx]
+opt-level = 3
+# Screenshot alpha normalization and channel conversion touch every desktop pixel.
+[profile.dev.package.ssx-types]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+# Library thumbnails decode full source pixels before resizing; keep these hot
+# kernels optimized in the normal desktop development executable as well.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package."png:0.18.1"]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package."miniz_oxide:0.8.9"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[patch.crates-io]
+gpui = { path = "vendor/gpui-0.2.2" }

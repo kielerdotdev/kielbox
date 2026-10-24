@@ -1,0 +1,36 @@
+/target/
+/dist/
+/.downloads/
+/recordings/
+/projects/
+*.partial
+*.log
+
+# Local credentials, preferences, crash reports, and captured content.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.dmp
+*.sqlite
+*.sqlite3
+*.db
+__pycache__/
+*.py[cod]
+/preferences.json
+/.codex/
+/.agents/
+/screenshots/
+/captures/
+/exports/
+/cache/
+
+# Upstream UI screenshots contain personal paths or credential-shaped demo text.
+# Keep them locally; regenerate baselines with anonymized fixtures when needed.
+/vendor/ssx/crates/ssx-editor-ui/docs/*.png
+/vendor/ssx/crates/ssx-editor-ui/tests/snapshots/*.png
+/vendor/ssx/crates/ssx-settings-ui/docs/*.png
+/vendor/ssx/crates/ssx-settings-ui/tests/snapshots/*.png

@@ -1,0 +1,14 @@
+[package]
+name = "rcr-dpdfnet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rustfft = "6.4"
+sha2 = "0.10"
+
+[[example]]
+name = "denoise"
+path = "examples/denoise.rs"

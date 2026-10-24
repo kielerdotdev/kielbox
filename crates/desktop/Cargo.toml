@@ -1,0 +1,25 @@
+[package]
+name = "rcr-desktop"
+version.workspace = true
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+anyhow.workspace = true
+async-channel = "2"
+serde_json.workspace = true
+serde.workspace = true
+tempfile = "3"
+sha2 = "0.10"
+rcr-media-core = { path = "../media-core" }
+rcr-toolkit = { path = "../toolkit" }
+rcr-editor-core = { path = "../editor-core" }
+image = { version = "0.25", default-features = false }
+unicode-segmentation = "1.12"
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+tray-icon = { version = "0.24", default-features = false }
+windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem"] }
+rcr-windows = { path = "../windows-capture" }
