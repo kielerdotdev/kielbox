@@ -1,6 +1,6 @@
 //! Raw little-endian f32 mono 48 kHz in/out, for tests and offline tools.
 use anyhow::{Context, Result};
-use rcr_dpdfnet::Denoiser;
+use dpdfnet::Denoiser;
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Write},

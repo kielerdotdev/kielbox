@@ -1,7 +1,7 @@
 //! Minimal Matroska muxer for the recorder's AV1 + independent float PCM tracks.
 //! No raw video pixels, subprocess, or external runtime in the recording path.
 use anyhow::{Context, Result, bail, ensure};
-use rcr_media_core::{AUDIO_RATE, AudioTrack, MediaPacket, NS_PER_SECOND, VideoConfig};
+use media_core::{AUDIO_RATE, AudioTrack, MediaPacket, NS_PER_SECOND, VideoConfig};
 use std::{
     fs::{self, File},
     io::{BufWriter, Seek, SeekFrom, Write},
@@ -466,9 +466,9 @@ impl MatroskaWriter {
                 track_id: track.id,
                 name: &track.name,
                 source_type: match &track.source {
-                    rcr_media_core::AudioSource::System => "system",
-                    rcr_media_core::AudioSource::Microphone => "microphone",
-                    rcr_media_core::AudioSource::Process { .. } => "application",
+                    media_core::AudioSource::System => "system",
+                    media_core::AudioSource::Microphone => "microphone",
+                    media_core::AudioSource::Process { .. } => "application",
                 },
                 sample_rate: AUDIO_RATE,
                 channels: 2,
@@ -657,7 +657,7 @@ mod tests {
         let track = AudioTrack {
             id: 2,
             name: "Mic \"desk\" 🎙".into(),
-            source: rcr_media_core::AudioSource::Microphone,
+            source: media_core::AudioSource::Microphone,
             endpoint_id: Some("opaque-private-endpoint".into()),
         };
         let config = VideoConfig::default();

@@ -284,13 +284,13 @@ pub fn backup_edits(media: &Path) -> anyhow::Result<Option<PathBuf>> {
 /// either the source or its existing sidecar, even if autosave is unavailable.
 pub fn backup_pending_edits(
     media: &Path,
-    project: &rcr_editor_core::Project,
+    project: &editor_core::Project,
 ) -> anyhow::Result<PathBuf> {
     backup_pending_sidecar(&edit_path_for_open(media), project)
 }
 fn backup_pending_sidecar(
     sidecar: &Path,
-    project: &rcr_editor_core::Project,
+    project: &editor_core::Project,
 ) -> anyhow::Result<PathBuf> {
     use std::io::Write;
     project.validate()?;
@@ -625,14 +625,14 @@ mod tests {
         let sidecar = folder.path().join("saved.json");
         let bytes = b"old disk version";
         std::fs::write(&sidecar, bytes).unwrap();
-        let mut project = rcr_editor_core::Project::default();
+        let mut project = editor_core::Project::default();
         let first = backup_pending_sidecar(&sidecar, &project).unwrap();
         project.width = 1280;
         let second = backup_pending_sidecar(&sidecar, &project).unwrap();
         assert_ne!(first, second);
         assert_eq!(std::fs::read(&sidecar).unwrap(), bytes);
-        assert_eq!(rcr_editor_core::Project::load(&first).unwrap().width, 2560);
-        assert_eq!(rcr_editor_core::Project::load(&second).unwrap().width, 1280);
+        assert_eq!(editor_core::Project::load(&first).unwrap().width, 2560);
+        assert_eq!(editor_core::Project::load(&second).unwrap().width, 1280);
     }
     #[test]
     fn recovering_unreadable_edits_keeps_exact_bytes_and_never_replaces_backups() {

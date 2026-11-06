@@ -207,11 +207,11 @@ impl Studio {
     }
     fn audio_device_control(
         &self,
-        kind: rcr_windows::audio_endpoint::AudioEndpointKind,
+        kind: windows_capture::audio_endpoint::AudioEndpointKind,
         compact: bool,
         cx: &mut Context<Self>,
     ) -> Div {
-        use rcr_windows::audio_endpoint::AudioEndpointKind;
+        use windows_capture::audio_endpoint::AudioEndpointKind;
         let (id, selected, focus, default_label) = match kind {
             AudioEndpointKind::Render => (
                 "desktop-audio-device",
@@ -314,7 +314,7 @@ impl Studio {
                                 ),
                                 |s| {
                                     s.child(self.audio_device_control(
-                                        rcr_windows::audio_endpoint::AudioEndpointKind::Render,
+                                        windows_capture::audio_endpoint::AudioEndpointKind::Render,
                                         compact,
                                         cx,
                                     ))
@@ -334,7 +334,7 @@ impl Studio {
                             .min_w_0()
                             .child(name)
                             .child(self.audio_device_control(
-                                rcr_windows::audio_endpoint::AudioEndpointKind::Capture,
+                                windows_capture::audio_endpoint::AudioEndpointKind::Capture,
                                 compact,
                                 cx,
                             ))
@@ -908,7 +908,7 @@ impl Studio {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.toolkit.update(cx, |toolkit, cx| {
                                     toolkit.capture(
-                                        rcr_toolkit::core::workflow::CaptureTarget::Region,
+                                        ::toolkit::core::workflow::CaptureTarget::Region,
                                         cx,
                                     )
                                 }) {
@@ -1185,8 +1185,8 @@ impl Studio {
             .child(row(
                 "Replay memory budget",
                 "Includes bitrate headroom, enabled audio sources and the preceding keyframe",
-                mono(rcr_media_core::replay_memory_budget(
-                    &rcr_media_core::VideoConfig { bitrate: self.preferences.bitrate,
+                mono(media_core::replay_memory_budget(
+                    &media_core::VideoConfig { bitrate: self.preferences.bitrate,
                         fps: self.preferences.fps,
                         keyframe_interval: self.preferences.capture_priority.keyframe_interval(self.preferences.fps),
                         ..Default::default() }, self.preferences.replay_seconds,
@@ -1613,7 +1613,7 @@ mod hotkey_persistence_tests {
 
     #[test]
     fn live_microphone_cleanup_is_snapshotted_by_each_replay_request() {
-        use rcr_windows::pipeline::RecorderCommand;
+        use windows_capture::pipeline::RecorderCommand;
         let first = crate::replay_save_request("first.mkv".into(), 120, true, true);
         let next = crate::replay_save_request("next.mkv".into(), 120, true, false);
         assert!(matches!(first, RecorderCommand::SaveReplay { suppress_microphone: true, .. }),

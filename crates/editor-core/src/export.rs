@@ -720,7 +720,7 @@ fn prepare_audio(
     }
     ensure!(!progress.cancel.load(Ordering::Relaxed), "export cancelled");
     let _suppression_stage = SuppressionStage::begin(&progress.suppressing_audio);
-    let mut denoiser = rcr_dpdfnet::Denoiser::new()?;
+    let mut denoiser = dpdfnet::Denoiser::new()?;
     let mut cache = HashMap::new();
     for clip in clips {
         ensure!(

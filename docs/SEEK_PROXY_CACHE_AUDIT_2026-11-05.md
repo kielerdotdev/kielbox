@@ -46,7 +46,7 @@ Validation status: the central full-core rerun **passed: 120 tests, 8 ignored**.
 
 ```powershell
 $env:RCR_SEEK_CACHE_DIR = '<fresh isolated fixture base>'
-cargo test -p rcr-editor-core scrub::proxy -j1
+cargo test -p editor-core scrub::proxy -j1
 ```
 
 ## Remaining limits and operational implications

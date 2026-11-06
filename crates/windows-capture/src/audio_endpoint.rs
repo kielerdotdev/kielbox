@@ -1,7 +1,7 @@
 //! Read-only endpoint discovery. Call on a worker; no audio stream is activated.
 use crate::audio::ComApartment;
 use anyhow::{ensure, Context, Result};
-use rcr_media_core::{
+use media_core::{
     validate_audio_endpoint_id, AudioSource, AudioTrack, MAX_AUDIO_ENDPOINT_ID_UNITS,
 };
 use std::{

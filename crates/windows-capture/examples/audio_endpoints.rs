@@ -2,7 +2,7 @@
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::ensure;
-    use rcr_windows::audio_endpoint::{enumerate_audio_endpoints, AudioEndpointKind};
+    use windows_capture::audio_endpoint::{enumerate_audio_endpoints, AudioEndpointKind};
     use serde_json::json;
     let args: Vec<_> = std::env::args().skip(1).collect();
     ensure!(

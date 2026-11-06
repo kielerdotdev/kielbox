@@ -1,7 +1,7 @@
 //! Real worker/FFmpeg lifecycle tests using generated pixels and audio only.
 use super::tests::probe;
 use super::*;
-use rcr_recording_tools::{
+use recording_tools::{
     audio::synth::{Signal, SyntheticAudio, SyntheticAudioConfig},
     error::SourceError,
     source::{
@@ -101,8 +101,8 @@ fn decode_all(path: &std::path::Path) {
 
 #[test]
 fn failed_owned_aac_encoder_preserves_a_decodable_video_prefix() {
-    use rcr_recording_tools::encode::{AudioParams, VideoParams};
-    use rcr_recording_tools::source::synthetic::render;
+    use recording_tools::encode::{AudioParams, VideoParams};
+    use recording_tools::source::synthetic::render;
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("audio-failed.mp4");
     let config = RecordConfig::new(&path);
@@ -140,12 +140,12 @@ fn requested_audio_lost_at_finalization_is_reported_in_recording_warnings() {
         fn description(&self) -> String { "injected final audio failure".into() }
         fn input_kind(&self) -> InputKind { InputKind::Rgba8 }
         fn has_audio(&self) -> bool { true }
-        fn write_video(&mut self, slot: u64, input: &Arc<EncoderInput>) -> rcr_recording_tools::error::Result<()> {
+        fn write_video(&mut self, slot: u64, input: &Arc<EncoderInput>) -> recording_tools::error::Result<()> {
             self.0.as_mut().unwrap().write_video(slot, input)
         }
-        fn write_audio(&mut self, _: &[f32]) -> rcr_recording_tools::error::Result<()> { Ok(()) }
+        fn write_audio(&mut self, _: &[f32]) -> recording_tools::error::Result<()> { Ok(()) }
         fn bytes_written(&self) -> u64 { self.0.as_ref().unwrap().bytes_written() }
-        fn finish(mut self: Box<Self>, end: Duration) -> rcr_recording_tools::error::Result<EncodeSummary> {
+        fn finish(mut self: Box<Self>, end: Duration) -> recording_tools::error::Result<EncodeSummary> {
             Box::new(self.0.take().unwrap()).finish(end)
         }
         fn abort(self: Box<Self>) {}
@@ -173,8 +173,8 @@ fn requested_audio_lost_at_finalization_is_reported_in_recording_warnings() {
 #[test]
 #[ignore = "Generated-media stop latency evaluation; run explicitly with --nocapture"]
 fn generated_stop_latency_eval() {
-    use rcr_recording_tools::encode::{AudioParams, VideoParams};
-    use rcr_recording_tools::source::synthetic::{read_counter, render};
+    use recording_tools::encode::{AudioParams, VideoParams};
+    use recording_tools::source::synthetic::{read_counter, render};
     let durations = std::env::var("RCR_STOP_EVAL_SECONDS").unwrap_or_else(|_| "1,10,60".into())
         .split(',').map(|value| value.parse::<u64>().unwrap()).collect::<Vec<_>>();
     let repeats = std::env::var("RCR_STOP_EVAL_REPEATS").unwrap_or_else(|_| "2".into()).parse::<usize>().unwrap();
@@ -604,7 +604,7 @@ fn overlapping_recorders_keep_cancel_and_stop_ownership_separate() {
 #[test]
 #[ignore = "Opt-in AV1 NVENC proof; generated frames only, no screen/audio capture"]
 fn five_minute_av1_replay_muxes_and_decodes_while_an_independent_screencast_runs() {
-    use rcr_media_core::{AvReplayBuffer, MediaPacket, VideoConfig, replay_memory_budget};
+    use media_core::{AvReplayBuffer, MediaPacket, VideoConfig, replay_memory_budget};
     let folder = tempfile::tempdir().unwrap();
     let worker = Worker::start_with_sources(
         options(&folder.path().join("quick")),
@@ -682,7 +682,7 @@ fn five_minute_av1_replay_muxes_and_decodes_while_an_independent_screencast_runs
     let packets = ring.snapshot(300);
     assert_eq!(packets.len(), 9000);
     let replay = folder.path().join("five-minutes.mkv");
-    rcr_media_io::save_snapshot(&replay, &config, &[], &packets).unwrap();
+    media_io::save_snapshot(&replay, &config, &[], &packets).unwrap();
     worker.stop();
     result.finish(&worker);
     drop(worker);

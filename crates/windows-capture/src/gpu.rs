@@ -1,6 +1,6 @@
 //! D3D11 desktop capture and video processing. No staging textures or CPU Map.
 use anyhow::{Context, Result, bail, ensure};
-use rcr_media_core::{VideoCapture, VideoConfig};
+use media_core::{VideoCapture, VideoConfig};
 use std::{
     mem::ManuallyDrop,
     time::{Duration, Instant},

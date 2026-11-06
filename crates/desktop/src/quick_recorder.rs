@@ -6,8 +6,8 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_recording_tools::{source::CaptureTarget, stats::StatsSnapshot};
-use rcr_toolkit::{
+use recording_tools::{source::CaptureTarget, stats::StatsSnapshot};
+use ::toolkit::{
     core::workflow::{CancelToken, CaptureRequest, CaptureTarget as StillTarget, Capturer},
     services::{LastRegionStore, ScreenCapturer},
 };
@@ -29,7 +29,7 @@ pub struct ShowControls;
 impl EventEmitter<ShowControls> for QuickRecorder {}
 pub struct Screenshot {
     pub target: StillTarget,
-    pub options: rcr_toolkit::worker::ScreenshotOptions,
+    pub options: ::toolkit::worker::ScreenshotOptions,
 }
 impl EventEmitter<Screenshot> for QuickRecorder {}
 struct PendingStart {
@@ -326,7 +326,7 @@ impl QuickRecorder {
                         },
                     });
                 } else {
-                    use rcr_toolkit::services::ExplicitTarget;
+                    use ::toolkit::services::ExplicitTarget;
                     let (target, explicit) = match choice.target {
                         CaptureTarget::Region(rect) => {
                             (StillTarget::Region, ExplicitTarget::Rect(rect))
@@ -341,7 +341,7 @@ impl QuickRecorder {
                     };
                     cx.emit(Screenshot {
                         target,
-                        options: rcr_toolkit::worker::ScreenshotOptions {
+                        options: ::toolkit::worker::ScreenshotOptions {
                             cursor: choice.settings.cursor,
                             explicit: Some(explicit),
                             captured: choice.captured,

@@ -46,7 +46,7 @@ pub fn capture_fixture(
         "Overlay fixture dimensions must be between 800×600 and 3840×2160"
     );
     let mut frame = synthetic_frame(width, height)?;
-    if matches!(scenario, Route::HoverRegion) { frame.origin = rcr_toolkit::types::Point { x: -640, y: -180 }; }
+    if matches!(scenario, Route::HoverRegion) { frame.origin = ::toolkit::types::Point { x: -640, y: -180 }; }
     let (reply, reply_rx) = mpsc::sync_channel(1);
     let handle = if matches!(scenario, Route::HoverRegion) {
         let targets = crate::region_targets::TargetSnapshot::from_rectangles(vec![

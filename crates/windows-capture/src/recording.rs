@@ -5,10 +5,10 @@ use crate::{
     pipeline::{observe, CapturePhase, PipelineEvent, RecorderCommand, RunOptions},
 };
 use anyhow::{ensure, Context, Result};
-use rcr_media_core::{
+use media_core::{
     AudioTrack, AvReplayBuffer, MediaPacket, PipelineStats, VideoCapture, VideoConfig, VideoEncoder,
 };
-use rcr_media_io::{contains_sequence_header, save_snapshot, MatroskaWriter};
+use media_io::{contains_sequence_header, save_snapshot, MatroskaWriter};
 use std::{
     path::PathBuf,
     sync::{
@@ -366,7 +366,7 @@ fn start_save(
         && !options
             .audio
             .iter()
-            .any(|t| t.source == rcr_media_core::AudioSource::Microphone)
+            .any(|t| t.source == media_core::AudioSource::Microphone)
     {
         anyhow::bail!("enable microphone capture before requesting microphone suppression");
     }
@@ -401,11 +401,11 @@ fn start_save(
                         );
                     }
                     if suppress_microphone {
-                        rcr_media_io::suppress_microphone(&mut packets, &audio, || {
+                        media_io::suppress_microphone(&mut packets, &audio, || {
                             worker_cancel.load(Ordering::Relaxed)
                         })?;
                         for track in &mut audio {
-                            if track.source == rcr_media_core::AudioSource::Microphone {
+                            if track.source == media_core::AudioSource::Microphone {
                                 track.name.push_str(" (DPDFNet)");
                             }
                         }

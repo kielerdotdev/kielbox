@@ -1,20 +1,20 @@
 [package]
-name = "rcr-toolkit"
+name = "toolkit"
 version.workspace = true
 edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-rcr-disk = { path = "../rcr-disk" }
+disk = { path = "../disk" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rcr-workflows = { path = "../rcr-workflows" }
-rcr-toolkit-services = { path = "../rcr-toolkit-services" }
-rcr-image-editor = { path = "../rcr-image-editor" }
-rcr-image-types = { path = "../rcr-image-types" }
-rcr-image-effects = { path = "../rcr-image-effects" }
-rcr-hdr = { path = "../rcr-hdr" }
+workflows = { path = "../workflows" }
+toolkit-services = { path = "../toolkit-services" }
+image-editor = { path = "../image-editor" }
+image-types = { path = "../image-types" }
+image-effects = { path = "../image-effects" }
+hdr = { path = "../hdr" }
 tempfile = "3"
 toml = "0.9"
 rayon = "1"
@@ -29,8 +29,8 @@ rqrr = "0.10"
 windows = { workspace = true, features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization"] }
 
 [dev-dependencies]
-rcr-workflows = { path = "../rcr-workflows", features = ["testing"] }
-rcr-upload = { path = "../rcr-upload" }
+workflows = { path = "../workflows", features = ["testing"] }
+upload = { path = "../upload" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "macros"] }
 url = "2"

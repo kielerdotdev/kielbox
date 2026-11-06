@@ -1,7 +1,7 @@
 //! Dense disk usage workspace; filesystem access stays on a cancellable worker.
 use crate::{disk_treemap, theme::*};
 use gpui::{prelude::*, *};
-use rcr_toolkit::{
+use ::toolkit::{
     core::workflow::CancelToken,
     disk_usage::{self, DiskUsage, ScanProgress},
 };

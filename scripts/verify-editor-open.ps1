@@ -13,7 +13,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $rcrRoot = Split-Path -Parent $PSScriptRoot
-$rcrExe = Join-Path $rcrRoot 'target/debug/rcr-desktop.exe'
+$rcrExe = Join-Path $rcrRoot 'target/debug/desktop.exe'
 if ($Executable) { $rcrExe = if ([System.IO.Path]::IsPathRooted($Executable)) {$Executable} else {Join-Path $rcrRoot $Executable} }
 if (-not [System.IO.Path]::IsPathRooted($Recording)) {
     $Recording = Join-Path $rcrRoot $Recording

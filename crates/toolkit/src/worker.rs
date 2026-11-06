@@ -360,7 +360,7 @@ impl Worker {
         let shutdown = Arc::new(AtomicBool::new(false));
         let quitting = shutdown.clone();
         thread::Builder::new()
-            .name("rcr-toolkit-workflows".into())
+            .name("toolkit-workflows".into())
             .spawn(move || {
                 let mut state = match State::new(paths, save_dir, events.clone()) {
                     Ok(state) => state,
@@ -608,7 +608,7 @@ impl State {
                 };
                 (
                     Workflow {
-                        id: "rcr-screenshot".into(),
+                        id: "screenshot".into(),
                         name: "Screenshot".into(),
                         input,
                         after_capture,

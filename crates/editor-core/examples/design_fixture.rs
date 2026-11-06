@@ -1,6 +1,6 @@
 //! Verify the design's library thumbnail and portrait export without UI automation.
 use anyhow::{ensure, Context, Result};
-use rcr_editor_core::*;
+use editor_core::*;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {

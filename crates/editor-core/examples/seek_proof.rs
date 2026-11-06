@@ -1,6 +1,6 @@
 //! Actual decoder correctness, latest-request and edited-timeline checks.
 use anyhow::{ensure, Context, Result};
-use rcr_editor_core::*;
+use editor_core::*;
 use std::{
     path::PathBuf,
     thread,

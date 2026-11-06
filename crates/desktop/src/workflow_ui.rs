@@ -1,6 +1,6 @@
 //! The workflow browser presents the actual execution order, including imported steps.
 use super::*;
-use rcr_toolkit::core::settings::{AfterCapture, AfterUpload, Workflow};
+use ::toolkit::core::settings::{AfterCapture, AfterUpload, Workflow};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 pub(super) type LayoutProbe = Rc<RefCell<BTreeMap<usize, Bounds<Pixels>>>>;
@@ -933,7 +933,7 @@ impl Toolkit {
 #[cfg(test)]
 mod tests {
     use super::{AfterCapture, AfterUpload, StepEdit, Workflow, edit_steps, title};
-    use rcr_toolkit::core::settings::builtin_workflows;
+    use ::toolkit::core::settings::builtin_workflows;
 
     #[test]
     fn compact_titles_preserve_custom_names() {

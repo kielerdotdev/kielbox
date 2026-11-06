@@ -172,7 +172,7 @@ impl Tray {
         }
         tools.append(&PredefinedMenuItem::separator())?;
         tools.append(&MenuItem::with_id("utilities", "All utilities", true, None))?;
-        for (i, tool) in rcr_toolkit::utilities::Tool::ALL.into_iter().enumerate() {
+        for (i, tool) in ::toolkit::utilities::Tool::ALL.into_iter().enumerate() {
             tools.append(&MenuItem::with_id(
                 format!("utility-{i}"),
                 tool.name(),

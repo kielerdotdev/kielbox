@@ -57,7 +57,7 @@ powershell -NoProfile -File scripts/ci/check-windows-package.ps1 `
   -ReportDirectory .downloads/package-check
 ```
 
-The second command requires a real release package including `rcr-clean.exe`.
+The second command requires a real release package including `clean.exe`.
 Its local reports may contain machine paths; they remain outside the artifact.
 The file-only suite creates fake executables in `.downloads/package-tests-*`.
 Remove those later with `scripts/clean-local-builds.ps1`.

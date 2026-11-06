@@ -1,0 +1,25 @@
+[package]
+name = "image-gpu"
+description = "wgpu compute pipeline for HDR to SDR tonemapping and video frame conversion."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[dependencies]
+image-types.workspace = true
+hdr.workspace = true
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan", "metal", "dx12", "gles"] }
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
+thiserror.workspace = true
+half.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 """Opt-in local DXGI/NVENC stop evaluation; microphone is never enabled.
 
-Build separately: cargo build --locked -p rcr-windows --example hardware-stop-eval -j1
+Build separately: cargo build --locked -p windows-capture --example hardware-stop-eval -j1
 Run outside the app sandbox when Windows denies Desktop Duplication there.
 Existing clips/reports are never overwritten. --validate-only performs no capture.
 """

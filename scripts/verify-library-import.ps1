@@ -1,6 +1,6 @@
 param(
     [string]$Recording = 'recordings/mux-audio-fixture-001.mkv',
-    [string]$Executable = 'target/debug/rcr-desktop.exe'
+    [string]$Executable = 'target/debug/desktop.exe'
 )
 $ErrorActionPreference = 'Stop'
 $rcrRoot = Split-Path -Parent $PSScriptRoot

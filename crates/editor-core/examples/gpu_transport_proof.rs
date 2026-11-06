@@ -3,7 +3,7 @@
 #[cfg(windows)]
 mod proof {
     use anyhow::{ensure, Context, Result};
-    use rcr_editor_core::{
+    use editor_core::{
         Edit, Editor, GpuPlaybackConfig, GpuPlaybackOutput, GpuPlaybackStatus, PlaybackOutput,
         PlaybackSession, Project, SourceStamp, TrackKind,
     };
@@ -173,7 +173,7 @@ mod proof {
         Ok(())
     }
     fn fixture_project(source: &Path) -> Result<Project> {
-        let asset = rcr_editor_core::probe(source)?;
+        let asset = editor_core::probe(source)?;
         ensure!(
             asset
                 .streams
@@ -182,7 +182,7 @@ mod proof {
             "Fixture needs an audio stream to exercise the existing audio clock"
         );
         let mut editor = Editor::default();
-        editor.execute(Edit::Sequence(rcr_editor_core::QuickEdit::Add(asset)))?;
+        editor.execute(Edit::Sequence(editor_core::QuickEdit::Add(asset)))?;
         let mut project = editor.project;
         // Even an audible tone fixture stays silent in optional WASAPI mode.
         for track in &mut project.tracks {

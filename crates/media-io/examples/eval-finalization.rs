@@ -1,8 +1,8 @@
 //! CPU-only mux/finalization evaluation, using one reusable software AV1 GOP.
-//! cargo run -p rcr-media-io --example eval-finalization -- report.json
+//! cargo run -p media-io --example eval-finalization -- report.json
 use anyhow::{Context, Result, ensure};
-use rcr_media_core::{AudioTrack, MediaPacket, VideoConfig};
-use rcr_media_io::MatroskaWriter;
+use media_core::{AudioTrack, MediaPacket, VideoConfig};
+use media_io::MatroskaWriter;
 use std::{path::Path, process::{Command, Stdio}, sync::Arc, time::Instant};
 
 fn command(program: &str) -> Command {

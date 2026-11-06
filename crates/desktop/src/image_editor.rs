@@ -2,7 +2,7 @@
 use crate::{text_input::TextInput, theme::*};
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_toolkit::{
+use ::toolkit::{
     annotation as a,
     image_editor::{Actor, CanvasAction, CanvasClipboardOperation, CanvasClipboardReply, Command, Event, Preview, Source, canvas_clipboard_key},
     types::Frame,
@@ -112,7 +112,7 @@ fn canvas_system_clipboard(owner: Option<isize>, operation: CanvasClipboardOpera
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock}},
     };
     const UNICODE_TEXT: u32 = 13; // CF_UNICODETEXT
-    const LIMIT: usize = rcr_toolkit::image_editor::CANVAS_CLIPBOARD_LIMIT;
+    const LIMIT: usize = ::toolkit::image_editor::CANVAS_CLIPBOARD_LIMIT;
     struct Open;
     impl Drop for Open { fn drop(&mut self) { let _ = unsafe { CloseClipboard() }; } }
     struct Memory(Option<HGLOBAL>);
@@ -384,7 +384,7 @@ impl ImageEditor {
         self.standalone = true;
     }
     pub fn smoke_open_standalone(&mut self, source: Source, cx: &mut Context<Self>) -> anyhow::Result<()> {
-        self.open_standalone(Source::Image(rcr_toolkit::effects::solid_frame(16, 9, [20, 30, 40, 255])), cx);
+        self.open_standalone(Source::Image(::toolkit::effects::solid_frame(16, 9, [20, 30, 40, 255])), cx);
         let previous = self.session_generation;
         self.close(cx);
         anyhow::ensure!(!self.complete_dialog(previous, Command::Project(PathBuf::new()), cx),
@@ -402,7 +402,7 @@ impl ImageEditor {
     }
     /// Synthetic own-window visual fixture: no save or clipboard service runs.
     pub fn seed_retry_preview(&mut self, cx: &mut Context<Self>) {
-        self.open_standalone(Source::Image(rcr_toolkit::effects::solid_frame(960, 540, [225, 234, 240, 255])), cx);
+        self.open_standalone(Source::Image(::toolkit::effects::solid_frame(960, 540, [225, 234, 240, 255])), cx);
         self.send(Command::Tool(a::Tool::Rectangle), cx);
         self.send(Command::Down(a::PointF::new(160., 120.), Default::default()), cx);
         self.send(Command::Move(a::PointF::new(760., 420.), Default::default()), cx);
@@ -543,7 +543,7 @@ impl ImageEditor {
                 })?;
             }
             9 => {
-                let mut session = a::EditorSession::from_frame(rcr_toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255]))?;
+                let mut session = a::EditorSession::from_frame(::toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255]))?;
                 let text_a = session.add_object(a::Object::new(a::ObjectId(0), Default::default(), a::ObjectKind::Text(a::object::TextShape {
                     rect: a::RectF::new(20., 20., 130., 40.), content: a::object::TextContent { text: "Alpha".into(), ..Default::default() }, ..Default::default() })));
                 session.add_object(a::Object::new(a::ObjectId(0), Default::default(), a::ObjectKind::Balloon(a::object::BalloonShape {
@@ -749,7 +749,7 @@ impl ImageEditor {
                 ensure!(!view.read(cx).help_visible && view.read(cx).actor.is_some() && !view.read(cx).finishing,
                     "Closing shortcut help exited the editor");
                 view.update(cx, |this, cx| {
-                    this.open_standalone(Source::Image(rcr_toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255])), cx);
+                    this.open_standalone(Source::Image(::toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255])), cx);
                     this.property_smoke = Some(PropertySmoke { stage: 24, ..Default::default() });
                 });
                 println!("Standalone contextual properties smoke: native Blur strength/Undo pixels; Text/Balloon selection and retained drafts; guarded Apply/Undo; F6 reveals offscreen Select and returns to canvas, native activation; keyboard R; property text ownership; dirty Ctrl+S and staged idle Escape retain drafts; F1/Escape help; accepted pixels/Undo restored; no output services");
@@ -915,9 +915,9 @@ impl ImageEditor {
                     // Clipboard access may wait for another process, so keep it off the UI thread.
                     let (tx, rx) = async_channel::bounded(1);
                     let spawned = std::thread::Builder::new().name("rcr-image-clipboard".into()).spawn(move || {
-                        use rcr_toolkit::core::workflow::Clipboard;
+                        use ::toolkit::core::workflow::Clipboard;
                         let result =
-                            rcr_toolkit::services::SystemClipboard::new(Default::default())
+                            ::toolkit::services::SystemClipboard::new(Default::default())
                                 .set_image(&frame)
                                 .map_err(|e| e.to_string());
                         drop(request); // Release admission before waking the UI.
@@ -1137,7 +1137,7 @@ impl ImageEditor {
         }
         true
     }
-    fn sync_label(&mut self, properties: &rcr_toolkit::image_editor::Properties, revision: u64, cx: &mut Context<Self>) {
+    fn sync_label(&mut self, properties: &::toolkit::image_editor::Properties, revision: u64, cx: &mut Context<Self>) {
         let Some(text) = properties.text.as_ref().filter(|text| single_line_label(text)) else {
             self.retain_active_label(cx); return;
         };
@@ -1700,7 +1700,7 @@ impl Render for ImageEditor {
             .child(button("flip-image", "Flip image horizontally")
                 .on_click(cx.listener(|this, _, _, cx| this.send(Command::Flip, cx))))
             .child(button("grayscale-image", "Make image grayscale")
-                .on_click(cx.listener(|this, _, _, cx| this.send(Command::Effect(rcr_toolkit::effects::Effect::Grayscale), cx))));
+                .on_click(cx.listener(|this, _, _, cx| this.send(Command::Effect(::toolkit::effects::Effect::Grayscale), cx))));
         let status = self
             .preview
             .as_ref()
@@ -1883,7 +1883,7 @@ impl Render for ImageEditor {
 mod clipboard_tests {
     fn owned_clipboard_request(key: char) -> (super::Actor, super::CanvasClipboardOperation, super::CanvasClipboardReply) {
         use super::{a, Actor, Command, Event, Source};
-        let actor = Actor::new(Source::Image(rcr_toolkit::effects::solid_frame(160, 100, [255; 4]))).unwrap();
+        let actor = Actor::new(Source::Image(::toolkit::effects::solid_frame(160, 100, [255; 4]))).unwrap();
         for command in [Command::Tool(a::Tool::Text),
             Command::Down(a::PointF::new(10., 10.), a::Modifiers::NONE),
             Command::Up(a::PointF::new(100., 60.), a::Modifiers::NONE), Command::Text("Keep".into()),
@@ -1961,7 +1961,7 @@ mod clipboard_tests {
     }
 
     use super::{ClipboardLifetime, LabelDraft, retained_draft_payload};
-    use rcr_toolkit::annotation as a;
+    use ::toolkit::annotation as a;
 
     #[test]
     fn apply_ack_before_preview_keeps_output_blocked_until_observed_and_reconciled() {

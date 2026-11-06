@@ -22,7 +22,7 @@ SPEC.loader.exec_module(HARDWARE)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--exe", type=Path, default=ROOT / "target/debug/rcr-desktop.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "target/debug/desktop.exe")
     parser.add_argument("--seconds", default="6,60")
     args = parser.parse_args()
     durations = [float(value) for value in args.seconds.split(",")]

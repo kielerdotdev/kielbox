@@ -3,7 +3,7 @@ param(
     [string]$FfmpegLibDirectory,
     [switch]$Automatic,
     [switch]$UntilEof,
-    [string]$Executable = 'target/debug/rcr-desktop.exe'
+    [string]$Executable = 'target/debug/desktop.exe'
 )
 $ErrorActionPreference = 'Stop'
 $rcrRoot = Split-Path -Parent $PSScriptRoot

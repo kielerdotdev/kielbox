@@ -1,6 +1,6 @@
 //! Serial native-tool cancellation and ordinary audio-metadata regression.
 use anyhow::{Context, Result, ensure};
-use rcr_editor_core::*;
+use editor_core::*;
 use std::{path::PathBuf, time::{Duration, Instant}};
 
 fn cancelled<T>(name: &str, run: impl FnOnce(&dyn Fn() -> bool) -> Result<T>) -> Result<()> {

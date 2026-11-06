@@ -1,7 +1,7 @@
 //! Event-driven WASAPI sources. Each device has an independent named track.
 //! GetBuffer QPC timestamps are converted onto the recorder's shared epoch.
 use anyhow::{ensure, Context, Result};
-use rcr_media_core::{
+use media_core::{
     AudioCapture, AudioSource, AudioTrack, MediaPacket, AUDIO_FRAME_BYTES, AUDIO_RATE,
     NS_PER_SECOND,
 };

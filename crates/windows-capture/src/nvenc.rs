@@ -2,8 +2,8 @@
 //! The NVIDIA DLL is loaded from System32; no CUDA toolkit is required.
 use anyhow::{bail, ensure, Context, Result};
 use libloading::Library;
-use rcr_media_core::{Codec, EncodedPacket, EncoderCapabilities, VideoConfig, VideoEncoder};
-use rcr_nvenc_sys::*;
+use media_core::{Codec, EncodedPacket, EncoderCapabilities, VideoConfig, VideoEncoder};
+use nvenc_sys::*;
 use std::{
     collections::VecDeque,
     ffi::{c_void, CStr},

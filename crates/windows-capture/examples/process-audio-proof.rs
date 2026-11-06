@@ -35,8 +35,8 @@ fn proof_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<(ProofMo
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::{ensure, Context};
-    use rcr_media_core::{AudioTrack, AUDIO_RATE};
-    use rcr_windows::audio::{process_creation_time, qpc_hns, AudioEvent, AudioWorkers};
+    use media_core::{AudioTrack, AUDIO_RATE};
+    use windows_capture::audio::{process_creation_time, qpc_hns, AudioEvent, AudioWorkers};
     use std::time::{Duration, Instant};
     let (mode, args) = proof_args(std::env::args().skip(1))?;
     let mut args = args.into_iter();

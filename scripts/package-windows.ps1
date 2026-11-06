@@ -52,12 +52,12 @@ if ($DevelopmentExecutable) {
         Push-Location $rcrPackageRoot
         try {
             Invoke-RcrWithFxc -Compiler $rcrFxcCompiler -Build {
-                & cargo build --locked --release -p rcr-desktop -p rcr-clean -j1
+                & cargo build --locked --release -p desktop -p clean -j1
                 if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE" }
             }
         } finally { Pop-Location }
     }
-    $rcrPackageSource = Join-Path $rcrPackageRoot 'target/release/rcr-desktop.exe'
+    $rcrPackageSource = Join-Path $rcrPackageRoot 'target/release/desktop.exe'
 }
 Assert-NoReparseAncestors $rcrPackageSource
 $rcrPackageSource = (Resolve-Path -LiteralPath $rcrPackageSource).Path
@@ -74,7 +74,7 @@ $rcrPackageFiles = [ordered]@{
     'THIRD_PARTY.md' = (Join-Path $rcrPackageRoot 'THIRD_PARTY.md')
     'Cargo.lock' = (Join-Path $rcrPackageRoot 'Cargo.lock')
     'licenses/Geist-OFL.txt' = (Join-Path $rcrPackageRoot 'assets/fonts/OFL.txt')
-    'licenses/LiberationSans-NOTICE.md' = (Join-Path $rcrPackageRoot 'crates/rcr-image-editor/THIRD_PARTY.md')
+    'licenses/LiberationSans-NOTICE.md' = (Join-Path $rcrPackageRoot 'crates/image-editor/THIRD_PARTY.md')
     'licenses/DPDFNet-Apache-2.0.txt' = (Join-Path $rcrPackageRoot 'crates/dpdfnet/LICENSE-CEVA')
     'licenses/HushMic-Apache-2.0.txt' = (Join-Path $rcrPackageRoot 'crates/dpdfnet/LICENSE-HUSHMIC')
     'licenses/DPDFNet-NOTICE.md' = (Join-Path $rcrPackageRoot 'crates/dpdfnet/NOTICE.md')
@@ -85,8 +85,8 @@ $rcrPackageFiles = [ordered]@{
     'licenses/FFmpeg-PROVIDER-LICENSE' = (Join-Path $rcrPackageRoot 'crates/editor-core/src/playback_gpu/ffmpeg7/PROVIDER-LICENSE')
 }
 if (-not $DevelopmentExecutable) {
-    $rcrPackageFiles['rcr-clean.exe'] = Join-Path $rcrPackageRoot 'target/release/rcr-clean.exe'
-    $rcrPackageFiles['CLEANUP.md'] = Join-Path $rcrPackageRoot 'crates/rcr-clean/README.md'
+    $rcrPackageFiles['clean.exe'] = Join-Path $rcrPackageRoot 'target/release/clean.exe'
+    $rcrPackageFiles['CLEANUP.md'] = Join-Path $rcrPackageRoot 'crates/clean/README.md'
 }
 if ($SourceArchive) {
     $rcrPackageArchiveSuffix = if ($SourceArchive -match '\.tar\.gz$') { '.tar.gz' } else { [IO.Path]::GetExtension($SourceArchive).ToLowerInvariant() }

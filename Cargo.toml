@@ -12,29 +12,29 @@ rust-version = "1.99"
 repository = "https://github.com/kielerdotdev/kielbox"
 
 [workspace.dependencies]
-rcr-screenshot-app = { path = "crates/rcr-screenshot-app" }
-rcr-screenshot = { path = "crates/rcr-screenshot" }
-rcr-screenshot-portal = { path = "crates/rcr-screenshot-portal" }
-rcr-screenshot-wayland = { path = "crates/rcr-screenshot-wayland" }
-rcr-screenshot-windows = { path = "crates/rcr-screenshot-windows" }
-rcr-screenshot-x11 = { path = "crates/rcr-screenshot-x11" }
-rcr-cli = { path = "crates/rcr-cli" }
-rcr-workflows = { path = "crates/rcr-workflows" }
-rcr-image-editor = { path = "crates/rcr-image-editor" }
-rcr-image-editor-ui = { path = "crates/rcr-image-editor-ui" }
-rcr-image-gpu = { path = "crates/rcr-image-gpu" }
-rcr-hdr = { path = "crates/rcr-hdr" }
-rcr-hotkeys = { path = "crates/rcr-hotkeys" }
-rcr-image-effects = { path = "crates/rcr-image-effects" }
-rcr-ipc = { path = "crates/rcr-ipc" }
-rcr-screenshot-overlay = { path = "crates/rcr-screenshot-overlay" }
-rcr-platform = { path = "crates/rcr-platform" }
-rcr-recording-tools = { path = "crates/rcr-recording-tools" }
-rcr-toolkit-services = { path = "crates/rcr-toolkit-services" }
-rcr-toolkit-settings-ui = { path = "crates/rcr-toolkit-settings-ui" }
-rcr-shell = { path = "crates/rcr-shell" }
-rcr-image-types = { path = "crates/rcr-image-types" }
-rcr-upload = { path = "crates/rcr-upload" }
+screenshot-app = { path = "crates/screenshot-app" }
+screenshot = { path = "crates/screenshot" }
+screenshot-portal = { path = "crates/screenshot-portal" }
+screenshot-wayland = { path = "crates/screenshot-wayland" }
+screenshot-windows = { path = "crates/screenshot-windows" }
+screenshot-x11 = { path = "crates/screenshot-x11" }
+cli = { path = "crates/cli" }
+workflows = { path = "crates/workflows" }
+image-editor = { path = "crates/image-editor" }
+image-editor-ui = { path = "crates/image-editor-ui" }
+image-gpu = { path = "crates/image-gpu" }
+hdr = { path = "crates/hdr" }
+hotkeys = { path = "crates/hotkeys" }
+image-effects = { path = "crates/image-effects" }
+ipc = { path = "crates/ipc" }
+screenshot-overlay = { path = "crates/screenshot-overlay" }
+platform = { path = "crates/platform" }
+recording-tools = { path = "crates/recording-tools" }
+toolkit-services = { path = "crates/toolkit-services" }
+toolkit-settings-ui = { path = "crates/toolkit-settings-ui" }
+shell = { path = "crates/shell" }
+image-types = { path = "crates/image-types" }
+upload = { path = "crates/upload" }
 thiserror = "2"
 tracing = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
@@ -58,7 +58,7 @@ windows = { version = "0.61.3", features = [
 debug = 1
 incremental = false
 
-[profile.dev.package.rcr-dpdfnet]
+[profile.dev.package.dpdfnet]
 opt-level = 3
 
 [profile.dev.package.rustfft]
@@ -72,16 +72,16 @@ opt-level = 2
 opt-level = 2
 
 # Screenshot raster kernels must run at production speed in desktop development builds.
-[profile.dev.package.rcr-toolkit]
+[profile.dev.package.toolkit]
 opt-level = 3
-[profile.dev.package.rcr-image-editor]
+[profile.dev.package.image-editor]
 opt-level = 3
-[profile.dev.package.rcr-image-effects]
+[profile.dev.package.image-effects]
 opt-level = 3
 # Screenshot alpha normalization and channel conversion touch every desktop pixel.
-[profile.dev.package.rcr-image-types]
+[profile.dev.package.image-types]
 opt-level = 3
-[profile.dev.package.rcr-hdr]
+[profile.dev.package.hdr]
 opt-level = 3
 [profile.dev.package.tiny-skia]
 opt-level = 3

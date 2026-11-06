@@ -75,7 +75,7 @@ mod tray;
 mod ui_proof;
 #[cfg(windows)]
 mod utilities;
-use rcr_media_core::{AudioTrack, PipelineStats};
+use media_core::{AudioTrack, PipelineStats};
 use std::{
     path::PathBuf,
     sync::{
@@ -87,7 +87,7 @@ use std::{
 };
 
 #[cfg(windows)]
-use rcr_windows::pipeline::{self, PipelineEvent, RecorderCommand, RunOptions};
+use windows_capture::pipeline::{self, PipelineEvent, RecorderCommand, RunOptions};
 #[cfg(windows)]
 use std::time::Instant;
 
@@ -145,7 +145,7 @@ fn replay_save_request(path: PathBuf, seconds: u64, microphone: bool, cleanup: b
 
 #[cfg(windows)]
 struct SetupInspection {
-    cancel: rcr_toolkit::core::workflow::CancelToken,
+    cancel: ::toolkit::core::workflow::CancelToken,
     result: mpsc::Receiver<Result<setup_diagnostics::Report, String>>,
 }
 #[cfg(windows)]
@@ -495,10 +495,10 @@ impl Studio {
     }
     fn open_audio_device_picker(
         &mut self,
-        kind: rcr_windows::audio_endpoint::AudioEndpointKind,
+        kind: windows_capture::audio_endpoint::AudioEndpointKind,
         cx: &mut Context<Self>,
     ) {
-        use rcr_windows::audio_endpoint::AudioEndpointKind;
+        use windows_capture::audio_endpoint::AudioEndpointKind;
         if self.active
             || self.audio_picker.is_some()
             || self.audio_device_picker.is_some()
@@ -639,8 +639,8 @@ impl Studio {
             audio.push(track);
         }
         let options = RunOptions {
-            display: Some(self.preferences.display.as_ref().map_or(rcr_windows::display::Selection::Primary,
-                |saved| rcr_windows::display::Selection::DevicePath(saved.id.clone()))),
+            display: Some(self.preferences.display.as_ref().map_or(windows_capture::display::Selection::Primary,
+                |saved| windows_capture::display::Selection::DevicePath(saved.id.clone()))),
             seconds: self.proof_seconds,
             preview: true,
             audio,
@@ -648,7 +648,7 @@ impl Studio {
             suppress_microphone: self.suppress_microphone && self.microphone,
             output: recordings::root().join(format!("rcr-{stamp}.mkv")),
             replay_seconds: self.preferences.replay_seconds,
-            video: rcr_media_core::VideoConfig {
+            video: media_core::VideoConfig {
                 width: self.preferences.height * 16 / 9,
                 height: self.preferences.height,
                 fps: self.preferences.fps,
@@ -665,7 +665,7 @@ impl Studio {
         self.session_display = self.preferences.display.clone();
         self.stats.output = options.output.display().to_string();
         let worker = std::thread::Builder::new()
-                .name("rcr-capture".into())
+                .name("capture".into())
                 .spawn(move || {
                     if let Err(error) =
                         pipeline::run_controlled(options, stop, Some(tx.clone()), Some(command_rx))
@@ -767,7 +767,7 @@ impl Studio {
                     let tool = command
                         .strip_prefix("utility-")
                         .and_then(|s| s.parse::<usize>().ok())
-                        .and_then(|i| rcr_toolkit::utilities::Tool::ALL.get(i).copied());
+                        .and_then(|i| ::toolkit::utilities::Tool::ALL.get(i).copied());
                     self.tab = 4;
                     self.toolkit.update(cx, |this, cx| this.utility(tool, cx));
                     if let Some(window) = cx
@@ -798,9 +798,9 @@ impl Studio {
                 "region" => self.quick_recorder.update(cx, |r, cx| r.launch(false, cx)),
                 "fullscreen" => {
                     let target = if command == "region" {
-                        rcr_toolkit::core::workflow::CaptureTarget::Region
+                        ::toolkit::core::workflow::CaptureTarget::Region
                     } else {
-                        rcr_toolkit::core::workflow::CaptureTarget::Fullscreen
+                        ::toolkit::core::workflow::CaptureTarget::Fullscreen
                     };
                     if self.toolkit.update(cx, |t, cx| t.capture(target, cx))
                         && let Some(window) = cx
@@ -842,7 +842,7 @@ impl Studio {
                 }
                 hotkeys::Event::ToggleRecord => self.toggle_record(cx),
                 hotkeys::Event::ToggleQuickRecord => self.quick_recorder.update(cx, |recorder, cx| recorder.toggle(cx)),
-                hotkeys::Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Region) => self.quick_recorder.update(cx, |recorder, cx| recorder.launch(false, cx)),
+                hotkeys::Event::Screenshot(::toolkit::core::workflow::CaptureTarget::Region) => self.quick_recorder.update(cx, |recorder, cx| recorder.launch(false, cx)),
                 hotkeys::Event::Screenshot(target) => {
                     let started = self
                         .toolkit
@@ -984,7 +984,7 @@ impl Studio {
     fn check_installation(&mut self, cx: &mut Context<Self>) {
         if self.setup_inspection.is_some() { return; }
         let config = setup_diagnostics::Config::capture(recordings::root());
-        let cancel = rcr_toolkit::core::workflow::CancelToken::new();
+        let cancel = ::toolkit::core::workflow::CancelToken::new();
         let worker_cancel = cancel.clone();
         let (sender, result) = mpsc::sync_channel(1);
         let spawned = std::thread::Builder::new().name("rcr-installation-check".into()).spawn(move || {
@@ -1156,7 +1156,7 @@ fn main() {
             let directory = args.windows(2).find(|pair| pair[0] == "--data-folder")
                 .map(|pair| PathBuf::from(&pair[1])).unwrap_or_else(|| PathBuf::from("recordings"));
             let report = setup_diagnostics::collect(setup_diagnostics::Config::capture(directory),
-                &rcr_toolkit::core::workflow::CancelToken::new());
+                &::toolkit::core::workflow::CancelToken::new());
             use std::io::Write as _;
             let bytes = if args.iter().any(|arg| arg == "--human") {
                 Some(report.human_summary().into_bytes())
@@ -1565,7 +1565,7 @@ fn main() {
                                             id: "offline-owned-preview-microphone".into(),
                                             label: "Studio microphone (disconnected)".into(),
                                         });
-                                        studio.open_audio_device_picker(rcr_windows::audio_endpoint::AudioEndpointKind::Capture, cx);
+                                        studio.open_audio_device_picker(windows_capture::audio_endpoint::AudioEndpointKind::Capture, cx);
                                     }
                                     if screen == "capture-preview-unavailable" {
                                         studio.preview_error = Some("The capture and interface use different GPUs. Shared-texture preview requires the same GPU.".into());

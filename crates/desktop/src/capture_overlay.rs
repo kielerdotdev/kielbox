@@ -2,7 +2,7 @@
 use crate::theme::*;
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_toolkit::{
+use ::toolkit::{
     annotation as a,
     core::workflow::CancelToken,
     image_editor::{Actor, Command, Event, Preview},
@@ -715,7 +715,7 @@ impl CaptureOverlay {
         if let Some(p) = self.point(e.position) {
             if self.tool.is_none() {
                 self.target_press = if self.selection.rect.is_none() {
-                    self.targets.hit_test(rcr_toolkit::types::Point {
+                    self.targets.hit_test(::toolkit::types::Point {
                         x: self.physical.0.saturating_add(p.x.floor() as i32),
                         y: self.physical.1.saturating_add(p.y.floor() as i32),
                     }).and_then(|rect| local_target(rect, self.physical)).map(|rect| (p, rect))
@@ -775,7 +775,7 @@ impl CaptureOverlay {
                 if self.cursor_pixel != Some(pixel) {
                     self.cursor_pixel = Some(pixel);
                     self.hovered = if self.selection.dragging() { None } else {
-                        self.targets.hit_test(rcr_toolkit::types::Point { x: self.physical.0.saturating_add(pixel.0 as i32), y: self.physical.1.saturating_add(pixel.1 as i32) })
+                        self.targets.hit_test(::toolkit::types::Point { x: self.physical.0.saturating_add(pixel.0 as i32), y: self.physical.1.saturating_add(pixel.1 as i32) })
                             .and_then(|rect| local_target(rect, self.physical))
                     };
                     cx.notify();
@@ -2315,7 +2315,7 @@ impl Drop for CaptureOverlay {
 mod region_guide_tests {
     use super::{lens_bounds, local_target};
     use gpui::{Bounds, point, px, size};
-    use rcr_toolkit::types::Rect;
+    use ::toolkit::types::Rect;
     #[test]
     fn physical_targets_translate_clip_and_preserve_negative_monitor_origins() {
         assert_eq!(local_target(Rect::new(-900, -250, 400, 200), (-640, -180, 900, 600)), Some(Rect::new(0, 0, 140, 130)));

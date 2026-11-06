@@ -1,6 +1,6 @@
 //! Public renderer checks, runnable through the host workspace without the
 //! upstream vendor workspace's unavailable development dependencies.
-use rcr_toolkit::{
+use toolkit::{
     annotation as a, effects,
     types::{Frame, Rect},
 };

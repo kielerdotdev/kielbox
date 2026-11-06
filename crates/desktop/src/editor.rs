@@ -6,7 +6,7 @@ mod watch_share;
 #[path = "editor_watch_fullscreen.rs"]
 mod watch_fullscreen;
 use gpui::{prelude::*, *};
-use rcr_editor_core::{
+use editor_core::{
     self as core, AudioExport, Content, Edit, Editor, ExportOptions, Id, JobProgress, MediaAsset,
     PlaybackOutput, PlaybackSession, PreviewFrame, Project, QuickEdit, ScrubSession, TrackKind,
     WaveBin,
@@ -67,7 +67,7 @@ impl From<core::ScrubFrame> for PendingFrame {
 mod seek_pipeline_trace_tests {
     use super::{CpuFrameIdentity, CpuFrameTiming, PendingFrame};
     use gpui::ImageId;
-    use rcr_editor_core::{PreviewFrame, ScrubFrame, ScrubMetadata, ScrubTrace};
+    use editor_core::{PreviewFrame, ScrubFrame, ScrubMetadata, ScrubTrace};
     use std::time::{Duration, Instant};
     #[test]
     fn trace_phase_report_separates_queue_decode_copy_handoff_bind_and_actual_paint() {
@@ -1320,7 +1320,7 @@ impl EditorView {
         let worker_epoch = media_epoch.clone();
         let events = tx.clone();
         let media_worker = thread::Builder::new()
-            .name("rcr-clip-media".into())
+            .name("clip-media".into())
             .spawn(move || {
                 for task in task_rx {
                     let g = task.generation();
@@ -1446,7 +1446,7 @@ impl EditorView {
         let (save_tx, save_rx) = mpsc::sync_channel::<(PathBuf, u64, Project)>(4);
         let save_events = tx.clone();
         let save_worker = thread::Builder::new()
-            .name("rcr-clip-autosave".into())
+            .name("clip-autosave".into())
             .spawn(move || {
                 while let Ok((path, revision, project)) = save_rx.recv() {
                     let result = project.save(&path).map_err(|error| format!("{error:#}"));

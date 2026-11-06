@@ -1,8 +1,8 @@
 //! Optional offline processing of an owned replay snapshot. The capture ring,
 //! continuous recording, video and system-audio allocations are left untouched.
 use anyhow::{ensure, Result};
-use rcr_dpdfnet::Denoiser;
-use rcr_media_core::{AudioSource, AudioTrack, MediaPacket, AUDIO_FRAME_BYTES};
+use dpdfnet::Denoiser;
+use media_core::{AudioSource, AudioTrack, MediaPacket, AUDIO_FRAME_BYTES};
 
 pub fn suppress_microphone(
     packets: &mut [MediaPacket],

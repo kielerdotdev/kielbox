@@ -1,7 +1,7 @@
 param([string]$Executable = '', [switch]$AudioPicker, [switch]$AudioDevices, [switch]$History, [switch]$LibrarySelection)
 $ErrorActionPreference = 'Stop'
 $rcrRoot = Split-Path -Parent $PSScriptRoot
-$rcrExe = Join-Path $rcrRoot 'target/debug/rcr-desktop.exe'
+$rcrExe = Join-Path $rcrRoot 'target/debug/desktop.exe'
 if ($Executable) { $rcrExe = if ([System.IO.Path]::IsPathRooted($Executable)) {$Executable} else {Join-Path $rcrRoot $Executable} }
 $rcrLogs = Join-Path $rcrRoot '.downloads'
 [System.IO.Directory]::CreateDirectory($rcrLogs) | Out-Null

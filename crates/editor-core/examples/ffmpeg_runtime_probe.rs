@@ -2,7 +2,7 @@
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::{bail, ensure, Context};
-    use rcr_editor_core::ffmpeg_runtime::{
+    use editor_core::ffmpeg_runtime::{
         probe_ffmpeg_runtime, FfmpegRuntimeConfig, FfmpegRuntimeRequirement,
     };
     let mut config = FfmpegRuntimeConfig::Automatic;

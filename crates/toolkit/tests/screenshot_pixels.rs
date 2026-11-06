@@ -1,4 +1,4 @@
-use rcr_toolkit::types::{ColorSpace, Frame, PixelFormat, Point, Size};
+use toolkit::types::{ColorSpace, Frame, PixelFormat, Point, Size};
 use std::time::Duration;
 #[test]
 fn packed_rgba_conversion_reuses_pixels_and_preserves_capture_metadata() {

@@ -1,4 +1,4 @@
-param([switch]$RequireReuse, [switch]$VideoPreview, [string]$Executable = 'target/debug/rcr-desktop.exe')
+param([switch]$RequireReuse, [switch]$VideoPreview, [string]$Executable = 'target/debug/desktop.exe')
 $ErrorActionPreference = 'Stop'
 $rcrRoot = Split-Path -Parent $PSScriptRoot
 $rcrExe = if ([IO.Path]::IsPathRooted($Executable)) { $Executable } else { Join-Path $rcrRoot $Executable }

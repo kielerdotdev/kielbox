@@ -1,0 +1,30 @@
+[package]
+name = "platform"
+description = "Wires the OS capture backends and HDR tone-mapping into one ScreenSource that always returns 8-bit sRGB frames."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[dependencies]
+image-types.workspace = true
+screenshot.workspace = true
+hdr.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+screenshot-windows.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+screenshot-wayland.workspace = true
+screenshot-portal.workspace = true
+screenshot-x11.workspace = true
+
+[dev-dependencies]
+half.workspace = true
+
+[lints]
+workspace = true

@@ -1,7 +1,7 @@
 //! Native radial disk map. Directory enumeration and byte aggregation happen
 //! elsewhere; drawing and hit testing inspect only a bounded slice of the tree.
 use gpui::{prelude::*, *};
-use rcr_toolkit::disk_usage::DiskUsage;
+use ::toolkit::disk_usage::DiskUsage;
 use std::{
     cell::Cell,
     collections::VecDeque,

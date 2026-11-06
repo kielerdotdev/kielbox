@@ -3,7 +3,7 @@
 //! frame bounds and child rectangles clipped to their ancestors. No application
 //! messages, text, class names, accessibility queries or pixel capture are used.
 //! Reference: https://github.com/ShareX/ShareX/blob/develop/ShareX.ScreenCaptureLib/Helpers/WindowsRectangleList.cs
-use rcr_toolkit::types::{Point, Rect};
+use ::toolkit::types::{Point, Rect};
 use std::{collections::HashSet, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 use windows::{core::BOOL, Win32::{Foundation::{HWND, LPARAM, RECT}, UI::WindowsAndMessaging::{
     EnumWindows, GetWindow, GetWindowRect, IsIconic, IsWindowVisible, GW_CHILD, GW_HWNDNEXT,

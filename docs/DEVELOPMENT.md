@@ -10,7 +10,7 @@ Install the MSVC Rust toolchain, Visual Studio C++ build tools, and a current NV
 
 ```powershell
 cargo build -j1
-cargo run -p rcr-desktop -j1
+cargo run -p desktop -j1
 ```
 
 Builds default to one worker with incremental caches disabled to limit memory/disk pressure.
@@ -54,16 +54,16 @@ Short headless proofs:
 
 ```powershell
 # Four seconds, video only.
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 4 --output recordings/proof.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 4 --output recordings/proof.mkv
 
 # Independent system and microphone tracks.
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 4 --audio system,mic --output recordings/audio-proof.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 4 --audio system,mic --output recordings/audio-proof.mkv
 
 # Replay-only operation: save the retained history on stop.
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 4 --audio system,mic --replay-only --save-on-stop --output recordings/replay.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 4 --audio system,mic --replay-only --save-on-stop --output recordings/replay.mkv
 
 # Save while the continuous recording is still running.
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 6 --audio system,mic --output recordings/session.mkv --save-at 3 --save-replay recordings/moment.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 6 --audio system,mic --output recordings/session.mkv --save-at 3 --save-replay recordings/moment.mkv
 ```
 
 CLI options include `--monitor`, `--width`, `--height`, `--fps`, `--bitrate` and `--replay-seconds`. Use unique output names.
@@ -79,13 +79,13 @@ Recording publication precedes offline replay processing, so final UI statistics
 For application audio, `--audio-process <PID>` replaces system audio and preserves a requested microphone, independently of argument order:
 
 ```powershell
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 4 --audio mic --audio-process 1234 --output recordings/app-proof.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 4 --audio mic --audio-process 1234 --output recordings/app-proof.mkv
 ```
 
 Replace `1234` with the current application PID. This CLI option binds the running instance at startup; it does not remember or follow an executable across relaunches. To check isolation without recording desktop video, microphone audio or PCM files, build the audio-only example and run the optional controlled proof:
 
 ```powershell
-cargo build -p rcr-windows --example process-audio-proof -j1
+cargo build -p windows-capture --example process-audio-proof -j1
 ./scripts/verify-process-audio.ps1
 ./scripts/verify-process-audio.ps1 -IncludeChildren
 ./scripts/verify-process-audio.ps1 -ExpectExit
@@ -104,7 +104,7 @@ The implementation uses **DPDFNet-2 48 kHz HR**, with pure Rust FP32 neural kern
 Suppression adds CPU work and clip-save/export delay. A one-second synthetic development fixture took about 0.23 seconds of processing in one run; longer clips can take several seconds. This is a local measurement, not a general hardware or quality benchmark. Replay-save memory can additionally include processed microphone payload and the model's scratch/weights, beyond the pinned raw snapshot.
 
 ```powershell
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 6 --audio system,mic --suppress-mic --output recordings/raw-session.mkv --save-at 3 --save-replay recordings/clean-moment.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 6 --audio system,mic --suppress-mic --output recordings/raw-session.mkv --save-at 3 --save-replay recordings/clean-moment.mkv
 ```
 
 Here `raw-session.mkv` contains the original microphone, and `clean-moment.mkv` contains a separately named DPDFNet-processed microphone track. Recording/replay suppression is native Rust; editor source decoding still uses the editor's existing FFmpeg dependency. See [model provenance](../crates/dpdfnet/NOTICE.md).
@@ -200,7 +200,7 @@ directory until publication without overwrite. Output fits within 1920×1080, an
 duration is capped at ten minutes. Audio uses Windows default devices and reports source
 failures. The OS capture border stays enabled; the controller requests capture exclusion.
 
-Repeat the hidden menu proof with `rcr-desktop --smoke-capture-menu --proof-output <absolute-folder>`.
+Repeat the hidden menu proof with `desktop --smoke-capture-menu --proof-output <absolute-folder>`.
 It uses an isolated profile, generated video/audio and internal GPUI input events to
 exercise the actual Studio window and desktop picker at three viewport sizes, frozen
 pixel/metadata routing, resizing, countdown cancellation, simultaneous still capture,
@@ -227,7 +227,7 @@ Capture/encode objects remain on one worker. The UI never waits for encoder comp
 
 Desktop Duplication access loss starts a visible reconnect attempt bounded to five seconds on the same GPU/output with unchanged SDR dimensions and rotation. Successful recovery requests a fresh keyframe. Device removal/reset, changed geometry, HDR or an expired recovery window stop capture with an error; recovery does not migrate to another display or GPU. This is an implemented recovery path, not proof of real display-mode/session transitions; those transitions have not yet been exercised.
 
-`rcr-media-core` defines `VideoCapture`, `VideoEncoder` (associated surface), and `AudioCapture` traits. The concrete Windows implementation owns D3D11 resources and NVENC sessions. Future AMF, oneVPL, and PipeWire/DMA-BUF implementations must preserve native surface ownership rather than add CPU frame buffers to the core interface.
+`media-core` defines `VideoCapture`, `VideoEncoder` (associated surface), and `AudioCapture` traits. The concrete Windows implementation owns D3D11 resources and NVENC sessions. Future AMF, oneVPL, and PipeWire/DMA-BUF implementations must preserve native surface ownership rather than add CPU frame buffers to the core interface.
 
 ## Validation and limits
 
@@ -277,7 +277,7 @@ Leaving the video editor releases decoder sessions, decoded frames, preview imag
 Native rendering smoke check, using a synthetic image and hidden GPUI window:
 
 ```powershell
-.\target\debug\rcr-desktop.exe --smoke-toolkit
+.\target\debug\desktop.exe --smoke-toolkit
 ```
 
-The combined `rcr-desktop` and `rcr-toolkit` packages are **GPL-3.0-or-later**, with the original screenshot-library notices preserved in source. Original RCR core packages retain Apache-2.0. See `LICENSE-GPL-3.0`, `LICENSE`, `THIRD_PARTY.md` and `docs/SCREENSHOT-PROVENANCE.md`.
+The combined `desktop` and `toolkit` packages are **GPL-3.0-or-later**, with the original screenshot-library notices preserved in source. Original RCR core packages retain Apache-2.0. See `LICENSE-GPL-3.0`, `LICENSE`, `THIRD_PARTY.md` and `docs/SCREENSHOT-PROVENANCE.md`.

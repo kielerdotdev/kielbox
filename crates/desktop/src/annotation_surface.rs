@@ -1,7 +1,7 @@
 //! Stable GPU tiles: changing an annotation replaces only the affected image tiles.
 use crate::image_editor::render_image;
 use gpui::{App, Bounds, ContentMask, Corners, Pixels, RenderImage, Window, fill, point, px, rgb, size};
-use rcr_toolkit::{image_editor::Preview, types::Rect};
+use ::toolkit::{image_editor::Preview, types::Rect};
 use std::{collections::BTreeMap, sync::Arc};
 /// Contrast against both light and dark pixels; only painted into the UI, never the image.
 pub fn outline(window: &mut Window, r: Bounds<Pixels>) {

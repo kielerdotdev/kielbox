@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Context as _, Result, ensure};
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_recording_tools::source::CaptureTarget;
+use recording_tools::source::CaptureTarget;
 use std::{
     path::PathBuf,
     sync::{

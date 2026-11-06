@@ -1,5 +1,5 @@
 //! Synthetic desktop drag. No display, clipboard or recorder access.
-use rcr_toolkit::{
+use toolkit::{
     annotation as a, effects,
     image_editor::{Actor, Command, Preview},
 };

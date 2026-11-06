@@ -32,7 +32,7 @@ identified by the source links and hashes in provenance.
 ## Controlled native proof (root runs serially)
 
 ```powershell
-cargo run -p rcr-editor-core --example d3d11_decode_proof -j1 -- `
+cargo run -p editor-core --example d3d11_decode_proof -j1 -- `
   --input .downloads/owned-av1-fixture.mkv --dll-dir C:/bin --frames 120
 ```
 
@@ -149,7 +149,7 @@ hung synchronous driver or filesystem call.
 The owned-file lifecycle proof is separate from decoder/color/display proofs:
 
 ```powershell
-cargo run -p rcr-editor-core --example gpu_transport_proof -j1 -- `
+cargo run -p editor-core --example gpu_transport_proof -j1 -- `
   --input .downloads/owned-60fps-av1-with-quiet-audio.mkv --dll-dir C:/bin `
   --adapter-low <observed-u32> --adapter-high <observed-i32>
 ```

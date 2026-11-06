@@ -816,8 +816,8 @@ mod tests {
     #[test]
     #[ignore = "Generated-file native/raw FFmpeg parity; needs exact runtime and a supplied AV1 fixture"]
     fn legacy_floor_pcm_packets_preserve_tone_seek_and_eof() {
-        use rcr_media_core::{AudioTrack, MediaPacket, VideoConfig};
-        use rcr_media_io::MatroskaWriter;
+        use media_core::{AudioTrack, MediaPacket, VideoConfig};
+        use media_io::MatroskaWriter;
         use std::process::{Command, Stdio};
         let source = std::env::var_os("RCR_NATIVE_AUDIO_AV1_FIXTURE")
             .map(std::path::PathBuf::from)

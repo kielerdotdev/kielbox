@@ -3,8 +3,8 @@ use super::menu_proof::Probe;
 use crate::{image_editor::frame_image, theme::*};
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_recording_tools::source::CaptureTarget;
-use rcr_toolkit::{
+use recording_tools::source::CaptureTarget;
+use ::toolkit::{
     core::workflow::{CancelToken, Captured},
     selection::{Point as PixelPoint, Selection},
     types::{Frame, Monitor, Rect, WindowInfo},
@@ -919,7 +919,7 @@ mod preparation_tests {
     fn desktop(width: u32, height: u32) -> Desktop {
         let mut frame = Frame::from_rgba8(width, height,
             [12, 34, 56, 255].into_iter().cycle().take((width * height * 4) as usize).collect()).unwrap();
-        frame.origin = rcr_toolkit::types::Point::new(-1920, 120);
+        frame.origin = ::toolkit::types::Point::new(-1920, 120);
         let mut with_cursor = frame.clone();
         if !with_cursor.data().is_empty() {
             with_cursor.data_mut()[..4].copy_from_slice(&[210, 180, 90, 255]);

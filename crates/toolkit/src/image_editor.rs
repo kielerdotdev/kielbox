@@ -256,7 +256,7 @@ impl Actor {
         let q = queue.clone();
         let latest = preview.clone();
         thread::Builder::new()
-            .name("rcr-image-editor".into())
+            .name("image-editor".into())
             .spawn(move || {
                 render_pool.install(|| {
                     let result = (|| -> Result<()> {

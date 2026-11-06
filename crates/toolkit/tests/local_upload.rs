@@ -1,9 +1,9 @@
 //! Exercise the native uploader's public API through the toolkit integration.
-use rcr_upload::local;
+use upload::local;
 
 #[tokio::test]
 async fn shared_folder_upload_preserves_existing_destination_and_source() {
-    use rcr_upload::{UploadContext, UploadKind, UploadRequest, Uploader};
+    use upload::{UploadContext, UploadKind, UploadRequest, Uploader};
     let directory = tempfile::tempdir().unwrap();
     let original = directory.path().join("source.png");
     let shared = directory.path().join("shared");
@@ -15,7 +15,7 @@ async fn shared_folder_upload_preserves_existing_destination_and_source() {
     let result = uploader
         .upload(
             &UploadRequest::from_path(&original, UploadKind::Image),
-            &UploadContext::new(rcr_upload::build_http_client().unwrap()),
+            &UploadContext::new(upload::build_http_client().unwrap()),
         )
         .await
         .unwrap();

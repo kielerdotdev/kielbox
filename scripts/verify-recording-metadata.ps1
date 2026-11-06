@@ -20,7 +20,7 @@ try {
     if ($rcrMetadataFps -ne [math]::Truncate($rcrMetadataFps)) { throw 'Proof requires an integer frame rate.' }
     & $rcrMetadataFFmpeg -nostdin -v error -i $rcrMetadataSource -map 0:v:0 -frames:v 1 -c copy -f obu $rcrMetadataPacket
     if ($LASTEXITCODE -ne 0) { throw 'Keyframe extraction failed.' }
-    & cargo run -p rcr-media-io --example metadata-proof -j1 -- $rcrMetadataPacket $rcrMetadataWork $rcrMetadataVideo.width $rcrMetadataVideo.height $rcrMetadataFps
+    & cargo run -p media-io --example metadata-proof -j1 -- $rcrMetadataPacket $rcrMetadataWork $rcrMetadataVideo.width $rcrMetadataVideo.height $rcrMetadataFps
     if ($LASTEXITCODE -ne 0) { throw 'Native metadata writer failed.' }
     foreach ($rcrMetadataKind in @('recording','replay')) {
         $rcrMetadataFile = Join-Path $rcrMetadataWork ($rcrMetadataKind + '.mkv')

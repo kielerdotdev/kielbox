@@ -1,7 +1,7 @@
 //! Read-only display discovery, with one actual enumeration admitted globally.
 use crate::{preferences::SavedDisplay, theme::*};
 use gpui::{prelude::*, *};
-use rcr_windows::display::Info;
+use windows_capture::display::Info;
 use std::sync::{Arc, OnceLock, mpsc, atomic::{AtomicBool, Ordering}};
 
 fn clean(text: &str) -> String { text.chars().filter(|c| !c.is_control()).take(256).collect() }
@@ -34,7 +34,7 @@ impl Discovery {
 }
 fn request(cancelled: Arc<AtomicBool>) -> Result<async_channel::Receiver<Result<Vec<Info>, String>>, String> {
     static WORKER: OnceLock<Result<Discovery, String>> = OnceLock::new();
-    WORKER.get_or_init(|| Discovery::start(|| rcr_windows::display::enumerate().map_err(|error| format!("{error:#}"))))
+    WORKER.get_or_init(|| Discovery::start(|| windows_capture::display::enumerate().map_err(|error| format!("{error:#}"))))
         .as_ref().map_err(Clone::clone)?.request(cancelled)
 }
 struct Row { key: String, title: String, detail: String, choice: Option<SavedDisplay>, unavailable: Option<String> }

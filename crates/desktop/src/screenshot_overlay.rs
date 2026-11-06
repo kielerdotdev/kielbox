@@ -2,7 +2,7 @@
 use crate::{image_editor::frame_image, theme::*};
 use gpui::{prelude::*, *};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use rcr_toolkit::{
+use ::toolkit::{
     core::workflow::CancelToken,
     types::{Frame, Rect},
 };
@@ -18,7 +18,7 @@ pub struct RegionOverlay {
     source: (i32, i32, u32, u32),
     focus: FocusHandle,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    selection: rcr_toolkit::selection::Selection,
+    selection: ::toolkit::selection::Selection,
     reply: Option<mpsc::SyncSender<Option<Rect>>>,
     cancel: CancelToken,
     recording: bool,
@@ -94,7 +94,7 @@ fn open_kind(
                         frame.width(),
                         frame.height(),
                     ),
-                    selection: rcr_toolkit::selection::Selection::new(
+                    selection: ::toolkit::selection::Selection::new(
                         frame.width(),
                         frame.height(),
                         false,
@@ -168,9 +168,9 @@ fn selected(
     Some(Rect::new(source.0 + left, source.1 + top, width, height))
 }
 impl RegionOverlay {
-    fn point(&self, point: Point<Pixels>) -> Option<rcr_toolkit::selection::Point> {
+    fn point(&self, point: Point<Pixels>) -> Option<::toolkit::selection::Point> {
         let bounds = self.bounds.get()?;
-        Some(rcr_toolkit::selection::Point {
+        Some(::toolkit::selection::Point {
             x: ((f32::from(point.x - bounds.left()) / f32::from(bounds.size.width).max(1.))
                 * self.source.2 as f32)
                 .clamp(0., self.source.2 as f32),

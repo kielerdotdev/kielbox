@@ -263,7 +263,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Binding generation failed' }
     $layout = New-OwnedDirectory (Join-Path $run 'layout-check')
     New-OwnedDirectory (Join-Path $layout 'src') | Out-Null
-    Write-OwnedText (Join-Path $layout 'Cargo.toml') "[package]`nname = `"rcr-ffmpeg7-layout-check`"`nversion = `"0.1.0`"`nedition = `"2021`"`n[workspace]`n"
+    Write-OwnedText (Join-Path $layout 'Cargo.toml') "[package]`nname = `"ffmpeg7-layout-check`"`nversion = `"0.1.0`"`nedition = `"2021`"`n[workspace]`n"
     $bindingLiteral = (Join-Path $output 'bindings.rs') | ConvertTo-Json -Compress
     Write-OwnedText (Join-Path $layout 'src/lib.rs') ("#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]`ninclude!($bindingLiteral);`n")
     & cargo test --offline -j1 --target x86_64-pc-windows-msvc --target-dir $targetDirectory --manifest-path (Join-Path $layout 'Cargo.toml')

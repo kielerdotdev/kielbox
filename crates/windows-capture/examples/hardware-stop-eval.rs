@@ -3,8 +3,8 @@
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::{ensure, Context};
-    use rcr_media_core::AudioTrack;
-    use rcr_windows::pipeline::{
+    use media_core::AudioTrack;
+    use windows_capture::pipeline::{
         self, CapturePhase, PipelineEvent, RecorderCommand, ReplaySave, RunOptions,
     };
     use std::{
@@ -125,7 +125,7 @@ fn main() -> anyhow::Result<()> {
         seconds: None,
         output: main_path.clone(),
         preview: false,
-        display: Some(rcr_windows::display::Selection::Primary),
+        display: Some(windows_capture::display::Selection::Primary),
         audio: if audio {
             vec![AudioTrack::system()]
         } else {

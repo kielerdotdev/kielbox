@@ -3,7 +3,7 @@ use crate::{
     nvenc::Nvenc,
 };
 use anyhow::{Context, Result, bail, ensure};
-use rcr_media_core::{
+use media_core::{
     AudioTrack, EncodedPacket, PipelineStats, ReplayBuffer, VideoCapture, VideoConfig, VideoEncoder,
 };
 use std::{
@@ -85,7 +85,7 @@ pub(crate) fn observe(options: &RunOptions, phase: CapturePhase) {
 impl RunOptions {
     pub fn resolved_replay_budget(&self) -> Result<usize> {
         if self.replay_max_bytes > 0 { return Ok(self.replay_max_bytes); }
-        rcr_media_core::replay_memory_budget(&self.video, self.replay_seconds, self.audio.len())
+        media_core::replay_memory_budget(&self.video, self.replay_seconds, self.audio.len())
     }
 }
 
@@ -128,7 +128,7 @@ pub fn run_controlled(
             || options
                 .audio
                 .iter()
-                .any(|t| t.source == rcr_media_core::AudioSource::Microphone),
+                .any(|t| t.source == media_core::AudioSource::Microphone),
         "--suppress-mic requires --audio mic (or system,mic); suppression applies only to saved replay clips"
     );
     if options.output.extension().is_some_and(|e| e == "ivf") {
@@ -310,7 +310,7 @@ fn run_ivf_proof(
     let (output_tx, output_rx) = mpsc::sync_channel::<EncodedPacket>(120);
     let writer_thread =
         thread::Builder::new()
-            .name("rcr-disk".into())
+            .name("disk".into())
             .spawn(move || -> Result<()> {
                 let mut writer = writer;
                 for packet in output_rx {
@@ -507,7 +507,7 @@ fn parse_cli(args: impl IntoIterator<Item = String>) -> Result<Option<CliOptions
     if let Some(pid) = process {
         options
             .audio
-            .retain(|track| track.source == rcr_media_core::AudioSource::Microphone);
+            .retain(|track| track.source == media_core::AudioSource::Microphone);
         options.audio.insert(0, AudioTrack::process(pid)?);
     }
     let mut ids = Vec::new();
@@ -533,7 +533,7 @@ pub fn cli() -> Result<()> {
             "Optional microphone suppression: --suppress-mic with --audio mic or system,mic. Runs on replay save only; capture/continuous recordings stay raw."
         );
         println!(
-            "rcr-capture [--seconds 10] [--output recordings/proof.mkv] [--audio system,mic] [--audio-process PID] [--monitor 0] [--width 2560] [--height 1440] [--fps 60] [--bitrate 25000000]\nApplication audio: --audio-process PID replaces system audio with that process and its children, preserving --audio mic. Requires supported Windows process loopback; activation failure never captures system audio instead. Select the actual application, not its launcher. Target exit stops its audio source; relaunch requires a new PID.\nReplay: --replay-only --save-on-stop; or --save-at 5 --save-replay recordings/replay.mkv\nDisplay: --monitor is a zero-based ordinal among NVIDIA-attached DXGI outputs, not the Windows display number. Desktop display selections use an exact monitor identity instead.\nSDR / AV1 NVENC. MKV carries independent PCM audio tracks. IVF remains available for video-only proofs. Existing files are never overwritten."
+            "capture [--seconds 10] [--output recordings/proof.mkv] [--audio system,mic] [--audio-process PID] [--monitor 0] [--width 2560] [--height 1440] [--fps 60] [--bitrate 25000000]\nApplication audio: --audio-process PID replaces system audio with that process and its children, preserving --audio mic. Requires supported Windows process loopback; activation failure never captures system audio instead. Select the actual application, not its launcher. Target exit stops its audio source; relaunch requires a new PID.\nReplay: --replay-only --save-on-stop; or --save-at 5 --save-replay recordings/replay.mkv\nDisplay: --monitor is a zero-based ordinal among NVIDIA-attached DXGI outputs, not the Windows display number. Desktop display selections use an exact monitor identity instead.\nSDR / AV1 NVENC. MKV carries independent PCM audio tracks. IVF remains available for video-only proofs. Existing files are never overwritten."
         );
         return Ok(());
     };
@@ -642,21 +642,21 @@ mod cli_tests {
             assert_eq!(options.audio.len(), 2);
             assert_eq!(
                 options.audio[0].source,
-                rcr_media_core::AudioSource::Process {
+                media_core::AudioSource::Process {
                     pid: 42,
                     created_at_hns: None
                 }
             );
             assert_eq!(
                 options.audio[1].source,
-                rcr_media_core::AudioSource::Microphone
+                media_core::AudioSource::Microphone
             );
             assert_eq!((options.audio[0].id, options.audio[1].id), (2, 3));
         }
         assert!(parsed(&[]).unwrap().audio.is_empty());
         assert_eq!(
             parsed(&["--audio", "system"]).unwrap().audio[0].source,
-            rcr_media_core::AudioSource::System
+            media_core::AudioSource::System
         );
         assert_eq!(parsed(&["--audio-process", "42"]).unwrap().audio.len(), 1);
     }

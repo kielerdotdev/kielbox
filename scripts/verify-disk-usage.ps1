@@ -1,4 +1,4 @@
-param([string]$Executable = 'target/debug/rcr-desktop.exe')
+param([string]$Executable = 'target/debug/desktop.exe')
 $ErrorActionPreference = 'Stop'
 $rcrDiskRoot = Split-Path -Parent $PSScriptRoot
 $rcrDiskExe = (Resolve-Path -LiteralPath $(if ([IO.Path]::IsPathRooted($Executable)) { $Executable } else { Join-Path $rcrDiskRoot $Executable })).Path

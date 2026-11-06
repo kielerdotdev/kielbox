@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = 'target/debug/rcr-desktop.exe',
+    [string]$Executable = 'target/debug/desktop.exe',
     [string]$OutputDirectory = '.downloads/capture-ux-evaluations',
     [ValidateRange(1, 10)][int]$Runs = 3,
     [switch]$Build,
@@ -51,7 +51,7 @@ try {
         }
     }
 
-    if ($Build) { Invoke-RcrEvaluation 'build' 'cargo' @('build', '--offline', '-p', 'rcr-desktop', '-j1') }
+    if ($Build) { Invoke-RcrEvaluation 'build' 'cargo' @('build', '--offline', '-p', 'desktop', '-j1') }
     $rcrEvalExecutable = (Resolve-Path -LiteralPath $Executable).Path
     $rcrEvalSource = Join-Path $rcrEvalDirectory 'silent-source.mp4'
     Invoke-RcrEvaluation 'generate-silent-source' 'ffmpeg' @('-hide_banner', '-loglevel', 'error', '-n', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration=6', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-threads', '2', '-pix_fmt', 'yuv420p', $rcrEvalSource)
@@ -82,16 +82,16 @@ try {
         Invoke-RcrEvaluation 'editor-keyboard' $rcrEvalExecutable @('--smoke-editor-keyboard', '--open', $rcrEvalSources.aac) 'Editor keyboard smoke passed'
     }
     if (-not $SkipPixelBenchmarks) {
-        Invoke-RcrEvaluation 'hdr' 'cargo' @('test', '--offline', '-p', 'rcr-hdr', 'timing_cached_screenshot_pipeline', '--', '--ignored', '--nocapture', '--test-threads=1') 'HDR synthetic.*identical_pixels=true'
-        Invoke-RcrEvaluation 'png' 'cargo' @('test', '--offline', '-p', 'rcr-workflows', 'timing_screenshot_png_compression', '--', '--ignored', '--nocapture', '--test-threads=1') 'PNG synthetic.*identical_pixels=true'
-        Invoke-RcrEvaluation 'png-allocation' 'cargo' @('test', '--offline', '-p', 'rcr-image-types', 'timing_borrowed_png_encode', '--', '--ignored', '--nocapture', '--test-threads=1') 'avoided_pixel_allocation_bytes=.*identical_encoded_bytes=true'
-        Invoke-RcrEvaluation 'picker-handoff' 'cargo' @('test', '--offline', '-p', 'rcr-desktop', 'timing_picker_preparation_handoff', '--', '--ignored', '--nocapture', '--test-threads=1') 'new_ui_handle_handoff_ms='
+        Invoke-RcrEvaluation 'hdr' 'cargo' @('test', '--offline', '-p', 'hdr', 'timing_cached_screenshot_pipeline', '--', '--ignored', '--nocapture', '--test-threads=1') 'HDR synthetic.*identical_pixels=true'
+        Invoke-RcrEvaluation 'png' 'cargo' @('test', '--offline', '-p', 'workflows', 'timing_screenshot_png_compression', '--', '--ignored', '--nocapture', '--test-threads=1') 'PNG synthetic.*identical_pixels=true'
+        Invoke-RcrEvaluation 'png-allocation' 'cargo' @('test', '--offline', '-p', 'image-types', 'timing_borrowed_png_encode', '--', '--ignored', '--nocapture', '--test-threads=1') 'avoided_pixel_allocation_bytes=.*identical_encoded_bytes=true'
+        Invoke-RcrEvaluation 'picker-handoff' 'cargo' @('test', '--offline', '-p', 'desktop', 'timing_picker_preparation_handoff', '--', '--ignored', '--nocapture', '--test-threads=1') 'new_ui_handle_handoff_ms='
     }
     if (-not $SkipRecordingBenchmark) {
         $env:RCR_STOP_EVAL_OUTPUT = Join-Path $rcrEvalDirectory 'recording-stop.json'
-        Invoke-RcrEvaluation 'recording-stop' 'cargo' @('test', '--offline', '-p', 'rcr-desktop', 'quick_recording::stress_tests::generated_stop_latency_eval', '--', '--ignored', '--exact', '--nocapture', '--test-threads=1')
+        Invoke-RcrEvaluation 'recording-stop' 'cargo' @('test', '--offline', '-p', 'desktop', 'quick_recording::stress_tests::generated_stop_latency_eval', '--', '--ignored', '--exact', '--nocapture', '--test-threads=1')
         if (-not (Test-Path -LiteralPath $env:RCR_STOP_EVAL_OUTPUT)) { throw 'Missing recording metrics' }
-        Invoke-RcrEvaluation 'native-mux-finalization' 'cargo' @('run', '--offline', '-p', 'rcr-media-io', '--example', 'eval-finalization', '-j1', '--', (Join-Path $rcrEvalDirectory 'native-mux-finalization.json'))
+        Invoke-RcrEvaluation 'native-mux-finalization' 'cargo' @('run', '--offline', '-p', 'media-io', '--example', 'eval-finalization', '-j1', '--', (Join-Path $rcrEvalDirectory 'native-mux-finalization.json'))
     }
     # Local regression targets for this fixture/runtime, not hardware guarantees.
     $rcrEvalBudgets = @{

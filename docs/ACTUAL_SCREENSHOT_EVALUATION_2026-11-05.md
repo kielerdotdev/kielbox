@@ -25,10 +25,10 @@ No PNG or other screenshot pixels were written to disk; only bounded JSON metada
 
 ## Reproduction and verification boundary
 
-The standalone example is `crates/rcr-platform/examples/eval-capture.rs`. Build centrally and run only with authorization to capture the actual desktop:
+The standalone example is `crates/platform/examples/eval-capture.rs`. Build centrally and run only with authorization to capture the actual desktop:
 
 ```powershell
-cargo build -p rcr-platform --example eval-capture -j1
+cargo build -p platform --example eval-capture -j1
 target/debug/examples/eval-capture.exe --output <fresh-existing-parent>/capture-report.json
 ```
 

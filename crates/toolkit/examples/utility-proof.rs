@@ -1,5 +1,5 @@
 //! Local integration fixtures. No screenshots, clipboard access or network traffic.
-use rcr_toolkit::{
+use toolkit::{
     annotation as a,
     core::workflow::CancelToken,
     effects,
@@ -18,7 +18,7 @@ fn request(tool: Tool) -> Request {
     }
 }
 fn main() -> anyhow::Result<()> {
-    rcr_toolkit::utilities::with_pool(proof)?
+    toolkit::utilities::with_pool(proof)?
 }
 fn proof() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
@@ -88,9 +88,9 @@ fn proof() -> anyhow::Result<()> {
             "copy".into(),
             input.to_string_lossy().into_owned(),
         ];
-        let mut spec = rcr_toolkit::services::command::ProcessSpec::new("ffmpeg", &args);
+        let mut spec = toolkit::services::command::ProcessSpec::new("ffmpeg", &args);
         spec.capture_stderr = true;
-        let result = rcr_toolkit::services::command::run_process(&spec, &CancelToken::new())?;
+        let result = toolkit::services::command::run_process(&spec, &CancelToken::new())?;
         anyhow::ensure!(result.success, "Fixture trim failed: {}", result.stderr);
         for mode in 0..3 {
             let mut r = request(Tool::VideoConvert);
@@ -110,10 +110,10 @@ fn proof() -> anyhow::Result<()> {
                 "json".into(),
                 out.files[0].to_string_lossy().into_owned(),
             ];
-            let mut spec = rcr_toolkit::services::command::ProcessSpec::new("ffprobe", &args);
+            let mut spec = toolkit::services::command::ProcessSpec::new("ffprobe", &args);
             spec.capture_stdout = true;
             spec.capture_stderr = true;
-            let info = rcr_toolkit::services::command::run_process(&spec, &CancelToken::new())?;
+            let info = toolkit::services::command::run_process(&spec, &CancelToken::new())?;
             anyhow::ensure!(info.success, "ffprobe failed");
             let v: serde_json::Value = serde_json::from_slice(&info.stdout)?;
             let streams = v["streams"].as_array().unwrap();

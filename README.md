@@ -44,7 +44,7 @@ and a Windows SDK. The Rust version is pinned in `rust-toolchain.toml`.
 ```powershell
 git clone https://github.com/kielerdotdev/kielbox.git
 cd kielbox
-cargo run --locked -p rcr-desktop -j1
+cargo run --locked -p desktop -j1
 ```
 
 To build a packaged release:

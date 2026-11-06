@@ -24,7 +24,7 @@ The OBS guide is relevant to the wider product's separation of capture, saved ou
 
 **Regression:** `save_as_stages_replacement_and_preserves_original_on_disk_failure` injects a storage-full error after partial staging. It verifies that the original remains readable while staging, survives the failure byte-for-byte, temporary output is removed, a failed first save publishes nothing, and a later explicit replacement succeeds.
 
-**Files:** `crates/rcr-workflows/src/workflow/services.rs`, `crates/rcr-workflows/src/settings/io.rs`, and the test-only helper re-export in `settings/mod.rs`.
+**Files:** `crates/workflows/src/workflow/services.rs`, `crates/workflows/src/settings/io.rs`, and the test-only helper re-export in `settings/mod.rs`.
 
 **Limits:** this protects the publication boundary. It does not promise immunity to every filesystem or hardware failure. The replacement requires enough free space for a new staged copy, and readers on Windows can temporarily prevent replacement. A failed replacement returns an error rather than discarding the prior output.
 
@@ -40,7 +40,7 @@ The OBS guide is relevant to the wider product's separation of capture, saved ou
 - `canceled_native_capture_does_not_open_a_selector` verifies that a completed but canceled request cannot open a new selection UI.
 - `selector_returning_a_selection_after_cancel_does_not_persist_it` simulates a late selector reply and verifies that the previous Last region remains intact.
 
-**Files:** `crates/rcr-toolkit-services/src/capture.rs` and `crates/toolkit/src/worker.rs`.
+**Files:** `crates/toolkit-services/src/capture.rs` and `crates/toolkit/src/worker.rs`.
 
 **Limits:** native OS calls remain synchronous and cannot be forcibly interrupted through this API. The fix rejects their stale result once control returns. It does not claim instantaneous cancellation of a blocked driver or a transaction spanning every possible cancellation race.
 
@@ -52,7 +52,7 @@ The OBS guide is relevant to the wider product's separation of capture, saved ou
 
 **Regression:** `sparse_and_extreme_display_geometry_is_rejected_before_canvas_allocation` supplies only two 1×1 source frames and tests excessive width, excessive area, and opposite extreme integer coordinates. Existing gap, negative-origin, and mixed-format tests remain applicable.
 
-**File:** `crates/rcr-screenshot/src/composite.rs`.
+**File:** `crates/screenshot/src/composite.rs`.
 
 **Limits:** this bounds the stitched canvas, not the application's total memory. Native frame pools, source images, cursor variants, annotation history, and GPU uploads have separate allocations. A valid allocation below the cap can still fail on a memory-starved machine. Very large legitimate arrangements may require per-display capture.
 
@@ -81,8 +81,8 @@ These results do not establish hardware capture behavior. `git diff --check` als
 Relevant commands for central verification:
 
 ```powershell
-cargo test -p rcr-workflows -p rcr-toolkit-services -p rcr-screenshot -j1
-cargo test -p rcr-toolkit -j1
+cargo test -p workflows -p toolkit-services -p screenshot -j1
+cargo test -p toolkit -j1
 ```
 
 Repeatable earlier synthetic performance evaluations are available through `scripts/evaluate-capture-ux.ps1`, including HDR conversion, PNG compression tradeoffs, borrowed encoding, and picker preparation. Those measurements exclude native capture, compositor scheduling, GPU upload, and user-perceived completion latency. Compare decoded pixels and output sizes as well as wall time; do not convert a pixel-kernel speedup into an end-to-end capture claim.
@@ -121,7 +121,7 @@ The next concrete screenshot candidate was malformed selection-mask handling. It
 
 **Regressions:** `malformed_masks_fail_capture_without_publishing_unmasked_pixels_or_changing_last_region` covers empty, short, long, and incorrectly clipped masks. Every case must return an error, preserve the prior persisted region, and leave only the prior region file on disk. `invalid_mask_geometry_is_rejected_before_modifying_source_pixels` tests out-of-bounds geometry, mismatched output dimensions, and extreme original dimensions using tiny synthetic frames. `a_mask_is_cropped_with_a_clipped_selection` now checks every output pixel against the expected frozen source or transparent black.
 
-**File:** `crates/rcr-toolkit-services/src/capture.rs`.
+**File:** `crates/toolkit-services/src/capture.rs`.
 
 Validation status: Wave 2 **passes**. All 18 capture tests passed, followed by the
 complete toolkit services suite (**87 passed**). Screenshot **4**, toolkit **48**
@@ -160,7 +160,7 @@ The subsequent D2 disk-cache ownership work is documented separately in [the see
 
 For example, two 8K SDR sources plus their canvas total 530,841,600 payload bytes and fit below 512 MiB. Their HDR equivalents require 663,552,000 bytes at the first conversion peak and are rejected before a native batch call. Normal HDR/SDR conversion remains pixel-identical; the code does not reduce resolution or change tone-map settings to meet the budget.
 
-**Files:** `crates/rcr-platform/src/source.rs`, its focused `capture_budget.rs` helper, and shared layout-limit exports in `crates/rcr-screenshot/src/{composite,lib}.rs`.
+**Files:** `crates/platform/src/source.rs`, its focused `capture_budget.rs` helper, and shared layout-limit exports in `crates/screenshot/src/{composite,lib}.rs`.
 
 **Regressions:** fake call counters verify that excessive single-monitor dimensions, sparse extreme coordinates, and an excessive HDR batch/conversion peak fail before any native capture call. Positive cases cover ordinary mixed HDR/SDR geometry, the two-8K-SDR boundary, and exact small-source pixels/metadata. Checked-arithmetic tests cover 512 MiB boundaries and overflow without allocating giant buffers.
 

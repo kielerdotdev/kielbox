@@ -1,5 +1,5 @@
 [package]
-name = "rcr-desktop"
+name = "desktop"
 version.workspace = true
 edition = "2024"
 license = "GPL-3.0-or-later"
@@ -11,9 +11,9 @@ serde_json.workspace = true
 serde.workspace = true
 tempfile = "3"
 sha2 = "0.10"
-rcr-media-core = { path = "../media-core" }
-rcr-toolkit = { path = "../toolkit" }
-rcr-editor-core = { path = "../editor-core" }
+media-core = { path = "../media-core" }
+toolkit = { path = "../toolkit" }
+editor-core = { path = "../editor-core" }
 image = { version = "0.25", default-features = false }
 unicode-segmentation = "1.12"
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
@@ -22,10 +22,10 @@ gpui = { version = "=0.2.2", default-features = false, features = ["windows-mani
 raw-window-handle = "0.6"
 tray-icon = { version = "0.24", default-features = false }
 windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem", "Win32_System_Power"] }
-rcr-windows = { path = "../windows-capture" }
-rcr-recording-tools = { path = "../rcr-recording-tools", default-features = false, features = ["audio"] }
-rcr-screenshot.workspace = true
-rcr-screenshot-windows.workspace = true
+windows-capture = { path = "../windows-capture" }
+recording-tools = { path = "../recording-tools", default-features = false, features = ["audio"] }
+screenshot.workspace = true
+screenshot-windows.workspace = true
 
 [dev-dependencies]
-rcr-media-io = { path = "../media-io" }
+media-io = { path = "../media-io" }

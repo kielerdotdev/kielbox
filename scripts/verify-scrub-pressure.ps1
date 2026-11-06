@@ -12,7 +12,7 @@ param(
     [string]$ReuseSeekCache = '',
     [ValidateSet(1, 2)][int]$ProxyThreads = 1,
     [ValidateSet('frame', 'slice')][string]$ProxyThreadType = 'frame',
-    [string]$Executable = 'target/debug/rcr-desktop.exe'
+    [string]$Executable = 'target/debug/desktop.exe'
 )
 $ErrorActionPreference = 'Stop'
 if ($DisableProxy -and -not $Cold) { throw 'Use -Cold when disabling proxy preparation.' }

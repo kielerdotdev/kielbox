@@ -6,15 +6,15 @@ Push-Location -LiteralPath $workspace
 try {
     & cargo test --locked -j1
     if ($LASTEXITCODE -ne 0) { throw 'Application workspace tests failed.' }
-    & cargo test --locked -p rcr-workflows -p rcr-image-editor -p rcr-image-effects -p rcr-upload -j1
+    & cargo test --locked -p workflows -p image-editor -p image-effects -p upload -j1
     if ($LASTEXITCODE -ne 0) { throw 'Screenshot and workflow tests failed.' }
-    & cargo build -p rcr-windows -j1
+    & cargo build -p windows-capture -j1
     if ($LASTEXITCODE -ne 0) { throw 'Capture build failed.' }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $output = Join-Path $workspace "recordings/verify-$stamp.mkv"
     $replay = Join-Path $workspace "recordings/verify-$stamp-replay.mkv"
     $sources = if ($Audio) { 'system,mic' } else { 'none' }
-    & ./target/debug/rcr-capture.exe --seconds 6 --output $output --audio $sources --save-at 3 --save-replay $replay
+    & ./target/debug/capture.exe --seconds 6 --output $output --audio $sources --save-at 3 --save-replay $replay
     if ($LASTEXITCODE -ne 0) { throw 'Native recording/replay proof failed.' }
     $rcrStatsProbe = & ffprobe -v error -show_entries format_tags=_RCR_METADATA -of json $output
     if ($LASTEXITCODE -ne 0) { throw 'Embedded statistics probe failed.' }

@@ -6,7 +6,7 @@ use crate::{
     theme::*,
 };
 use gpui::{prelude::*, *};
-use rcr_toolkit::{
+use ::toolkit::{
     core::{
         settings::{InputKind, Paths},
         workflow::{CaptureTarget, Event as Progress, Outcome, RunReport, StepKind, StepStatus},
@@ -29,14 +29,14 @@ pub enum ToolkitEvent {
 type CaptureSmoke = (
     WindowHandle<crate::capture_overlay::CaptureOverlay>,
     usize,
-    mpsc::Receiver<Option<rcr_toolkit::worker::OverlayResult>>,
+    mpsc::Receiver<Option<::toolkit::worker::OverlayResult>>,
     Option<[u8; 32]>,
 );
-type StandaloneSmoke = (u8, mpsc::Receiver<Option<rcr_toolkit::worker::StandaloneImage>>, Option<[u8; 32]>);
+type StandaloneSmoke = (u8, mpsc::Receiver<Option<::toolkit::worker::StandaloneImage>>, Option<[u8; 32]>);
 pub struct Toolkit {
     quick_recorder: Entity<crate::quick_recorder::QuickRecorder>,
     capture_extras: bool,
-    capture_requests: Vec<(CaptureTarget, rcr_toolkit::worker::ScreenshotOptions)>,
+    capture_requests: Vec<(CaptureTarget, ::toolkit::worker::ScreenshotOptions)>,
     capture_probe: Option<crate::quick_recorder::menu_proof::Probe>,
     smoke_image_refs: Vec<std::sync::Weak<RenderImage>>,
     shell_operation: u64,
@@ -54,9 +54,9 @@ pub struct Toolkit {
     utilities: Entity<crate::utilities::Utilities>,
     disk_usage: Entity<crate::disk_usage::DiskUsageView>,
     editing: bool,
-    reply: Option<mpsc::SyncSender<Option<rcr_toolkit::types::Frame>>>,
-    standalone_reply: Option<mpsc::SyncSender<Option<rcr_toolkit::worker::StandaloneImage>>>,
-    edit_cancel: Option<rcr_toolkit::core::workflow::CancelToken>,
+    reply: Option<mpsc::SyncSender<Option<::toolkit::types::Frame>>>,
+    standalone_reply: Option<mpsc::SyncSender<Option<::toolkit::worker::StandaloneImage>>>,
+    edit_cancel: Option<::toolkit::core::workflow::CancelToken>,
     edit: bool,
     upload: bool,
     query: Entity<TextInput>,
@@ -76,9 +76,9 @@ impl Toolkit {
     pub fn snapshot_surface(&mut self, route: &str, cx: &mut Context<Self>) -> bool {
         if route == "tools-history-fixture" { return self.seed_history_fixture(cx); }
         let effect = match route {
-            "tools-image-blur" => Some(rcr_toolkit::annotation::Tool::Blur),
-            "tools-image-pixelate" => Some(rcr_toolkit::annotation::Tool::Pixelate),
-            "tools-image-magnifier" => Some(rcr_toolkit::annotation::Tool::Magnify),
+            "tools-image-blur" => Some(::toolkit::annotation::Tool::Blur),
+            "tools-image-pixelate" => Some(::toolkit::annotation::Tool::Pixelate),
+            "tools-image-magnifier" => Some(::toolkit::annotation::Tool::Magnify),
             _ => None,
         };
         if let Some(tool) = effect {
@@ -193,11 +193,11 @@ impl Toolkit {
             crate::screen_tools::smoke(cx)?;
             let (tx, rx) = mpsc::sync_channel(1);
             let overlay = crate::capture_overlay::open(
-                rcr_toolkit::effects::solid_frame(1280, 720, [35, 50, 70, 255]),
+                ::toolkit::effects::solid_frame(1280, 720, [35, 50, 70, 255]),
                 true,
                 false,
                 tx,
-                rcr_toolkit::core::workflow::CancelToken::new(),
+                ::toolkit::core::workflow::CancelToken::new(),
                 false,
                 cx,
             )?;
@@ -207,7 +207,7 @@ impl Toolkit {
         }
         view.update(cx, |this, cx| -> anyhow::Result<bool> {
             use sha2::Digest;
-            use rcr_toolkit::worker::{OverlayAction, OverlayCompletion};
+            use ::toolkit::worker::{OverlayAction, OverlayCompletion};
             let (handle, step, rx, digest) = this.smoke_capture.as_mut()
                 .ok_or_else(|| anyhow::anyhow!("Missing capture overlay"))?;
             let completed = crate::capture_overlay::CaptureOverlay::SMOKE_STAGES;
@@ -226,7 +226,7 @@ impl Toolkit {
                 let hash: [u8; 32] = sha2::Sha256::digest(result.frame.data()).into();
                 if *step == completed {
                     anyhow::ensure!(result.action == OverlayAction::Copy, "Wrong initial overlay action");
-                    anyhow::ensure!(result.frame.data() != rcr_toolkit::effects::solid_frame(
+                    anyhow::ensure!(result.frame.data() != ::toolkit::effects::solid_frame(
                         result.frame.width(), result.frame.height(), [35, 50, 70, 255]).data(), "Annotation missing from copied crop");
                     *digest = Some(hash);
                     result.completion.try_send(OverlayCompletion::Failed("Synthetic clipboard busy. Your annotated capture remains open.".into()))?;
@@ -255,16 +255,16 @@ impl Toolkit {
     }
     fn smoke_standalone(view: Entity<Self>, window: &mut Window, cx: &mut App) -> anyhow::Result<bool> {
         use sha2::Digest;
-        use rcr_toolkit::worker::StandaloneCompletion;
+        use ::toolkit::worker::StandaloneCompletion;
         if view.read(cx).smoke_standalone.is_none() {
             let (tx, rx) = mpsc::sync_channel(1);
             view.update(cx, |this, cx| -> anyhow::Result<()> {
                 this.smoke_standalone = Some((0, rx, None));
                 this.standalone_reply = Some(tx);
-                this.edit_cancel = Some(rcr_toolkit::core::workflow::CancelToken::new());
+                this.edit_cancel = Some(::toolkit::core::workflow::CancelToken::new());
                 this.editing = true;
                 this.editor.update(cx, |editor, cx| editor.smoke_open_standalone(
-                    rcr_toolkit::image_editor::Source::Image(rcr_toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255])), cx))?;
+                    ::toolkit::image_editor::Source::Image(::toolkit::effects::solid_frame(320, 180, [235, 240, 245, 255])), cx))?;
                 cx.notify();
                 Ok(())
             })?;
@@ -360,7 +360,7 @@ impl Toolkit {
                     let Some(frame) = this.editor.update(cx, |editor, _| editor.take_accepted()) else { return; };
                     if let Some(reply) = &this.standalone_reply {
                         let completed = this.editor.update(cx, |editor, cx| editor.completion_channel(cx));
-                        if reply.try_send(Some(rcr_toolkit::worker::StandaloneImage { frame, completion: completed })).is_err() {
+                        if reply.try_send(Some(::toolkit::worker::StandaloneImage { frame, completion: completed })).is_err() {
                             this.editor.update(cx, |editor, cx| editor.finish_failed("The save workflow is no longer available. Your edits remain open.".into(), cx));
                         }
                         cx.notify();
@@ -451,7 +451,7 @@ impl Toolkit {
         self.quick_recorder.update(cx, |recorder, _| recorder.set_probe(probe.clone()));
         self.capture_probe = Some(probe); self.pane = 0; cx.notify();
     }
-    pub(crate) fn capture_requests(&self) -> &[(CaptureTarget, rcr_toolkit::worker::ScreenshotOptions)] { &self.capture_requests }
+    pub(crate) fn capture_requests(&self) -> &[(CaptureTarget, ::toolkit::worker::ScreenshotOptions)] { &self.capture_requests }
     pub(crate) fn capture_menu_ready(&self) -> bool { self.snapshot.is_some() && self.error.is_none() }
     pub fn screen_utility(
         &mut self,
@@ -464,7 +464,7 @@ impl Toolkit {
             .update(cx, |this, cx| this.screen_tool(mode, window, cx));
         cx.notify();
     }
-    pub fn utility(&mut self, tool: Option<rcr_toolkit::utilities::Tool>, cx: &mut Context<Self>) {
+    pub fn utility(&mut self, tool: Option<::toolkit::utilities::Tool>, cx: &mut Context<Self>) {
         self.pane = 5;
         if let Some(tool) = tool {
             self.utilities
@@ -600,7 +600,7 @@ impl Toolkit {
                         let _ = reply.try_send(None);
                         continue;
                     }
-                    let desktop = rcr_toolkit::types::Rect::new(frame.origin.x, frame.origin.y, frame.width(), frame.height());
+                    let desktop = ::toolkit::types::Rect::new(frame.origin.x, frame.origin.y, frame.width(), frame.height());
                     // Freeze the native target geometry before creating our own
                     // overlay. Enumeration is bounded and never blocks UI input.
                     let (targets_tx, targets_rx) = async_channel::bounded(1);
@@ -746,7 +746,7 @@ impl Toolkit {
                             let failures = report
                                 .all_steps()
                                 .filter_map(|s| {
-                                    if let rcr_toolkit::core::workflow::StepStatus::Failed(f) =
+                                    if let ::toolkit::core::workflow::StepStatus::Failed(f) =
                                         &s.status
                                     {
                                         Some(f.message.clone())
@@ -829,7 +829,7 @@ impl Toolkit {
         })
         .detach();
     }
-    fn save(&mut self, settings: rcr_toolkit::core::settings::Settings, cx: &mut Context<Self>) {
+    fn save(&mut self, settings: ::toolkit::core::settings::Settings, cx: &mut Context<Self>) {
         self.submit(Action::SaveSettings(Box::new(settings)), cx);
     }
     fn home(&self, cx: &mut Context<Self>) -> Div {
@@ -962,7 +962,7 @@ impl Toolkit {
                 .child("Screenshot & sharing settings"),
         );
         if let Some(snapshot) = &self.snapshot {
-            root=root.child(panel().child("Screenshot format").child(div().flex().gap_2().children([("PNG",rcr_toolkit::core::settings::ImageFormatKind::Png),("JPEG",rcr_toolkit::core::settings::ImageFormatKind::Jpg),("WebP",rcr_toolkit::core::settings::ImageFormatKind::Webp)].into_iter().enumerate().map(|(i,(name,format))|button(("screenshot-format",i),name).bg(rgb(if snapshot.settings.general.image_format==format{0x173025}else{SOFT})).on_click(cx.listener(move|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.image_format=format;this.save(settings,cx);}})))))
+            root=root.child(panel().child("Screenshot format").child(div().flex().gap_2().children([("PNG",::toolkit::core::settings::ImageFormatKind::Png),("JPEG",::toolkit::core::settings::ImageFormatKind::Jpg),("WebP",::toolkit::core::settings::ImageFormatKind::Webp)].into_iter().enumerate().map(|(i,(name,format))|button(("screenshot-format",i),name).bg(rgb(if snapshot.settings.general.image_format==format{0x173025}else{SOFT})).on_click(cx.listener(move|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.image_format=format;this.save(settings,cx);}})))))
                 .child(div().flex().items_center().justify_between().child("Include cursor").child(toggle("screenshot-cursor",snapshot.settings.capture.show_cursor).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.show_cursor= !settings.capture.show_cursor;this.save(settings,cx);}})))))
                 .child(panel().child("Filename pattern").child(self.pattern.clone()).child(button("save-screenshot-pattern","Save naming pattern").on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.file_name_pattern=this.pattern.read(cx).value();this.save(settings,cx);}}))))
                 .child(panel().child("Save folder").child(mono(snapshot.settings.general.resolve_save_dir().display().to_string())).child(button("screenshot-folder","Change").on_click(cx.listener(|_,_,window,cx|{
@@ -970,7 +970,7 @@ impl Toolkit {
                     cx.spawn_in(window,async move|view,cx|{if let Ok(Ok(Some(paths)))=selected.await&&let Some(path)=paths.into_iter().next(){let _=view.update(cx,|this,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.save_dir=Some(path);this.save(settings,cx);}});}}).detach();
                 }))))
                 .child(panel().child("HDR tone mapping").child(muted("RCR converts each HDR display before stitching it with SDR displays."))
-                    .child(button("toggle-highlight-preservation",if snapshot.settings.capture.hdr.knee>=0.99{"Faithful SDR whites"}else{"Preserve highlight detail"}).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.hdr=if settings.capture.hdr.knee>=0.99{rcr_toolkit::core::settings::HdrConfig::preserve_highlights()}else{rcr_toolkit::core::settings::HdrConfig::faithful()};this.save(settings,cx);}}))))
+                    .child(button("toggle-highlight-preservation",if snapshot.settings.capture.hdr.knee>=0.99{"Faithful SDR whites"}else{"Preserve highlight detail"}).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.hdr=if settings.capture.hdr.knee>=0.99{::toolkit::core::settings::HdrConfig::preserve_highlights()}else{::toolkit::core::settings::HdrConfig::faithful()};this.save(settings,cx);}}))))
                 .child(panel().child("Advanced toolbox configuration").child(muted("All imported uploader, workflow, naming and post-upload settings remain available in this file. Secrets use the system keyring."))
                     .child(button("open-toolkit-config","Edit settings.toml").on_click({let path=snapshot.config_path.clone();move|_,_,_|{let _=std::process::Command::new("notepad.exe").arg(&path).spawn();}}))
                     .child(button("reload-toolkit-config","Reload settings").on_click(cx.listener(|this,_,_,cx|{this.submit(Action::Refresh,cx);}))));

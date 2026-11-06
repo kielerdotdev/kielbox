@@ -1,7 +1,7 @@
 //! Remux one supplied AV1 keyframe plus synthetic audio; never captures devices.
 use anyhow::{Context, Result, ensure};
-use rcr_media_core::{AudioTrack, MediaPacket, PipelineStats, VideoConfig};
-use rcr_media_io::{MatroskaWriter, save_snapshot};
+use media_core::{AudioTrack, MediaPacket, PipelineStats, VideoConfig};
+use media_io::{MatroskaWriter, save_snapshot};
 use std::path::PathBuf;
 
 fn main() -> Result<()> {

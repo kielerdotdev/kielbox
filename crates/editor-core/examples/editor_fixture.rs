@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rcr_editor_core::*;
+use editor_core::*;
 use std::{path::PathBuf, sync::atomic::Ordering};
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();

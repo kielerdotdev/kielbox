@@ -1,6 +1,6 @@
 //! Full-database history search with bounded, replaceable worker requests.
 use super::*;
-use rcr_toolkit::worker::{HISTORY_PAGE_SIZE, HistoryPage, HistorySearch};
+use ::toolkit::worker::{HISTORY_PAGE_SIZE, HistoryPage, HistorySearch};
 use std::{cell::RefCell, collections::{BTreeMap, BTreeSet}, rc::Rc, sync::Arc};
 
 type Probe = Rc<RefCell<BTreeMap<usize, Bounds<Pixels>>>>;
@@ -196,7 +196,7 @@ impl Toolkit {
             rows = rows.child(div().w_full().min_w_0().h(px(56.)).px_3().py_2().border_b_1().border_color(rgb(LINE))
                 .flex().flex_shrink_0().flex_row().items_center().gap_3()
                 .when_some(state.probe.clone(), |s, probe| s.relative().child(measure(probe, 100 + entry.id as usize)))
-                .child(icon(if entry.kind == rcr_toolkit::core::history::EntryKind::Video { "film" } else { "folder" }))
+                .child(icon(if entry.kind == ::toolkit::core::history::EntryKind::Video { "film" } else { "folder" }))
                 .child(div().id(("history-label", entry.id as usize)).flex_1().min_w_0().flex().flex_col().gap_1().overflow_hidden()
                     .tooltip(move |_, cx| cx.new(|_| HistoryTip(tooltip.clone())).into())
                     .child(div().w_full().min_w_0().overflow_hidden().whitespace_nowrap().child(name))
@@ -247,11 +247,11 @@ pub struct HistorySmoke {
     focus: Option<FocusHandle>,
     status: String,
     catalog: Vec<i64>,
-    database: Option<Arc<rcr_toolkit::core::history::History>>,
+    database: Option<Arc<::toolkit::core::history::History>>,
 }
 
-fn fixture_database() -> anyhow::Result<Arc<rcr_toolkit::core::history::History>> {
-    use rcr_toolkit::core::history::{EntryKind, History, NewEntry};
+fn fixture_database() -> anyhow::Result<Arc<::toolkit::core::history::History>> {
+    use ::toolkit::core::history::{EntryKind, History, NewEntry};
     let history = Arc::new(History::open_in_memory()?);
     for i in 0..257 {
         let mut entry = NewEntry::new(EntryKind::Image);
@@ -427,7 +427,7 @@ impl Toolkit {
                     "Filtered history replaced the Library catalog feed");
                 // Simulate a capture completing while another Tools pane is open.
                 view.update(cx, |this, cx| { this.pane = 0; cx.notify(); });
-                let mut entry = rcr_toolkit::core::history::NewEntry::new(rcr_toolkit::core::history::EntryKind::Image);
+                let mut entry = ::toolkit::core::history::NewEntry::new(::toolkit::core::history::EntryKind::Image);
                 entry.local_path = Some(PathBuf::from("oldest-new-capture.png")); entry.created_at = 300;
                 state.database.as_ref().unwrap().insert(&entry)?;
                 view.update(cx, |this, cx| { this.history_changed(cx); this.pane = 3; cx.notify(); });
@@ -436,7 +436,7 @@ impl Toolkit {
             }
             6 => {
                 ensure!(view.read(cx).history_ui.page.as_ref().unwrap().total == 2, "Returning to History missed a capture saved on another pane");
-                let mut entry = rcr_toolkit::core::history::NewEntry::new(rcr_toolkit::core::history::EntryKind::Image);
+                let mut entry = ::toolkit::core::history::NewEntry::new(::toolkit::core::history::EntryKind::Image);
                 entry.local_path = Some(PathBuf::from("oldest-external-capture.png")); entry.created_at = 301;
                 state.database.as_ref().unwrap().insert(&entry)?;
                 key(window, cx, "f5");

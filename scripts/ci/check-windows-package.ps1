@@ -49,7 +49,7 @@ function Invoke-KielboxPackagedCommand([string]$Executable, [string]$Argument, [
     } finally { $kielboxProcess.Dispose() }
 }
 
-$kielboxHelp = Invoke-KielboxPackagedCommand 'rcr-clean.exe' '--help' 'cleanup-help'
+$kielboxHelp = Invoke-KielboxPackagedCommand 'clean.exe' '--help' 'cleanup-help'
 if ($kielboxHelp.exit_code -ne 0 -or $kielboxHelp.stdout -notmatch 'Usage:') { throw 'Packaged cleanup CLI did not return help.' }
 $kielboxDoctor = Invoke-KielboxPackagedCommand 'rcr.exe' '--diagnose' 'diagnose'
 # Hosted runners need not have NVIDIA hardware or optional FFmpeg. Exit 1 is a

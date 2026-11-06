@@ -1,5 +1,5 @@
 //! Exercise the exact screenshot service used by GPUI without copying to the clipboard.
-use rcr_toolkit::{
+use toolkit::{
     core::{
         settings::{Paths, Settings},
         workflow::{CancelToken, CaptureRequest, CaptureTarget, Capturer},
@@ -9,7 +9,7 @@ use rcr_toolkit::{
 fn main() -> anyhow::Result<()> {
     let startup = std::env::args().any(|arg| arg == "--startup");
     if startup {
-        use rcr_toolkit::types::{ColorSpace, Frame, PixelFormat, Size};
+        use toolkit::types::{ColorSpace, Frame, PixelFormat, Size};
         let mut frame = Frame::new(Size::new(5120, 1440), PixelFormat::Bgra8, ColorSpace::Srgb);
         let started = std::time::Instant::now();
         frame.set_opaque();
@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         );
         if startup {
             let started = std::time::Instant::now();
-            let actor = rcr_toolkit::image_editor::Actor::desktop(result.frame)?;
+            let actor = toolkit::image_editor::Actor::desktop(result.frame)?;
             loop {
                 if let Some(preview) = actor.take_preview() {
                     println!(

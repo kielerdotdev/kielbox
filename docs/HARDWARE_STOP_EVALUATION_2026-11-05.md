@@ -51,7 +51,7 @@ The first resumed `desktop-short/` run had `preview_draws=0`. It remains preserv
 
 There were no preview errors; the owned host viewport was 1440×900. Production Stop handler execution was 0.005–0.023 ms, finishing-state drawing 1.56–2.04 ms. The real worker had retired, the saved file existed and the refreshed Library contained it before success. Both 60-second files contain 121 distinct sampled images and decode all 3,604 frames. The few frames beyond a nominal 60 seconds reflect the UI timer/33 ms poll measurement schedule, not missing or fabricated source frames.
 
-The strict Desktop aggregates are `desktop-preview-fixed/desktop-evaluation.json` and `desktop-long/desktop-evaluation.json`, both with `success=true`. Their tested executable is `target/debug/rcr-desktop.exe`, SHA-256 `E6755412BCCD14EF211B0AE4011F1D51C6255FA4E5D8BB384FEFD026C8C9AF86`. These measurements use the production Stop handler and GPU submission through a hidden window; they do not include physical mouse dispatch latency or prove monitor scanout.
+The strict Desktop aggregates are `desktop-preview-fixed/desktop-evaluation.json` and `desktop-long/desktop-evaluation.json`, both with `success=true`. Their tested executable is `target/debug/desktop.exe`, SHA-256 `E6755412BCCD14EF211B0AE4011F1D51C6255FA4E5D8BB384FEFD026C8C9AF86`. These measurements use the production Stop handler and GPU submission through a hidden window; they do not include physical mouse dispatch latency or prove monitor scanout.
 
 ## Earlier locked-session attempts
 
@@ -99,7 +99,7 @@ The second existing-file validation is expected to return nonzero with `blocked_
 For a future explicitly available, unlocked/active-display test session:
 
 ```powershell
-cargo build --locked -p rcr-windows --example hardware-stop-eval -j1
+cargo build --locked -p windows-capture --example hardware-stop-eval -j1
 python scripts/eval-hardware-recording-stop.py --output .downloads/hardware-stop-unlocked-new --seconds 6,60 --audio none,system --scenarios continuous,replay-on-stop,record-and-replay,replay-save-near-stop --render-silence
 
 # Actual Desktop Stop/controller/preview/Library gate, with the same authorization.

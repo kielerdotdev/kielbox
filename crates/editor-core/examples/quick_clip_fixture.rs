@@ -1,6 +1,6 @@
 //! End-to-end quick clip checks. Uses a synthetic two-tone recording, no UI automation.
 use anyhow::{ensure, Context, Result};
-use rcr_editor_core::*;
+use editor_core::*;
 use std::{path::PathBuf, time::Duration};
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();

@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory)][string]$Recording,
-    [string]$Executable = 'target/debug/rcr-desktop.exe',
+    [string]$Executable = 'target/debug/desktop.exe',
     [string]$ReuseSeekCache = '',
     [ValidateSet('1440x900','2560x1440')][string]$WindowSize = '2560x1440'
 )

@@ -954,13 +954,13 @@ impl Library {
                         }
                         continue;
                     }
-                    let asset = rcr_editor_core::probe_cancellable(&path, cancelled).ok();
+                    let asset = editor_core::probe_cancellable(&path, cancelled).ok();
                     let duration = asset.as_ref().map_or(0., |a| a.duration_ns as f64 / 1e9);
                     let detail = asset.as_ref().map_or_else(String::new, |a| {
                         let audio = a
                             .streams
                             .iter()
-                            .filter(|s| s.kind == rcr_editor_core::TrackKind::Audio)
+                            .filter(|s| s.kind == editor_core::TrackKind::Audio)
                             .count();
                         format!(
                             "{} × {} · {} audio track{}",
@@ -971,7 +971,7 @@ impl Library {
                         )
                     });
                     let image = asset
-                        .and_then(|a| rcr_editor_core::thumbnail_cancellable(&a, 0.2, (320, 180), cancelled).ok())
+                        .and_then(|a| editor_core::thumbnail_cancellable(&a, 0.2, (320, 180), cancelled).ok())
                         .and_then(|f| image::RgbaImage::from_raw(f.width, f.height, f.bgra))
                         .map(|b| {
                             if let Some(cache) = &cache && !cancelled() {

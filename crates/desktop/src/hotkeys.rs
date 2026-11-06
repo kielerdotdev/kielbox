@@ -143,7 +143,7 @@ pub enum Event {
     ToggleReplay,
     SaveReplay,
     ToggleRecord,
-    Screenshot(rcr_toolkit::core::workflow::CaptureTarget),
+    Screenshot(::toolkit::core::workflow::CaptureTarget),
     Notice(String),
 }
 pub struct Hotkeys {
@@ -162,7 +162,7 @@ impl Hotkeys {
         let (tx, events) = mpsc::sync_channel(16);
         let (ready, initialized) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
-            .name("rcr-hotkeys".into())
+            .name("hotkeys".into())
             .spawn(move || unsafe {
                 // Create the message queue before publishing this thread's ID.
                 let mut message = MSG::default();
@@ -204,9 +204,9 @@ impl Hotkeys {
                                 1 => Event::ToggleReplay,
                                 2 => Event::SaveReplay,
                                 3 => Event::ToggleRecord,
-                                4 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Region),
-                                5 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Fullscreen),
-                                6 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Window),
+                                4 => Event::Screenshot(::toolkit::core::workflow::CaptureTarget::Region),
+                                5 => Event::Screenshot(::toolkit::core::workflow::CaptureTarget::Fullscreen),
+                                6 => Event::Screenshot(::toolkit::core::workflow::CaptureTarget::Window),
                                 7 => Event::ToggleQuickRecord,
                                 _ => continue,
                             };

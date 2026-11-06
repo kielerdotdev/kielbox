@@ -1,7 +1,7 @@
 fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     {
-        rcr_windows::pipeline::cli()
+        windows_capture::pipeline::cli()
     }
     #[cfg(not(windows))]
     {

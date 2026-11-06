@@ -1,7 +1,7 @@
 //! Frozen-desktop sampling/ruler overlays and independent pinned image/monitor windows.
 use crate::{image_editor::render_image, theme::*};
 use gpui::{prelude::*, *};
-use rcr_toolkit::{
+use ::toolkit::{
     core::workflow::{CancelToken, CaptureRequest, CaptureTarget, Capturer},
     services::{LastRegionStore, ScreenCapturer},
     types::Frame,
@@ -168,10 +168,10 @@ impl Screen {
                 .min(self.frame.height() - 1),
         )
     }
-    fn rect(&self) -> rcr_toolkit::types::Rect {
+    fn rect(&self) -> ::toolkit::types::Rect {
         let a = self.start.unwrap_or(self.end);
         let b = self.end;
-        rcr_toolkit::types::Rect::new(
+        ::toolkit::types::Rect::new(
             a.0.min(b.0) as i32,
             a.1.min(b.1) as i32,
             a.0.abs_diff(b.0) + 1,
@@ -316,11 +316,11 @@ pub fn pin(frame: Arc<Frame>, cx: &mut App) -> anyhow::Result<()> {
             .spawn(async move {
                 utilities::with_pool(|| {
                     let (w, h) = utilities::fit(frame.width(), frame.height(), 8192, 8192);
-                    let frame = rcr_toolkit::effects::resize(
+                    let frame = ::toolkit::effects::resize(
                         &frame,
                         w,
                         h,
-                        rcr_toolkit::effects::ResizeFilter::Bilinear,
+                        ::toolkit::effects::ResizeFilter::Bilinear,
                     )?;
                     let mut bgra = frame.into_data();
                     for p in bgra.as_chunks_mut::<4>().0 {
@@ -503,7 +503,7 @@ impl Render for Monitor {
 /// Native synthetic input/paint only: never captures the desktop or writes the clipboard.
 pub fn smoke(cx: &mut App) -> anyhow::Result<()> {
     for mode in [Mode::Color, Mode::Ruler, Mode::Pin] {
-        let f = rcr_toolkit::effects::solid_frame(640, 360, [12, 34, 56, 255]);
+        let f = ::toolkit::effects::solid_frame(640, 360, [12, 34, 56, 255]);
         let mut bytes = f.data().to_vec();
         for p in bytes.as_chunks_mut::<4>().0 {
             p.swap(0, 2);

@@ -185,7 +185,7 @@ impl Proof {
     ) -> anyhow::Result<bool> {
         if self.stage == 10 { return Ok(true); }
         if self.stage == 0 {
-            ensure!(matches!(view.read(cx).preview_output, rcr_editor_core::PlaybackOutput::Silent),
+            ensure!(matches!(view.read(cx).preview_output, editor_core::PlaybackOutput::Silent),
                 "Native fullscreen proof requires Silent playback");
             ensure!(!window.is_fullscreen(), "Native fullscreen proof must start windowed");
             self.history = Some(view.update(cx, |editor, _| history(&mut editor.model))?);

@@ -370,7 +370,7 @@ capture/record/save/discard workflow proof passed without Computer Use or device
 capture. Desktop all-target Clippy with `--no-deps -- -D warnings` passed.
 
 Final rendered PNGs were visually inspected under `.downloads/capture-alignment-final/`.
-The development build is `dist/windows-dev/rcr-capture-aligned.exe`, SHA-256
+The development build is `dist/windows-dev/capture-aligned.exe`, SHA-256
 `085629AF3A6DE18F56A1C154AB0DC5617428497DA448CCD555CDAC18DCF49F65`.
 Its debug GPUI shaders still require this checkout.
 
@@ -409,7 +409,7 @@ the result. Screencasts still have their own WGC/FFmpeg worker and replay isolat
   Studio screen and overlay were visually inspected. No Computer Use, desktop or
   audio-device capture, clipboard output or messaging occurred during this pass.
 
-The build is staged as `dist/windows-dev/rcr-desktop-picker.exe`, SHA-256
+The build is staged as `dist/windows-dev/desktop-picker.exe`, SHA-256
 `5DD088D6F8DD39BA6A08D452FE17A907F29D5FD9C7913437DDD2222151C72D6E`.
 It remains a development build whose GPUI shaders require this checkout. A full
 drive interrupted linking; superseded generated test executables/symbols and the
@@ -443,7 +443,7 @@ shows an active screencast in red even when game replay is off.
   ID and per-job pointer option; normal workflow preferences are preserved.
 
 The current running `dist/windows-dev/rcr.exe` was locked, so the updated build is
-staged alongside it as `dist/windows-dev/rcr-capture-ui.exe`, SHA-256
+staged alongside it as `dist/windows-dev/capture-ui.exe`, SHA-256
 `96932713F7E04CA6E50160270EF250DC43DE945CA7EDA86745A3368B969C767C`.
 Debug GPUI shaders still require this checkout. A compiler allocation failure
 occurred with C: nearly full; removing superseded owned test executables/symbols
@@ -482,7 +482,7 @@ screencast, while the game recorder/replay worker remains independent.
   native Matroska replay and fully decoded it with FFmpeg. An independent generated
   H.264/AAC screencast ran concurrently and also decoded fully; stopping it left
   the retained replay ring unchanged. Repeat with:
-  `cargo test -p rcr-desktop --offline five_minute_av1_replay_muxes_and_decodes_while_an_independent_screencast_runs -- --ignored --nocapture`.
+  `cargo test -p desktop --offline five_minute_av1_replay_muxes_and_decodes_while_an_independent_screencast_runs -- --ignored --nocapture`.
 
 These tests exposed and fixed a race that could discard a terminal Saved event
 behind Finishing, and a missing warning when source loss saved a playable prefix.
@@ -580,8 +580,8 @@ Local proof files and reports are in the ignored `recordings/` directory. They c
 To generate synthetic independent audio (440 Hz and 880 Hz) from a previously captured IVF and exercise edited export:
 
 ```powershell
-cargo run -p rcr-media-io --example mux_fixture -j1 -- recordings/capture-proof-002.ivf recordings/tones.mkv
-cargo run -p rcr-editor-core --example editor_fixture -j1 -- recordings/tones.mkv recordings/edited.mp4
+cargo run -p media-io --example mux_fixture -j1 -- recordings/capture-proof-002.ivf recordings/tones.mkv
+cargo run -p editor-core --example editor_fixture -j1 -- recordings/tones.mkv recordings/edited.mp4
 ffprobe -v error -show_streams -show_format recordings/edited.mp4
 ffmpeg -v error -threads 2 -i recordings/edited.mp4 -map 0 -f null NUL
 python scripts/verify-editor-tones.py recordings/edited.mp4
@@ -593,7 +593,7 @@ To repeat audio-monitor validation without playing sound or rendering another ex
 
 ```powershell
 $env:SDL_AUDIODRIVER = 'dummy'
-cargo run -p rcr-editor-core --example editor_fixture -j1 -- --monitor-only recordings/edited.rcr.json
+cargo run -p editor-core --example editor_fixture -j1 -- --monitor-only recordings/edited.rcr.json
 Remove-Item Env:SDL_AUDIODRIVER
 ```
 
@@ -616,9 +616,9 @@ The optional denoiser runs on replay save or on selected editor audio tracks at 
 Repeat the hardware/save check with unique output names:
 
 ```powershell
-cargo run -p rcr-windows --bin rcr-capture -j1 -- --seconds 6 --audio system,mic --suppress-mic --output recordings/dn-raw.mkv --save-at 3 --save-replay recordings/dn-clean.mkv
+cargo run -p windows-capture --bin capture -j1 -- --seconds 6 --audio system,mic --suppress-mic --output recordings/dn-raw.mkv --save-at 3 --save-replay recordings/dn-clean.mkv
 python scripts/verify-dpdfnet-replay.py recordings/dn-raw.mkv recordings/dn-clean.mkv
-cargo run -p rcr-editor-core --example editor_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/dn-edit.mp4 --suppress-mic --fast --range-test
+cargo run -p editor-core --example editor_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/dn-edit.mp4 --suppress-mic --fast --range-test
 ```
 
 The replay checker expects a short proof whose history starts at video time zero. Reference-data regeneration is documented in `crates/dpdfnet/NOTICE.md`; ordinary Rust tests need neither Python nor ONNX Runtime.
@@ -632,7 +632,7 @@ The headless `quick_clip_fixture` was run against the native synthetic two-tone 
 The independent `verify-quick-clip.py` check verifies full video/audio decode, two-second sample coverage, volume and pitch on both sides of the join, and more than 40 dB rejection of the muted source. It caught an existing audio graph problem: timestamp-based trimming after tempo/delay could discard leading silence and produce an apparent two-second file with missing audio samples. The graph now uses 48 kHz sample counts, padding and continuous timestamps for each piece before mixing. The corrected proof is `recordings/quick-editor-proof-003-{game,mic}.mp4`.
 
 ```powershell
-cargo run -p rcr-editor-core --example quick_clip_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/quick-proof
+cargo run -p editor-core --example quick_clip_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/quick-proof
 python scripts/verify-quick-clip.py recordings/quick-proof
 ```
 
@@ -665,11 +665,11 @@ Short headless local measurements at 1280×720 bounds:
 Native tests muted **only audio tracks**, leaving actual video decoding enabled. The timing check waits for a frame beyond the paused position, so an already-due buffered frame is not counted as a resumed frame. Eight-piece testing exercises prefetched decoder-batch boundaries. Four cancellations during process startup also reaped all workers/processes; that separate test took about 7.2 seconds in total, including Windows process creation returning after cancellation. These are development measurements, not a guarantee for every file or PC load, and are not end-to-end GPUI display latency measurements.
 
 ```powershell
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --legacy
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --cuts
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --full-size
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --churn
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --legacy
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --cuts
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --full-size
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --churn
 ```
 
 The default benchmark uses a silent simulator. `--native-muted` exercises the real default output device with zero audible samples. Tests cover paused-clock freezing, PCM tails, consuming muted sources without replaying stale samples on unmute, and dropping only frames that are already due. All 88 workspace tests passed. Computer Use remains disabled; visual playback and physical A/V synchronization need user verification.
@@ -686,8 +686,8 @@ Native Capture, Library, Editor and Settings layouts were rebuilt around the sup
 - The native muted eight-piece playback benchmark presented **97 frames in 1.65 seconds**, reported zero dropped frames, a **22.68 ms** 95th-percentile interval and warm resumes of **32.25 / 34.07 / 34.25 ms**. Cold readiness was 674.57 ms; worker/process shutdown took 12.3 ms. These are headless local development measurements, not end-to-end GPUI display latency.
 
 ```powershell
-cargo run -p rcr-editor-core --example design_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/design-portrait-proof-001.mp4
-cargo run -p rcr-editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --cuts
+cargo run -p editor-core --example design_fixture -j1 -- recordings/mux-audio-fixture-001.mkv recordings/design-portrait-proof-001.mp4
+cargo run -p editor-core --example playback_bench -j1 -- recordings/mux-audio-fixture-001.mkv --native-muted --cuts
 ```
 
 The workspace build passed.
@@ -736,7 +736,7 @@ The combined Windows build passed `cargo test --workspace -j1` (100 tests) and `
 
 `scripts/verify-toolkit.ps1` passed on the final executable. It renders the five Tools pages, opens a synthetic 640×360 image in the GPUI editor, and dispatches mouse events through the painted canvas to create a rectangle. The actor publishes an undoable annotation. All seven stages completed in 326 ms in this run. This uses a hidden native window and does not operate the desktop or collect screenshots.
 
-The `rcr-toolkit` `capture-proof` example captured the real 5120×1440 Windows desktop through `windows-wgc`, returning an SDR8 frame. Cold initialization plus capture took 807 ms in this one run. The frame stayed in memory; the proof neither saves pixels nor changes the clipboard. This is a service smoke check, not a screenshot latency benchmark. Toolkit production services persist between jobs and refresh when configuration/imports change.
+The `toolkit` `capture-proof` example captured the real 5120×1440 Windows desktop through `windows-wgc`, returning an SDR8 frame. Cold initialization plus capture took 807 ms in this one run. The frame stayed in memory; the proof neither saves pixels nor changes the clipboard. This is a service smoke check, not a screenshot latency benchmark. Toolkit production services persist between jobs and refresh when configuration/imports change.
 
 The final executable also passed `scripts/verify-editor-open.ps1 -Trim`: one-piece left/right trims restored 599 → 509 → 599 frames, and joined two-piece checks restored 299 → 254 → 299 frames. Painted grips followed input; audio linkage and undo/redo remained correct. The run completed in 1,626 ms.
 
@@ -767,7 +767,7 @@ The final synthetic benchmark measured a 0.95 ms median / 1.30 ms p95 raster pub
 
 All 107 workspace tests passed. New tests reconstruct the incremental framebuffer and compare it byte-for-byte with full renders over patterned pixels, edits, undo/redo, grayscale, rotation, tile-boundary blur/pixelate/magnify, spotlight deletion and zoom. They also cover undelivered initial/dirty tile merging and preserving intermediate freehand samples. Strict workspace Clippy passed.
 
-The rebuilt executable passed `verify-toolkit.ps1` (native overlay selection/move/resize, annotation undo/redo and exact cropped output) and `verify-editor-open.ps1 -Trim` (both edges of single/split video clips, linked audio, undo/redo). These run hidden native GPUI windows without Computer Use. The launchable performance build is `target/debug/rcr-desktop-perf.exe`.
+The rebuilt executable passed `verify-toolkit.ps1` (native overlay selection/move/resize, annotation undo/redo and exact cropped output) and `verify-editor-open.ps1 -Trim` (both edges of single/split video clips, linked audio, undo/redo). These run hidden native GPUI windows without Computer Use. The launchable performance build is `target/debug/desktop-perf.exe`.
 
 ## ShareX-style utility coverage (2026-10-23)
 
@@ -777,9 +777,9 @@ All 113 workspace tests passed, including streaming hash vectors/comparison, Uni
 
 `utility-proof` exercised synthetic image viewing, beautification, thumbnails, conversion, effects and combination. Windows OCR extracted `RCR TEST 12345` from the generated image. A two-second sample of the existing synthetic multitrack recording converted successfully to MP4/H.264/AAC, WebM/VP9/Opus and GIF. Independent FFprobe inspection found three streams, including both separate audio tracks, in MP4 and WebM; GIF correctly contained only video. A one-second timestamp produced a 320×180 thumbnail. Temporary proof files were removed when the fixture scope ended. No desktop screenshot, clipboard access, network upload or computer automation was used.
 
-The new native smoke passed all 25 stages: six Tools panes, all 17 utility pages (including synthetic image and inspector result controls), screen color/ruler/pin-region input, pinned-image rendering, all seven monitor colors, and the existing screenshot annotation/cropping regression. Video opening and both trim edges on single/split clips also passed with linked audio and undo/redo. These checks used the rebuilt `target/debug/rcr-desktop-utilities.exe`.
+The new native smoke passed all 25 stages: six Tools panes, all 17 utility pages (including synthetic image and inspector result controls), screen color/ruler/pin-region input, pinned-image rendering, all seven monitor colors, and the existing screenshot annotation/cropping regression. Video opening and both trim edges on single/split clips also passed with linked audio and undo/redo. These checks used the rebuilt `target/debug/desktop-utilities.exe`.
 
-The native verification scripts accept `-Executable target/debug/rcr-desktop-utilities.exe` to target this build. Normal Cargo builds retain the original `rcr-desktop` target. Quit the existing app through its tray menu before switching executables so its global capture hotkeys are released.
+The native verification scripts accept `-Executable target/debug/desktop-utilities.exe` to target this build. Normal Cargo builds retain the original `desktop` target. Quit the existing app through its tray menu before switching executables so its global capture hotkeys are released.
 
 ## Persistent annotation properties and live region feedback
 
@@ -789,10 +789,10 @@ All annotation tools now display selected-object outlines. The engine reports th
 
 All 21 toolkit tests and strict workspace Clippy passed. New tests verify selection-specific properties, live blur/pixelate/highlight/spotlight/magnifier bounds, strength undo/redo, and identical image pixels before/after requesting the overlay. The hidden native GPUI smoke passed all 25 outer stages and 14 capture interaction phases. It checks that controls are painted without right-click, draws blur/pixelate with live bounds before release, selects the blur object, clicks its actual strength button, undoes the change and confirms the cropped output.
 
-The launchable build is `target/debug/rcr-desktop-annotations.exe`. Validation used `verify-toolkit.ps1 -Executable target/debug/rcr-desktop-annotations.exe`; no Computer Use was used.
+The launchable build is `target/debug/desktop-annotations.exe`. Validation used `verify-toolkit.ps1 -Executable target/debug/desktop-annotations.exe`; no Computer Use was used.
 
 ```powershell
-cargo run -p rcr-toolkit --example annotation-bench -j1
+cargo run -p toolkit --example annotation-bench -j1
 cargo test --workspace -j1
 cargo clippy --workspace --all-targets -j1 -- -D warnings
 ```
@@ -804,7 +804,7 @@ Tools → Workflows now uses a grouped list and a separate detail pane, replacin
 
 Two focused desktop regression tests cover custom-name preservation and edits to ordered imported steps, including duplicate-add and invalid-index handling. Strict desktop Clippy passes. The hidden native GPUI smoke selects all ten default workflows by dispatching pointer events against their painted bounds, checks separate sidebar/detail columns and a compact run button within the viewport, then completes the existing 25-stage toolkit/overlay suite. These checks do not execute workflows, upload files, change saved settings, or use desktop automation. Pixel appearance and the compact stacked layout remain manual review items.
 
-The review executable is `target/debug/rcr-desktop-workflows.exe`; existing running executables were left untouched.
+The review executable is `target/debug/desktop-workflows.exe`; existing running executables were left untouched.
 
 
 ## Paused seeking revision (2026-10-23)
@@ -819,7 +819,7 @@ The Windows fast path checks pinned FFmpeg 7 library majors before using public 
 
 All 22 editor-core unit tests pass, including existing transport clock/audio/presentation checks and the bounded cache regression. Strict Clippy checks pass for desktop/editor-core and all their targets. The hidden native GPUI trim smoke also drags the painted seek ruler, asserts that it follows the pointer immediately through the scrub worker with no transport/debounce, and verifies the project is unchanged. All four trim/restore, linked-audio and undo/redo cases pass. Initial editor readiness in that run was 471 ms. No Computer Use was involved.
 
-Review build: `target/debug/rcr-desktop-seeking.exe`.
+Review build: `target/debug/desktop-seeking.exe`.
 
 The cut-playback regression presented 99 frames in 1.65 s, with an 18.5 ms p95 presentation interval, zero dropped frames and warm resumes of 20.4, 14.6 and 15.7 ms. All transport workers/processes were reaped in 23.8 ms.
 
@@ -836,7 +836,7 @@ A new hidden native `--smoke-scrub` fixture dispatches pointer events through th
 
 The AV1 luminance-counter proof continues to pass frame/color comparisons through neighboring-cache hits, trims, speed fallback, split/reorder and opacity fallback. Its 120-request rapid-input phase delivered 96 intermediate frames and reached the final target in 423 ms. Decoder shutdown completed in 70.4 ms. All 22 core tests and strict Clippy checks for desktop/editor-core with all targets pass. Native linked-audio trim/restore and undo/redo checks pass in all four cases; final editor readiness in that fixture was 370 ms. No Computer Use was used.
 
-Review executable: `target/debug/rcr-desktop-scrub.exe`. Run the native paint-latency fixture with `scripts/verify-editor-open.ps1 -Scrub -Recording <recording> -Executable target/debug/rcr-desktop-scrub.exe`.
+Review executable: `target/debug/desktop-scrub.exe`. Run the native paint-latency fixture with `scripts/verify-editor-open.ps1 -Scrub -Recording <recording> -Executable target/debug/desktop-scrub.exe`.
 
 ## Whole-recording seeking revision (2026-10-24)
 
@@ -855,9 +855,9 @@ The frame-counter proof with `--proxy` matches original graph pixels exactly at 
 All 22 editor-core tests and strict desktop/editor-core Clippy checks with all targets pass.
 
 ```powershell
-cargo run -p rcr-editor-core --example playback_bench -j1 -- target/debug/recordings/replay-1792789538677.mkv --random
-cargo run -p rcr-editor-core --example seek_proof -j1 -- .downloads/seek-frame-counter.mkv --proxy
-./scripts/verify-editor-open.ps1 -Random -Recording target/debug/recordings/replay-1792789538677.mkv -Executable target/debug/rcr-desktop-fastseek.exe
+cargo run -p editor-core --example playback_bench -j1 -- target/debug/recordings/replay-1792789538677.mkv --random
+cargo run -p editor-core --example seek_proof -j1 -- .downloads/seek-frame-counter.mkv --proxy
+./scripts/verify-editor-open.ps1 -Random -Recording target/debug/recordings/replay-1792789538677.mkv -Executable target/debug/desktop-fastseek.exe
 ```
 
 ## Product workflow revision: source review (2026-10-24)
@@ -909,7 +909,7 @@ Current source additionally restores focus after accepting Add clip, resets expo
 
 ## Library and annotation responsiveness checkpoint (2026-10-24)
 
-The desktop unit suite now passes all 52 tests, including imported-reference transaction rollback, asynchronous discovery cancellation, reversible mixed local/external removal and Unicode display names. The hidden native Library import fixture passed in 4,973 ms in its own marked workspace: production background import, duplicate/skipped-file counts, actual video/image previews and card selection, an unavailable named favorite, reference-only removal and persisted Undo, and latest-scan replacement. Original media and fixture-sidecar hashes remained unchanged. Run it with `scripts/verify-library-import.ps1 -Executable target/debug/rcr-desktop-polish.exe`; the evidence directory is retained rather than deleting user files.
+The desktop unit suite now passes all 52 tests, including imported-reference transaction rollback, asynchronous discovery cancellation, reversible mixed local/external removal and Unicode display names. The hidden native Library import fixture passed in 4,973 ms in its own marked workspace: production background import, duplicate/skipped-file counts, actual video/image previews and card selection, an unavailable named favorite, reference-only removal and persisted Undo, and latest-scan replacement. Original media and fixture-sidecar hashes remained unchanged. Run it with `scripts/verify-library-import.ps1 -Executable target/debug/desktop-polish.exe`; the evidence directory is retained rather than deleting user files.
 
 After event-driven annotation delivery replaced 12/16 ms polling, the native toolkit fixture passed all 25 stages in 2,196 ms. It checks overlay selection/move/resize, persistent properties, blur/pixelate draft guides, mouse/Enter/Space property changes and Undo, tool shortcuts, text Escape, toolbar recovery, and a 670×308 cropped output. The extended editor keyboard fixture passed in 7,853 ms: split, native focus/selection, audio slider fine/coarse limits and Undo, export-menu Escape, named Add clip picker acceptance, asynchronous append and exact Undo, durable save and owned-fixture cleanup. These fixtures dispatch native GPUI events with Computer Use disabled; they do not establish physical input-to-monitor latency.
 
@@ -932,7 +932,7 @@ The final controlled annotation probe retained the earlier consumer and input: b
 
 A fresh actual export after source preflight passed `editor_fixture --fast --range-test --suppress-mic`: one second of AV1 at 960×540, plus AAC Mix, System audio and Microphone tracks confirmed independently with FFprobe (MP4 labels are `handler_name`). Frame-45 preview, advancing playback and decoder cancellation/reaping passed. Output: `.downloads/source-guard-export-20261024.mp4`.
 
-The normal `target/debug/rcr-desktop.exe` was restored and built (temporary Cargo alias removed). Owned-window captures at 1100×680 show saved Replay Edit/Show in folder actions and source recovery after dismissing its error toast. That review caught an unanchored absolute placeholder; `.inset_0()` fixed the missing center message/button. The dismissed-toast proof now visibly retains Open original. This review executable's SHA-256 is `[redacted local build hash]`. Subsequent source edits are not represented by that hash. No Computer Use was involved.
+The normal `target/debug/desktop.exe` was restored and built (temporary Cargo alias removed). Owned-window captures at 1100×680 show saved Replay Edit/Show in folder actions and source recovery after dismissing its error toast. That review caught an unanchored absolute placeholder; `.inset_0()` fixed the missing center message/button. The dismissed-toast proof now visibly retains Open original. This review executable's SHA-256 is `[redacted local build hash]`. Subsequent source edits are not represented by that hash. No Computer Use was involved.
 
 ## Application audio and capture lifecycle checkpoint (2026-10-24)
 
@@ -960,7 +960,7 @@ A fresh real `editor_fixture --fast --range-test --suppress-mic` run passed afte
 
 All 66 desktop tests passed at this checkpoint: stale import/navigation ordering, newer re-import versus delayed removal, reference-delta reconciliation preserving unrelated preferences, no-clobber Trash restore, a synced original-path Trash journal and structured partial-export recovery information. Source-drive inspection/moves/rollback for Remove and Undo now run on a single admitted background operation. Local atomic preferences persistence retains its existing synchronous behavior. Native Library validation of this newer worker path and the later durable Trash browser remain pending.
 
-Five local-upload tests passed through `rcr-toolkit --test local_upload`: the harness compiles the actual vendored local-uploader source against RCR's existing dependency lockfile, including its private collision/cancellation regressions. Creating a shared-folder output now uses `create_new`; a destination claimed after naming is preserved rather than truncated or removed. The public upload path also retained its existing destination, copied under the next name and left the original intact. These tests use only temporary local files, with no network uploads. Direct tests through the unrelated upstream workspace could not resolve its separately locked Clap version offline, and dependencies outside RCR were not downloaded merely for that workspace.
+Five local-upload tests passed through `toolkit --test local_upload`: the harness compiles the actual vendored local-uploader source against RCR's existing dependency lockfile, including its private collision/cancellation regressions. Creating a shared-folder output now uses `create_new`; a destination claimed after naming is preserved rather than truncated or removed. The public upload path also retained its existing destination, copied under the next name and left the original intact. These tests use only temporary local files, with no network uploads. Direct tests through the unrelated upstream workspace could not resolve its separately locked Clap version offline, and dependencies outside RCR were not downloaded merely for that workspace.
 ## Native recovery, input isolation and GPU presentation checkpoint (2026-10-24)
 
 A complete workspace run passed 249 tests, with two intentionally ignored standalone fixtures. Later targeted desktop/Windows runs passed 77 and 23 tests respectively; the latter adds session-diagnostic coverage. Strict workspace/all-target Clippy passed with warnings denied before the subsequent synthetic GPU-surface helper and presentation changes. Those later changes require a fresh lint checkpoint.
@@ -971,7 +971,7 @@ The latest whole-timeline pointer-drag fixture used the actual 119.57-second 256
 
 An owned shared-texture proof reproduced a concrete GPU-preview failure: while the producer held its keyed mutex, the old renderer cleared the backbuffer and skipped the video, yielding background pixels. The updated renderer keeps one consumer-private GPU texture, copies a successfully acquired shared frame into it, releases the shared mutex, then draws the private image. Contention redraws the last good image for the same producer identity. A new identity starts without cached pixels. There is no CPU video readback in this production path.
 
-`rcr-desktop --smoke-gpu-surface` subsequently passed initial color, byte-equal last-good redraw while busy, newly published color, producer texture/dimension replacement, native resize and window shutdown. An initial resize assertion exposed asynchronous native resize in the proof itself; the corrected helper waits for the requested viewport with a five-second bound before requesting a snapshot. Passing owned-window artifacts are under `.downloads/research/gpu-surface-proof/run-1792807818352609500-36600`; the resized red frame was visually inspected. These snapshots contain only synthetic app-owned textures.
+`desktop --smoke-gpu-surface` subsequently passed initial color, byte-equal last-good redraw while busy, newly published color, producer texture/dimension replacement, native resize and window shutdown. An initial resize assertion exposed asynchronous native resize in the proof itself; the corrected helper waits for the requested viewport with a five-second bound before requesting a snapshot. Passing owned-window artifacts are under `.downloads/research/gpu-surface-proof/run-1792807818352609500-36600`; the resized red frame was visually inspected. These snapshots contain only synthetic app-owned textures.
 
 The isolated `gpu_convert_proof` unit and native runs passed. Synthetic NV12 array slices converted black/white/red/green to shared BGRA with opaque alpha and at most four-channel-value tolerance, including downscale, visible crop, bounded four-view caching, nonblocking busy handling, cancellation/resume and invalid input rejection. The complete hardware proof took 198.8 ms; this is not a per-frame throughput benchmark. CPU upload/readback exists only in this synthetic proof. The converter is not yet connected to playback.
 
@@ -1032,7 +1032,7 @@ The native device-picker fixture passed in 895 ms using seeded devices and the p
 
 The initial native GPUI playback proof stalled with GPU publication 1 but zero actual surface draws. Its hidden window called `Window::draw`, which constructs a Scene without native presentation. An explicit owned-window diagnostic presentation API now resizes the hidden target and executes the regular GPU draw/present path without readback or desktop input. The corrected proof passed in 1,991 ms: actual submitted GPU ID 1, paused ID 8, resumed playback and drawn CPU replacement frame 15 preserving the clock, with an 18-surface pool, future-frame maximum 3 and pending-read maximum 1, and no pixel readback. A separate CPU-image frame identity now prevents retained old CPU pixels from being acknowledged as a newer GPU frame after seek/hide/fallback. The proof's metadata/phase diagnostics remain bounded and failures are no longer swallowed by window-update fallback.
 
-The latest toolkit native fixture passed all 25 outer stages in 9,948 ms, including stale image-project/insert-dialog rejection after reopening, retained-Actor retry and Utilities stale-save/screen-selection admission with actual generated QR decoding. The wrapped overlay recovery layout was inspected at `.downloads/research/rcr-overlay-retry-wrapped-1100.png`; a 180-character unbroken diagnostic wraps inside the capped panel while Save/Copy stay visible. Capture with device controls fits 1100×680 at `rcr-capture-devices-1100.png`. Strict workspace all-target Clippy passed with warnings denied before the subsequent sustained-GPU/row-geometry fixture additions. Source-open autosave is normal app behavior; newer GPU/device native fixtures now isolate their project/preferences/cache working directories so this cannot alter existing user project state. Their media source is still read-only.
+The latest toolkit native fixture passed all 25 outer stages in 9,948 ms, including stale image-project/insert-dialog rejection after reopening, retained-Actor retry and Utilities stale-save/screen-selection admission with actual generated QR decoding. The wrapped overlay recovery layout was inspected at `.downloads/research/rcr-overlay-retry-wrapped-1100.png`; a 180-character unbroken diagnostic wraps inside the capped panel while Save/Copy stay visible. Capture with device controls fits 1100×680 at `capture-devices-1100.png`. Strict workspace all-target Clippy passed with warnings denied before the subsequent sustained-GPU/row-geometry fixture additions. Source-open autosave is normal app behavior; newer GPU/device native fixtures now isolate their project/preferences/cache working directories so this cannot alter existing user project state. Their media source is still read-only.
 
 ### Sustained owned GPU playback and device-picker review (2026-10-24)
 
@@ -1040,13 +1040,13 @@ A fresh `cargo test --workspace --all-targets -j1 --offline` passed, followed by
 
 Observed submission intervals in that hidden-window diagnostic were 15.64 ms median, 30.32 ms p95 and 61.33 ms maximum, with 396 draws including redraws and 8,283 ms total fixture time. These results establish sustained frame identity and completion, not smooth monitor playback. The fixture directly presents an owned render target and uses WinRT timer wakeups, whereas normal visible windows use the DWM-driven repaint path. Additional bounded timing instrumentation is needed to separate timer/dispatch delay, audio-clock pacing and renderer work.
 
-The isolated audio-device fixture passed in 888 ms and the application-source picker fixture passed in 382 ms, including their keyboard/state checks and a minimum 200-pixel label-container assertion. Subsequent rendered inspection of `rcr-capture-microphone-devices-readable-1100.png` and `rcr-capture-audio-picker-readable-1100.png` still showed ellipses instead of readable row labels. The container-width assertion did not establish correct glyph layout. Both picker layouts therefore remain under correction; the successful input tests must not be represented as a successful visual review.
+The isolated audio-device fixture passed in 888 ms and the application-source picker fixture passed in 382 ms, including their keyboard/state checks and a minimum 200-pixel label-container assertion. Subsequent rendered inspection of `capture-microphone-devices-readable-1100.png` and `capture-audio-picker-readable-1100.png` still showed ellipses instead of readable row labels. The container-width assertion did not establish correct glyph layout. Both picker layouts therefore remain under correction; the successful input tests must not be represented as a successful visual review.
 
 ### Shaped text correction and playback phase measurements
 
 The complete workspace/all-target test run passed after shared FFmpeg discovery, the optional playback preference and new diagnostic sampling. A newly added test module initially resolved GPUI's re-exported test macro recursively; importing Rust's built-in test attribute fixed compilation. The normal desktop executable then built successfully in 39.2 seconds.
 
-Rendered device/application pickers are now readable. The underlying GPUI text cache ignored changing truncation widths when wrapping was disabled, retaining an intrinsic-pass ellipsis. It now keys both wrap and truncation widths and starts each measurement from original text runs rather than destructively reusing previously truncated runs. The native device fixture passed in 900 ms, including actual shaped-text equality and the same two-run StyledText measured first at 1 pixel, then at 600 pixels; the wide pass must restore its full original glyph text. The application-source fixture passed in 397 ms. Owned targets `rcr-capture-microphone-devices-text-fixed-1100.png` and `rcr-capture-audio-picker-text-fixed-1100.png` were visually inspected and show labels and details correctly. Unavailable long detail text still truncates normally within its row.
+Rendered device/application pickers are now readable. The underlying GPUI text cache ignored changing truncation widths when wrapping was disabled, retaining an intrinsic-pass ellipsis. It now keys both wrap and truncation widths and starts each measurement from original text runs rather than destructively reusing previously truncated runs. The native device fixture passed in 900 ms, including actual shaped-text equality and the same two-run StyledText measured first at 1 pixel, then at 600 pixels; the wide pass must restore its full original glyph text. The application-source fixture passed in 397 ms. Owned targets `capture-microphone-devices-text-fixed-1100.png` and `capture-audio-picker-text-fixed-1100.png` were visually inspected and show labels and details correctly. Unavailable long detail text still truncates normally within its row.
 
 An instrumented muted-WASAPI GPUI EOF run again observed all 360 submitted IDs without skips, CPU replacement or readback, finishing in 8,212.6 ms with unchanged original media SHA-256. Its 527 bounded phase samples measured scene construction median/p95/max 12.12/12.80/14.35 ms, native presentation 0.419/0.572/2.569 ms, actual requested-1-ms background timer completion 2.91/13.97/15.79 ms and foreground dispatch 0.161/0.413/2.174 ms. Scene work is a substantial cost in this development build; the result does not justify attributing every interval outlier to the timer or claim smooth physical scanout. The owned fixture directory is `.downloads/gpu-playback-smoke-J9XUIg`.
 
@@ -1160,7 +1160,7 @@ The default exact warm path still passed after these envelope changes: fresh-cac
 
 The expanded native editor keyboard run passed in 9,167 ms. It verifies the retained incomplete-file action, three-action forward/reverse traversal, scrolling and Close visibility with a very long fictional path plus large errors, skipping pending controls, and injected clipboard success/failure/stale-result guards. It invokes neither Explorer nor clipboard services. Actual Windows diagnostic copying uses the same bounded admission and allocation/transfer/close acknowledgement as saved-file copying; UTF-16, payload/admission bounds and dropped-observer tests are injected, not an interoperability proof. The 900×600 `rcr-editor-export-failed-900.png` owned-target rendering was inspected: explanation, incomplete path, Copy and Close remain legible and inside the panel.
 
-Both new 900×600 Capture audio-error presentations were rendered and inspected with no capture worker or audio activation: `rcr-capture-audio-error-900.png` and `rcr-capture-audio-error-stopped-900.png`. Actual bounded source errors remain visible after Stop and are separate from replay-save notices. The subsequent native keyboard fixtures passed both active/stopped presentations, including focus, Home/End, Page and arrow scrolling, and Escape. Owned-target screenshots `rcr-capture-audio-error-keyboard-900.png` and `rcr-capture-audio-error-stopped-keyboard-900.png` were inspected. These fixtures do not establish real microphone recovery or device-unplug behavior.
+Both new 900×600 Capture audio-error presentations were rendered and inspected with no capture worker or audio activation: `capture-audio-error-900.png` and `capture-audio-error-stopped-900.png`. Actual bounded source errors remain visible after Stop and are separate from replay-save notices. The subsequent native keyboard fixtures passed both active/stopped presentations, including focus, Home/End, Page and arrow scrolling, and Escape. Owned-target screenshots `capture-audio-error-keyboard-900.png` and `capture-audio-error-stopped-keyboard-900.png` were inspected. These fixtures do not establish real microphone recovery or device-unplug behavior.
 
 The copied native AV1 path was also checked against the original 119.57-second recording, with proxy generation disabled. Seven ordinary/trim/reorder comparisons reported mean BGRA error 0.000 against independently decoded references; speed and effects intentionally used the existing fallback. Artifacts: `.downloads/native-av1-correctness-<id>`. Original SHA-256 was unchanged. The separate explicit mapped experiment passed the owned six-second pixel comparisons and a real held-output cancellation/admission test; it retains at most one returned mapping (pool 23), but did not improve original-recording exact release latency: 202.91 ms versus copied native 186.01 ms in the earlier landing trial. Mapped output remains opt-in. These checks do not prove forced device-fault recovery.
 
@@ -1253,7 +1253,7 @@ Settings audio selectors overflowed their cards because full-width buttons had b
 
 Debug renderers now reuse a bounded process-wide cache of compiled shader bytes, keyed by stage and current HLSL/HLSLI contents. Source changes invalidate entries and compilation failures remain retryable. Release builds already embed shader bytecode. Screenshot pixel kernels are optimized in development builds; packed RGBA conversion reuses storage and packed BGRA conversion swaps channels in place, avoiding a second full-frame allocation. Padded rows still compact correctly.
 
-Reproduce pixel/capture measurements with `cargo run -p rcr-toolkit --example capture-proof -j1 -- --startup`. On the tested 5120×1440 Windows desktop:
+Reproduce pixel/capture measurements with `cargo run -p toolkit --example capture-proof -j1 -- --startup`. On the tested 5120×1440 Windows desktop:
 
 | Measurement (ms) | Before | After |
 | --- | --- | --- |
@@ -1288,7 +1288,7 @@ Broader Windows tests could not compile because rustc exhausted system memory wh
 
 ## Disk usage analyzer (2026-10-24)
 
-Six scanner tests pass through `cargo test -p rcr-toolkit --lib disk_usage::tests -j1`: aggregation, cancellation, invalid roots, hard-link logical counts, disappearing directories and conditional Windows symlink handling. The symlink fixture may skip when creation privileges are unavailable. Five standalone treemap tests cover proportional areas, bounds, overlap, empty/invalid inputs, extreme weights and 1,024 entries. Desktop/toolkit strict Clippy passes.
+Six scanner tests pass through `cargo test -p toolkit --lib disk_usage::tests -j1`: aggregation, cancellation, invalid roots, hard-link logical counts, disappearing directories and conditional Windows symlink handling. The symlink fixture may skip when creation privileges are unavailable. Five standalone treemap tests cover proportional areas, bounds, overlap, empty/invalid inputs, extreme weights and 1,024 entries. Desktop/toolkit strict Clippy passes.
 
 The desktop build passed with an isolated output because the normal executable was running. `scripts/verify-disk-usage.ps1` scanned an owned fixture and rendered the actual GPUI UI at 1440×900 and 900×600, including the compact treemap tab. The snapshots under `.downloads/disk-usage-<id>` showed the expected 15 MiB, four files and three folders; visual inspection found no clipped controls. This checks native scanning/rendering, not manual pointer interaction or whole-drive performance. Results use logical size and directory traversal; privileged NTFS enumeration and allocated-space accounting remain unimplemented.
 

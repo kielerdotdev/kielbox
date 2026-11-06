@@ -1,4 +1,4 @@
-use rcr_dpdfnet::{Denoiser, Model};
+use dpdfnet::{Denoiser, Model};
 fn floats(bytes: &[u8]) -> Vec<f32> {
     bytes
         .as_chunks::<4>()

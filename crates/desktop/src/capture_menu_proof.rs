@@ -1,7 +1,7 @@
 //! Hidden, generated-content GPUI fixture. No desktop input, capture or audio devices.
 use super::*;
 use anyhow::{Context as _, Result, ensure};
-use rcr_toolkit::types::{Frame, Monitor, Rect, WindowInfo};
+use ::toolkit::types::{Frame, Monitor, Rect, WindowInfo};
 use std::{
     cell::RefCell,
     collections::BTreeMap,
@@ -28,7 +28,7 @@ pub(crate) fn measure(probe: Probe, key: &'static str) -> Div {
     )
 }
 fn generated_worker(options: Options) -> Result<Worker> {
-    use rcr_recording_tools::{
+    use recording_tools::{
         audio::synth::{Signal, SyntheticAudio, SyntheticAudioConfig},
         source::synthetic::{SyntheticConfig, SyntheticSource, TimeMode},
     };
@@ -48,7 +48,7 @@ fn generated_worker(options: Options) -> Result<Worker> {
                             start: Duration::ZERO,
                         },
                         TimeMode::Realtime,
-                    ))) as Box<dyn rcr_recording_tools::audio::AudioSource>
+                    ))) as Box<dyn recording_tools::audio::AudioSource>
                 })
                 .collect();
             Ok((Box::new(video), audio))
@@ -58,7 +58,7 @@ fn generated_worker(options: Options) -> Result<Worker> {
 
 fn desktop(_: &CancelToken) -> Result<picker::Desktop> {
     let mut frame = Frame::from_rgba8(1800, 1200, vec![0; 1800 * 1200 * 4])?;
-    frame.origin = rcr_toolkit::types::Point::new(-1800, -100);
+    frame.origin = ::toolkit::types::Point::new(-1800, -100);
     frame.scale_factor = 2.;
     for (index, pixel) in frame
         .data_mut()
@@ -427,7 +427,7 @@ pub(crate) fn run(output: PathBuf, failed: Arc<AtomicBool>, cx: &mut App) -> Res
                 wait(host,cx,"explicit still result",|r|r.selection.is_none()).await?;
                 inspect(host,cx,|s,_,cx|->Result<()> { let t=s.toolkit.read(cx); let (_,options)=t.capture_requests().last().unwrap();
                     if target=="screen" { let c=options.captured.as_ref().unwrap(); ensure!(c.frame.rect()==Rect::new(-900,-100,900,1200),"Wrong monitor"); }
-                    else { ensure!(options.captured.is_none() && options.explicit==Some(rcr_toolkit::services::ExplicitTarget::Window("front".into())),"Window capture must use the native window ID, not an occluded desktop crop"); } Ok(())
+                    else { ensure!(options.captured.is_none() && options.explicit==Some(::toolkit::services::ExplicitTarget::Window("front".into())),"Window capture must use the native window ID, not an occluded desktop crop"); } Ok(())
                 })??;
             }
             // Cross-display video is rejected in the same overlay, with no worker.

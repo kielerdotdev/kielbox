@@ -1,5 +1,5 @@
 [package]
-name = "rcr-media-io"
+name = "media-io"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,6 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rcr-media-core = { path = "../media-core" }
-rcr-dpdfnet = { path = "../dpdfnet" }
+media-core = { path = "../media-core" }
+dpdfnet = { path = "../dpdfnet" }
 tempfile = "3"

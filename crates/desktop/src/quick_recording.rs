@@ -1,7 +1,7 @@
 //! Independent screencast session: WGC + bounded recording pipeline + external FFmpeg.
 //! No recorder commands, replay packets, or game-capture settings enter this module.
 use anyhow::{Context, Result, ensure};
-use rcr_recording_tools::{
+use recording_tools::{
     adapter::{AudioSelection, default_audio},
     audio::AudioSource,
     encode::{EncodeSummary, Encoder, EncoderInput, InputKind, OutputSpec},
@@ -387,7 +387,7 @@ struct ExternalEncoder {
     last_pixels: Vec<u8>,
 }
 impl ExternalEncoder {
-    fn open(spec: &OutputSpec) -> rcr_recording_tools::error::Result<Self> {
+    fn open(spec: &OutputSpec) -> recording_tools::error::Result<Self> {
         let open = || -> Result<Self> {
             ensure!(!spec.path.exists(), "Output already exists");
             let directory = tempfile::Builder::new()
@@ -485,10 +485,10 @@ impl Encoder for ExternalEncoder {
         &mut self,
         slot: u64,
         input: &Arc<EncoderInput>,
-    ) -> rcr_recording_tools::error::Result<()> {
+    ) -> recording_tools::error::Result<()> {
         self.write_frame(slot, input).map_err(encoder_error)
     }
-    fn write_audio(&mut self, samples: &[f32]) -> rcr_recording_tools::error::Result<()> {
+    fn write_audio(&mut self, samples: &[f32]) -> recording_tools::error::Result<()> {
         let mut write = || -> Result<()> {
             ensure!(!self.audio_failed, "Audio encoder previously failed");
             let format = self.spec.audio.context("Audio is disabled")?;
@@ -524,7 +524,7 @@ impl Encoder for ExternalEncoder {
     fn finish(
         mut self: Box<Self>,
         end: Duration,
-    ) -> rcr_recording_tools::error::Result<EncodeSummary> {
+    ) -> recording_tools::error::Result<EncodeSummary> {
         let mut finish = || -> Result<EncodeSummary> {
             let mut video = self.video.take().context("No video frames were recorded")?;
             if let Some(format) = self.spec.audio.filter(|_| !self.audio_failed) {
@@ -645,7 +645,7 @@ mod tests {
     }
     fn preserve_audio_failure(
         path: &std::path::Path,
-        recording: &rcr_recording_tools::session::Recording,
+        recording: &recording_tools::session::Recording,
         source_count: usize,
         samples: &[f64],
         probe: &serde_json::Value,
@@ -886,7 +886,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(3));
         assert!(child.lock().unwrap().try_wait().unwrap().is_some());
     }
-    use rcr_recording_tools::{
+    use recording_tools::{
         audio::{
             AudioSource,
             synth::{Signal, SyntheticAudio, SyntheticAudioConfig},

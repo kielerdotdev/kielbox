@@ -1,8 +1,8 @@
 //! CPU annotation actor benchmark; no GPUI, native windows, capture, or clipboard.
-//! Run: cargo run -p rcr-toolkit --example annotation_actor_probe --release -- 3
+//! Run: cargo run -p toolkit --example annotation_actor_probe --release -- 3
 //! Prints one JSON record per measurement. Native GPU upload/presentation is excluded.
 use anyhow::{Context, Result, bail, ensure};
-use rcr_toolkit::{
+use toolkit::{
     annotation as a,
     image_editor::{Actor, Command, Event, Preview},
     types::Frame,

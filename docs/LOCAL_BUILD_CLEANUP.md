@@ -2,7 +2,7 @@
 
 The retained application package is `dist/windows-reviewed-2026-11-05/`.
 Launch it with its `Start-rcr.ps1` and the same existing working/data folder.
-Its `rcr-clean.exe` is an intentional packaged helper; keep the entire package.
+Its `clean.exe` is an intentional packaged helper; keep the entire package.
 
 Preview and remove obsolete development copies and packaging-test executables:
 

@@ -1450,6 +1450,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "clean"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ctrlc",
+ "disk",
+ "filetime",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "clap_complete",
+ "clap_mangen",
+ "ctrlc",
+ "hotkeys",
+ "image-types",
+ "ipc",
+ "platform",
+ "serde",
+ "serde_json",
+ "shell",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+ "toml_edit 0.23.10+spec-1.0.0",
+ "toolkit-services",
+ "tracing",
+ "tracing-subscriber",
+ "upload",
+ "windows-registry 0.6.1",
+ "wiremock",
+ "workflows",
+ "x11rb 0.14.0",
+]
+
+[[package]]
 name = "clipboard-win"
 version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2024,6 +2067,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel 2.5.0",
+ "editor-core",
+ "gpui",
+ "image",
+ "media-core",
+ "media-io",
+ "raw-window-handle",
+ "recording-tools",
+ "screenshot",
+ "screenshot-windows",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "toolkit",
+ "tray-icon",
+ "unicode-segmentation",
+ "windows 0.61.3",
+ "windows-capture",
+]
+
+[[package]]
 name = "dify"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2110,6 +2179,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk"
+version = "0.1.0"
+dependencies = [
+ "filetime",
+ "tempfile",
+ "windows 0.61.3",
+ "workflows",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2192,6 +2271,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "dpdfnet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rustfft",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2232,6 +2320,21 @@ checksum = "6758be723a3f298bbfda4db75748bc2ba0abafe096b6383c7c32da264764fbc3"
 dependencies = [
  "bytemuck",
  "emath",
+]
+
+[[package]]
+name = "editor-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dpdfnet",
+ "libloading",
+ "media-core",
+ "media-io",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -3894,6 +3997,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hdr"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "image-types",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3966,6 +4082,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "hotkeys"
+version = "0.1.0"
+dependencies = [
+ "ashpd 0.13.13",
+ "async-io",
+ "futures-lite 2.6.1",
+ "global-hotkey",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
+ "tracing",
+ "zbus",
 ]
 
 [[package]]
@@ -4239,6 +4370,84 @@ dependencies = [
 ]
 
 [[package]]
+name = "image-editor"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cosmic-text",
+ "image",
+ "image-effects",
+ "image-types",
+ "proptest",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiny-skia",
+]
+
+[[package]]
+name = "image-editor-ui"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "clap",
+ "directories",
+ "eframe",
+ "egui",
+ "egui_kittest",
+ "image",
+ "image-editor",
+ "image-effects",
+ "image-types",
+ "proptest",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "image-effects"
+version = "0.1.0"
+dependencies = [
+ "image-types",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "image-gpu"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "half",
+ "hdr",
+ "image-types",
+ "naga 30.0.1",
+ "pollster 1.0.1",
+ "thiserror 2.0.21",
+ "tracing",
+ "wgpu 30.0.1",
+]
+
+[[package]]
+name = "image-types"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "image",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "image-webp"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4377,6 +4586,19 @@ dependencies = [
  "core-foundation 0.10.0",
  "core-foundation-sys",
  "leaky-cow",
+]
+
+[[package]]
+name = "ipc"
+version = "0.1.0"
+dependencies = [
+ "fs4 1.1.0",
+ "interprocess",
+ "rustix 1.1.5",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "widestring",
 ]
 
 [[package]]
@@ -4962,6 +5184,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "media-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "media-io"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dpdfnet",
+ "media-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5484,6 +5727,10 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "nvenc-sys"
+version = "0.1.0"
 
 [[package]]
 name = "objc"
@@ -6333,6 +6580,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "platform"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "hdr",
+ "image-types",
+ "screenshot",
+ "screenshot-portal",
+ "screenshot-wayland",
+ "screenshot-windows",
+ "screenshot-x11",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "plist"
 version = "1.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6996,614 +7259,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rcr-clean"
-version = "0.1.0"
-dependencies = [
- "clap",
- "ctrlc",
- "filetime",
- "rcr-disk",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "rcr-cli"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "clap_complete",
- "clap_mangen",
- "ctrlc",
- "rcr-hotkeys",
- "rcr-image-types",
- "rcr-ipc",
- "rcr-platform",
- "rcr-shell",
- "rcr-toolkit-services",
- "rcr-upload",
- "rcr-workflows",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml 0.9.12+spec-1.1.0",
- "toml_edit 0.23.10+spec-1.0.0",
- "tracing",
- "tracing-subscriber",
- "windows-registry 0.6.1",
- "wiremock",
- "x11rb 0.14.0",
-]
-
-[[package]]
-name = "rcr-desktop"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel 2.5.0",
- "gpui",
- "image",
- "raw-window-handle",
- "rcr-editor-core",
- "rcr-media-core",
- "rcr-media-io",
- "rcr-recording-tools",
- "rcr-screenshot",
- "rcr-screenshot-windows",
- "rcr-toolkit",
- "rcr-windows",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tray-icon",
- "unicode-segmentation",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "rcr-disk"
-version = "0.1.0"
-dependencies = [
- "filetime",
- "rcr-workflows",
- "tempfile",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "rcr-dpdfnet"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rustfft",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "rcr-editor-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "libloading",
- "rcr-dpdfnet",
- "rcr-media-core",
- "rcr-media-io",
- "serde",
- "serde_json",
- "tempfile",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "rcr-hdr"
-version = "0.1.0"
-dependencies = [
- "half",
- "rayon",
- "rcr-image-types",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
-name = "rcr-hotkeys"
-version = "0.1.0"
-dependencies = [
- "ashpd 0.13.13",
- "async-io",
- "futures-lite 2.6.1",
- "global-hotkey",
- "proptest",
- "serde",
- "thiserror 2.0.21",
- "tracing",
- "zbus",
-]
-
-[[package]]
-name = "rcr-image-editor"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "cosmic-text",
- "image",
- "proptest",
- "rayon",
- "rcr-image-effects",
- "rcr-image-types",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tiny-skia",
-]
-
-[[package]]
-name = "rcr-image-editor-ui"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "clap",
- "directories",
- "eframe",
- "egui",
- "egui_kittest",
- "image",
- "proptest",
- "rcr-image-editor",
- "rcr-image-effects",
- "rcr-image-types",
- "rfd",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "rcr-image-effects"
-version = "0.1.0"
-dependencies = [
- "rayon",
- "rcr-image-types",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "rcr-image-gpu"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "half",
- "naga 30.0.1",
- "pollster 1.0.1",
- "rcr-hdr",
- "rcr-image-types",
- "thiserror 2.0.21",
- "tracing",
- "wgpu 30.0.1",
-]
-
-[[package]]
-name = "rcr-image-types"
-version = "0.1.0"
-dependencies = [
- "half",
- "image",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "rcr-ipc"
-version = "0.1.0"
-dependencies = [
- "fs4 1.1.0",
- "interprocess",
- "rustix 1.1.5",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "widestring",
-]
-
-[[package]]
-name = "rcr-media-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "rcr-media-io"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rcr-dpdfnet",
- "rcr-media-core",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "rcr-nvenc-sys"
-version = "0.1.0"
-
-[[package]]
-name = "rcr-platform"
-version = "0.1.0"
-dependencies = [
- "half",
- "rcr-hdr",
- "rcr-image-types",
- "rcr-screenshot",
- "rcr-screenshot-portal",
- "rcr-screenshot-wayland",
- "rcr-screenshot-windows",
- "rcr-screenshot-x11",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
-name = "rcr-recording-tools"
-version = "0.1.0"
-dependencies = [
- "ashpd 0.13.13",
- "async-io",
- "cpal",
- "directories",
- "ffmpeg-next",
- "ffmpeg-sys-next",
- "gifski",
- "half",
- "imgref",
- "pipewire",
- "rcr-hdr",
- "rcr-image-gpu",
- "rcr-image-types",
- "rcr-screenshot",
- "rcr-screenshot-wayland",
- "rcr-screenshot-windows",
- "rcr-screenshot-x11",
- "rcr-workflows",
- "rgb",
- "rubato",
- "rustix 1.1.5",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "wayland-server",
- "windows 0.62.2",
- "x11rb 0.14.0",
- "zbus",
-]
-
-[[package]]
-name = "rcr-screenshot"
-version = "0.1.0"
-dependencies = [
- "rcr-image-types",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "rcr-screenshot-app"
-version = "0.1.0"
-dependencies = [
- "async-io",
- "chrono",
- "clap",
- "ctrlc",
- "futures-lite 2.6.1",
- "image",
- "ksni",
- "notify",
- "notify-rust",
- "opener",
- "rcr-hotkeys",
- "rcr-image-types",
- "rcr-ipc",
- "rcr-platform",
- "rcr-toolkit-services",
- "rcr-workflows",
- "rfd",
- "rustix 1.1.5",
- "serde",
- "serde_json",
- "tao",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "tray-icon",
- "wayland-client",
- "wayland-protocols-misc",
- "wayland-protocols-wlr",
- "wiremock",
- "x11rb 0.14.0",
- "zbus",
-]
-
-[[package]]
-name = "rcr-screenshot-overlay"
-version = "0.1.0"
-dependencies = [
- "font8x8",
- "image",
- "memmap2",
- "proptest",
- "rcr-image-types",
- "rustix 1.1.5",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "tracing-subscriber",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-misc",
- "wayland-protocols-wlr",
- "windows 0.62.2",
- "x11rb 0.14.0",
-]
-
-[[package]]
-name = "rcr-screenshot-portal"
-version = "0.1.0"
-dependencies = [
- "ashpd 0.13.13",
- "async-io",
- "futures-lite 2.6.1",
- "image",
- "rcr-image-types",
- "rcr-screenshot",
- "thiserror 2.0.21",
- "tracing",
- "wayland-client",
- "wayland-protocols",
- "zbus",
-]
-
-[[package]]
-name = "rcr-screenshot-wayland"
-version = "0.1.0"
-dependencies = [
- "rcr-image-types",
- "rcr-screenshot",
- "rustix 1.1.5",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "wayland-server",
-]
-
-[[package]]
-name = "rcr-screenshot-windows"
-version = "0.1.0"
-dependencies = [
- "half",
- "rcr-image-types",
- "rcr-screenshot",
- "thiserror 2.0.21",
- "tracing",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "rcr-screenshot-x11"
-version = "0.1.0"
-dependencies = [
- "rcr-image-types",
- "rcr-screenshot",
- "rustix 1.1.5",
- "thiserror 2.0.21",
- "tracing",
- "x11rb 0.14.0",
-]
-
-[[package]]
-name = "rcr-shell"
-version = "0.1.0"
-dependencies = [
- "plist",
- "quick-xml 0.42.0",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "windows-registry 0.6.1",
-]
-
-[[package]]
-name = "rcr-toolkit"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "crc32fast",
- "image",
- "md-5",
- "rayon",
- "rcr-disk",
- "rcr-hdr",
- "rcr-image-editor",
- "rcr-image-effects",
- "rcr-image-types",
- "rcr-toolkit-services",
- "rcr-upload",
- "rcr-workflows",
- "rqrr",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "toml 0.9.12+spec-1.1.0",
- "url",
- "windows 0.61.3",
-]
-
-[[package]]
-name = "rcr-toolkit-services"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "half",
- "keyring",
- "notify-rust",
- "opener",
- "rcr-hdr",
- "rcr-image-types",
- "rcr-platform",
- "rcr-recording-tools",
- "rcr-screenshot",
- "rcr-screenshot-overlay",
- "rcr-upload",
- "rcr-workflows",
- "rfd",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "toml 0.9.12+spec-1.1.0",
- "tracing",
- "url",
- "wiremock",
- "zip",
-]
-
-[[package]]
-name = "rcr-toolkit-settings-ui"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "eframe",
- "egui",
- "egui_kittest",
- "half",
- "image",
- "proptest",
- "rcr-cli",
- "rcr-hdr",
- "rcr-hotkeys",
- "rcr-image-editor-ui",
- "rcr-image-types",
- "rcr-shell",
- "rcr-toolkit-services",
- "rcr-upload",
- "rcr-workflows",
- "rfd",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "toml 0.9.12+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "windows-registry 0.6.1",
-]
-
-[[package]]
-name = "rcr-upload"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "fancy-regex",
- "futures-util",
- "http-body",
- "httpdate",
- "indexmap",
- "mime_guess",
- "percent-encoding",
- "proptest",
- "rand 0.9.5",
- "reqwest",
- "rustls",
- "rustls-platform-verifier 0.6.2",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sxd-document",
- "sxd-xpath",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "rcr-windows"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "libloading",
- "rcr-media-core",
- "rcr-media-io",
- "rcr-nvenc-sys",
- "serde",
- "serde_json",
- "tempfile",
- "windows 0.61.3",
- "windows-core 0.61.2",
-]
-
-[[package]]
-name = "rcr-workflows"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "directories",
- "fs4 0.13.1",
- "image",
- "proptest",
- "qrcode",
- "rcr-image-types",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.21",
- "toml 0.9.12+spec-1.1.0",
- "tracing",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "read-fonts"
 version = "0.39.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7638,6 +7293,44 @@ name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
+
+[[package]]
+name = "recording-tools"
+version = "0.1.0"
+dependencies = [
+ "ashpd 0.13.13",
+ "async-io",
+ "cpal",
+ "directories",
+ "ffmpeg-next",
+ "ffmpeg-sys-next",
+ "gifski",
+ "half",
+ "hdr",
+ "image-gpu",
+ "image-types",
+ "imgref",
+ "pipewire",
+ "rgb",
+ "rubato",
+ "rustix 1.1.5",
+ "screenshot",
+ "screenshot-wayland",
+ "screenshot-windows",
+ "screenshot-x11",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-server",
+ "windows 0.62.2",
+ "workflows",
+ "x11rb 0.14.0",
+ "zbus",
+]
 
 [[package]]
 name = "recvmsg"
@@ -8245,6 +7938,136 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "screenshot"
+version = "0.1.0"
+dependencies = [
+ "image-types",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "screenshot-app"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "chrono",
+ "clap",
+ "ctrlc",
+ "futures-lite 2.6.1",
+ "hotkeys",
+ "image",
+ "image-types",
+ "ipc",
+ "ksni",
+ "notify",
+ "notify-rust",
+ "opener",
+ "platform",
+ "rfd",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "tao",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toolkit-services",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tray-icon",
+ "wayland-client",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "wiremock",
+ "workflows",
+ "x11rb 0.14.0",
+ "zbus",
+]
+
+[[package]]
+name = "screenshot-overlay"
+version = "0.1.0"
+dependencies = [
+ "font8x8",
+ "image",
+ "image-types",
+ "memmap2",
+ "proptest",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "windows 0.62.2",
+ "x11rb 0.14.0",
+]
+
+[[package]]
+name = "screenshot-portal"
+version = "0.1.0"
+dependencies = [
+ "ashpd 0.13.13",
+ "async-io",
+ "futures-lite 2.6.1",
+ "image",
+ "image-types",
+ "screenshot",
+ "thiserror 2.0.21",
+ "tracing",
+ "wayland-client",
+ "wayland-protocols",
+ "zbus",
+]
+
+[[package]]
+name = "screenshot-wayland"
+version = "0.1.0"
+dependencies = [
+ "image-types",
+ "rustix 1.1.5",
+ "screenshot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-server",
+]
+
+[[package]]
+name = "screenshot-windows"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "image-types",
+ "screenshot",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "screenshot-x11"
+version = "0.1.0"
+dependencies = [
+ "image-types",
+ "rustix 1.1.5",
+ "screenshot",
+ "thiserror 2.0.21",
+ "tracing",
+ "x11rb 0.14.0",
+]
+
+[[package]]
 name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8469,6 +8292,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shell"
+version = "0.1.0"
+dependencies = [
+ "plist",
+ "quick-xml 0.42.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -9554,6 +9389,99 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
+name = "toolkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "crc32fast",
+ "disk",
+ "hdr",
+ "image",
+ "image-editor",
+ "image-effects",
+ "image-types",
+ "md-5",
+ "rayon",
+ "rqrr",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+ "toolkit-services",
+ "upload",
+ "url",
+ "windows 0.61.3",
+ "workflows",
+]
+
+[[package]]
+name = "toolkit-services"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "half",
+ "hdr",
+ "image-types",
+ "keyring",
+ "notify-rust",
+ "opener",
+ "platform",
+ "recording-tools",
+ "rfd",
+ "screenshot",
+ "screenshot-overlay",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+ "upload",
+ "url",
+ "wiremock",
+ "workflows",
+ "zip",
+]
+
+[[package]]
+name = "toolkit-settings-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "cli",
+ "eframe",
+ "egui",
+ "egui_kittest",
+ "half",
+ "hdr",
+ "hotkeys",
+ "image",
+ "image-editor-ui",
+ "image-types",
+ "proptest",
+ "rfd",
+ "serde",
+ "serde_json",
+ "shell",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 0.9.12+spec-1.1.0",
+ "toolkit-services",
+ "tracing",
+ "tracing-subscriber",
+ "upload",
+ "windows-registry 0.6.1",
+ "workflows",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9866,6 +9794,40 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "upload"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "fancy-regex",
+ "futures-util",
+ "http-body",
+ "httpdate",
+ "indexmap",
+ "mime_guess",
+ "percent-encoding",
+ "proptest",
+ "rand 0.9.5",
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier 0.6.2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sxd-document",
+ "sxd-xpath",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "wiremock",
+]
 
 [[package]]
 name = "url"
@@ -10828,6 +10790,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-capture"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libloading",
+ "media-core",
+ "media-io",
+ "nvenc-sys",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
+]
+
+[[package]]
 name = "windows-collections"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11435,6 +11413,28 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "workflows"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "directories",
+ "fs4 0.13.1",
+ "image",
+ "image-types",
+ "proptest",
+ "qrcode",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]

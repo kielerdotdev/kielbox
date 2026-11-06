@@ -1,7 +1,7 @@
 //! GPUI front end for local ShareX-style utilities.
 use crate::{image_editor::render_image, text_input::TextInput, theme::*};
 use gpui::{prelude::*, *};
-use rcr_toolkit::{
+use ::toolkit::{
     core::workflow::{CancelToken, Clipboard},
     services,
     types::Frame,
@@ -69,7 +69,7 @@ pub struct Utilities {
     screen_feedback: ScreenFeedback,
     job: Option<(CancelToken, mpsc::Receiver<anyhow::Result<WorkResult>>)>,
     screen: Option<mpsc::Receiver<anyhow::Result<crate::screen_tools::Picked>>>,
-    borderless: Arc<std::sync::Mutex<Vec<rcr_toolkit::window_tools::Borderless>>>,
+    borderless: Arc<std::sync::Mutex<Vec<::toolkit::window_tools::Borderless>>>,
 }
 impl EventEmitter<UtilityEvent> for Utilities {}
 impl Utilities {
@@ -300,7 +300,7 @@ impl Utilities {
         let spawn = std::thread::Builder::new()
             .name("rcr-utility".into())
             .spawn(move || {
-                let result = rcr_toolkit::utilities::with_pool(move || work(token)).and_then(|r| r);
+                let result = ::toolkit::utilities::with_pool(move || work(token)).and_then(|r| r);
                 let _ = tx.send(result);
             });
         match spawn {
@@ -746,7 +746,7 @@ impl Utilities {
                 "A late save stole the active screen tool's worker slot");
             self.start(|_| panic!("Ordinary work admitted during screen acquisition"), cx);
             anyhow::ensure!(self.job.is_none(), "Screen acquisition allowed competing work");
-            use rcr_toolkit::core::workflow::{QrCodeRenderer, QrRenderer};
+            use ::toolkit::core::workflow::{QrCodeRenderer, QrRenderer};
             tx.send(Ok(crate::screen_tools::Picked { mode: crate::screen_tools::Mode::Qr,
                 text: String::new(), image: Some(QrCodeRenderer.render(PAYLOAD)?) }))?;
             self.poll(cx);
@@ -767,7 +767,7 @@ impl Utilities {
             if self.tool == Tool::Color {
                 self.result = Some(Output {
                     text: utilities::color_text([12, 34, 56, 255]),
-                    image: Some(Arc::new(rcr_toolkit::effects::solid_frame(
+                    image: Some(Arc::new(::toolkit::effects::solid_frame(
                         240,
                         120,
                         [12, 34, 56, 255],
@@ -780,7 +780,7 @@ impl Utilities {
             }
             if self.tool == Tool::Windows {
                 self.result = Some(message(
-                    serde_json::to_string(&vec![rcr_toolkit::window_tools::Info {
+                    serde_json::to_string(&vec![::toolkit::window_tools::Info {
                         handle: 0,
                         process: 0,
                         title: "Synthetic fixture".into(),
@@ -799,7 +799,7 @@ impl Utilities {
             false
         }
     }
-    fn borderless(&mut self, info: rcr_toolkit::window_tools::Info, cx: &mut Context<Self>) {
+    fn borderless(&mut self, info: ::toolkit::window_tools::Info, cx: &mut Context<Self>) {
         let saved = self.borderless.clone();
         self.side_job(
             move |cancel| {
@@ -808,7 +808,7 @@ impl Utilities {
                 if saved.iter().any(|s| s.handle() == info.handle) {
                     return Ok(());
                 }
-                saved.push(rcr_toolkit::window_tools::Borderless::apply(&info)?);
+                saved.push(::toolkit::window_tools::Borderless::apply(&info)?);
                 Ok(())
             },
             "Window borders removed · use Restore windows to undo",
@@ -1219,7 +1219,7 @@ impl Render for Utilities {
                         .on_click(cx.listener(|this, _, _, cx| this.restore_windows(cx))),
                 );
                 if let Ok(windows) =
-                    serde_json::from_str::<Vec<rcr_toolkit::window_tools::Info>>(&out.text)
+                    serde_json::from_str::<Vec<::toolkit::window_tools::Info>>(&out.text)
                 {
                     for (i, info) in windows.into_iter().enumerate() {
                         let action = info.clone();
@@ -1354,7 +1354,7 @@ impl Drop for Utilities {
 #[cfg(test)]
 mod feedback_tests {
     use super::{DialogTicket, ScreenFeedback};
-    use rcr_toolkit::utilities::Tool;
+    use ::toolkit::utilities::Tool;
 
     #[test]
     fn result_dialog_requires_same_tool_inputs_result_and_idle_worker() {

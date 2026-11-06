@@ -2,8 +2,8 @@
 
 ## Disk usage
 
-For developer artifact cleanup, use the separate [rcr-clean CLI](../crates/rcr-clean/README.md):
-`rcr-clean C:\src --apply` removes eligible dependencies, build output, project
+For developer artifact cleanup, use the separate [clean CLI](../crates/clean/README.md):
+`clean C:\src --apply` removes eligible dependencies, build output, project
 caches and Git worktrees older than 30 days. Omit `--apply` to preview. It shares
 the disk scanner with the desktop explorer and runs without the UI.
 
@@ -19,7 +19,7 @@ Scanning runs on a cancellable worker; file lists are virtualized. Results use l
 
 For whole local NTFS drives, run RCR as administrator to enable **NTFS MFT** scanning. This reads file records and lengths in sequential batches, then assembles the directory tree without opening each file. The status bar identifies the backend actually used. Folders, other filesystems and inaccessible raw volumes use **Windows directory batches**, obtaining names, sizes and attributes together rather than querying each file separately. Other platforms retain ordinary directory traversal. Raw NTFS reads do not lock or modify the volume; a changing filesystem can still produce an inconsistent snapshot. Unsupported MFT layouts fall back to directory scanning.
 
-For repeatable timing in PowerShell, `cargo run -p rcr-toolkit --example disk_scan_bench -j1 -- 'C:\'` prints backend, elapsed time and totals. Add `--directory` to force the fallback. Use the same root and account privileges when comparing runs; filesystem caches affect timings.
+For repeatable timing in PowerShell, `cargo run -p toolkit --example disk_scan_bench -j1 -- 'C:\'` prints backend, elapsed time and totals. Add `--directory` to force the fallback. Use the same root and account privileges when comparing runs; filesystem caches affect timings.
 
 You can also launch `rcr.exe --analyze-folder "C:\Users"`. `scripts/verify-disk-usage.ps1` scans a small owned fixture and captures the app's GPUI render target at two window sizes without desktop automation. Layout follows the linked-list/treemap approach described by [WinDirStat](https://github.com/windirstat/windirstat/wiki/Reading-Results); logical versus allocated sizes and privileged scanning are explained in the [WizTree FAQ](https://diskanalyzer.com/faq).
 
@@ -64,8 +64,8 @@ Behavior references: [ShareX tools](https://getsharex.com/), [directory indexer]
 ```powershell
 cargo test --workspace -j1
 cargo clippy --workspace --all-targets -j1 -- -D warnings
-cargo run -p rcr-toolkit --example utility-proof -j1 -- recordings/mux-audio-fixture-001.mkv
-.\scripts\verify-toolkit.ps1 -Executable target/debug/rcr-desktop.exe
+cargo run -p toolkit --example utility-proof -j1 -- recordings/mux-audio-fixture-001.mkv
+.\scripts\verify-toolkit.ps1 -Executable target/debug/desktop.exe
 ```
 
 The proof uses synthetic image/text fixtures and the existing synthetic two-track recording. Native smoke tests use hidden windows with synthetic pointer/key events; they never capture the real desktop or write the system clipboard.

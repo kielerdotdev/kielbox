@@ -1,7 +1,7 @@
 //! Integration fixture: existing AV1 proof + isolated 440/880 Hz audio tracks.
 use anyhow::{Context, Result};
-use rcr_media_core::*;
-use rcr_media_io::*;
+use media_core::*;
+use media_io::*;
 use std::{
     fs::File,
     io::{ErrorKind, Read},

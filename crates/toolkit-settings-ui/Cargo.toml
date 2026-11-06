@@ -1,0 +1,67 @@
+[package]
+name = "toolkit-settings-ui"
+description = "egui window for ssx settings and history: general, capture and HDR, workflows, hotkeys, uploaders, history, integration (library + `toolkit-settings-ui` binary)."
+version.workspace = true
+edition = "2024"
+# egui/eframe 0.35 need a newer compiler than the workspace floor.
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+default-run = "toolkit-settings-ui"
+
+[lib]
+name = "toolkit_settings_ui"
+
+[[bin]]
+name = "toolkit-settings-ui"
+path = "src/main.rs"
+
+[features]
+# Mirrors cli so the Integration page's diagnostics describe the build that would be
+# shipped. The defaults match `cli` (recorder with the system FFmpeg); a release build
+# selects the linkage explicitly with `--no-default-features` (see .github/workflows/release.yml).
+default = ["record", "ffmpeg"]
+record = ["cli/record"]
+ffmpeg = ["record", "cli/ffmpeg"]
+ffmpeg-static = ["record", "cli/ffmpeg-static"]
+
+[dependencies]
+image-types.workspace = true
+workflows.workspace = true
+hdr.workspace = true
+hotkeys.workspace = true
+shell.workspace = true
+upload.workspace = true
+toolkit-services = { path = "../toolkit-services" }
+# `default-features = false`: the FFmpeg linkage is chosen by this crate's own features above.
+# Otherwise cargo's feature unification would switch on the system FFmpeg in every build that
+# includes the settings window, including static and FFmpeg-free ones.
+cli = { path = "../cli", default-features = false }
+# Reused for the dark theme and the shared widgets/icons, so both windows look like one product.
+image-editor-ui = { path = "../image-editor-ui" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+image.workspace = true
+half.workspace = true
+toml = "0.9"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wayland", "x11", "wgpu"] }
+egui = "0.35"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }
+clap = { version = "4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+# Same version shell uses for the classic Explorer verbs.
+windows-registry = "0.6"
+
+[dev-dependencies]
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+tempfile = "3"
+
+[lints]
+workspace = true

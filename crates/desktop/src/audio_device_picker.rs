@@ -1,8 +1,8 @@
 //! Read-only audio endpoint selection; enumeration never activates a stream.
 use crate::{preferences::SavedAudioEndpoint, text_input::TextInput, theme::*};
 use gpui::{prelude::*, *};
-pub use rcr_windows::audio_endpoint::AudioEndpointKind;
-use rcr_windows::audio_endpoint::{
+pub use windows_capture::audio_endpoint::AudioEndpointKind;
+use windows_capture::audio_endpoint::{
     AudioEndpoint, AudioEndpointList, enumerate_audio_endpoints_cancellable,
 };
 use std::{

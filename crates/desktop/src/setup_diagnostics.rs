@@ -1,6 +1,6 @@
 //! Read-only setup inspection. Never initialize capture, an encoder, or an audio
 //! endpoint. Call on a worker (or before GPUI starts for the CLI).
-use rcr_toolkit::{
+use ::toolkit::{
     core::workflow::CancelToken,
     services::command::{ProcessOutput, ProcessSpec, STDOUT_HEAD_BYTES, run_process},
 };

@@ -39,7 +39,7 @@ All nine setup-diagnostic tests passed in the integrated Desktop checkpoint of 2
 Added regressions cover deterministic PATH resolution, missing explicit overrides, exact encoder-token parsing, cancellation, startup/deadline errors, missing debug checkout files, and preserving conflicting data files. A native test-binary child exercises a hung process, nonzero exit, and oversized stdout/stderr without a shell, media processing, or hardware activation. Run centrally:
 
 ```powershell
-cargo test -p rcr-desktop setup_diagnostics::tests
+cargo test -p desktop setup_diagnostics::tests
 ```
 
 Do not treat a successful setup report as a hardware qualification or recording-quality evaluation. Those require separate, explicitly authorized capture/encoder tests.

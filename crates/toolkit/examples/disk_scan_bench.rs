@@ -1,5 +1,5 @@
 //! Run from an administrator terminal for a whole-volume NTFS measurement.
-use rcr_toolkit::{core::workflow::CancelToken, disk_usage};
+use toolkit::{core::workflow::CancelToken, disk_usage};
 use std::{env, path::PathBuf};
 
 fn main() -> std::io::Result<()> {
