@@ -36,6 +36,10 @@ pub struct Counters {
     pub audio_samples: AtomicU64,
     /// Audio sample frames discarded (overflow, pause) or synthesised as silence.
     pub audio_silence_samples: AtomicU64,
+    /// Audio frames arriving after their mixed timeline position was emitted.
+    pub audio_late_samples: AtomicU64,
+    /// Hard timestamp resynchronizations across audio sources.
+    pub audio_resyncs: AtomicU64,
     /// Bytes of the output file so far (sampled).
     pub file_bytes: AtomicU64,
     /// Highest slot index that reached the encoder (+1), i.e. the encoded timeline length.
@@ -57,6 +61,8 @@ impl Counters {
             encoded: self.encoded.load(Relaxed),
             audio_samples: self.audio_samples.load(Relaxed),
             audio_silence_samples: self.audio_silence_samples.load(Relaxed),
+            audio_late_samples: self.audio_late_samples.load(Relaxed),
+            audio_resyncs: self.audio_resyncs.load(Relaxed),
             file_bytes: self.file_bytes.load(Relaxed),
             recorded,
         }
@@ -88,6 +94,8 @@ pub struct StatsSnapshot {
     pub audio_samples: u64,
     /// Audio sample frames of silence inserted to bridge gaps.
     pub audio_silence_samples: u64,
+    pub audio_late_samples: u64,
+    pub audio_resyncs: u64,
     /// Output file size in bytes (sampled while running, exact after `stop`).
     pub file_bytes: u64,
     /// Recorded (paused time excluded) duration.

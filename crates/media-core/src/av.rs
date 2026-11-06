@@ -173,7 +173,7 @@ impl AvReplayBuffer {
                 .push_back(packet);
         }
         self.prune_audio();
-        while self.bytes > self.max_bytes || self.duration_ns() > self.max_ns {
+        while self.bytes > self.max_bytes || self.can_prune_time() {
             if let Some(packet) = self.video.pop_front() {
                 self.bytes -= packet.memory_bytes();
             }
@@ -185,6 +185,26 @@ impl AvReplayBuffer {
                 break;
             }
         }
+    }
+    fn can_prune_time(&self) -> bool {
+        if self.duration_ns() <= self.max_ns {
+            return false;
+        }
+        // Keep the GOP containing the requested start. Removing it as soon as
+        // the duration exceeds the target makes a five-minute replay up to a
+        // whole GOP too short. The byte ceiling still takes precedence.
+        let Some(end) = self
+            .video
+            .back()
+            .map(|packet| packet.pts_ns + packet.duration_ns)
+        else {
+            return false;
+        };
+        self.video
+            .iter()
+            .skip(1)
+            .find(|packet| packet.keyframe)
+            .is_some_and(|next| end.saturating_sub(next.pts_ns) >= self.max_ns)
     }
     fn prune_audio(&mut self) {
         // Audio callbacks can precede the first asynchronous encoder completion.
@@ -355,6 +375,80 @@ mod tests {
             duration_ns: 10_000_000,
             keyframe,
             data: vec![0; bytes].into(),
+        }
+    }
+    #[test]
+    fn a_requested_history_keeps_the_keyframe_before_its_start() {
+        let mut ring = AvReplayBuffer::new(100_000, 3).unwrap();
+        for second in 0..10 {
+            ring.push(MediaPacket {
+                track: 1,
+                pts_ns: second * NS_PER_SECOND,
+                duration_ns: NS_PER_SECOND,
+                keyframe: second.is_multiple_of(2),
+                data: vec![0; 100].into(),
+            });
+            if second >= 2 {
+                assert!(ring.duration_ns() >= 3 * NS_PER_SECOND);
+                assert!(ring.duration_ns() <= 4 * NS_PER_SECOND);
+                let saved = ring.snapshot(3);
+                assert!(saved[0].keyframe);
+                assert!(saved[0].pts_ns <= (second + 1 - 3) * NS_PER_SECOND);
+            }
+        }
+    }
+    #[test]
+    fn five_minute_retention_covers_all_desktop_bitrates_and_audio_counts() {
+        use crate::{replay_memory_budget, VideoConfig};
+        // Reuse immutable payloads: this tests the real ring's byte accounting
+        // across six virtual minutes without allocating gigabytes of test data.
+        for bitrate in [15_000_000, 25_000_000, 50_000_000] {
+            for audio_tracks in 0..=2 {
+                let config = VideoConfig {
+                    bitrate,
+                    ..Default::default()
+                };
+                let budget = replay_memory_budget(&config, 300, audio_tracks).unwrap();
+                let mut ring = AvReplayBuffer::new(budget, 300).unwrap();
+                let video: Arc<[u8]> = vec![0; (bitrate as usize).div_ceil(8 * 60)].into();
+                let audio: Arc<[u8]> = vec![0; 48_000 * AUDIO_FRAME_BYTES / 60].into();
+                for frame in 0..360_u64 * 60 {
+                    let start = frame * NS_PER_SECOND / 60;
+                    let duration = (frame + 1) * NS_PER_SECOND / 60 - start;
+                    ring.push(MediaPacket {
+                        track: 1,
+                        pts_ns: start,
+                        duration_ns: duration,
+                        keyframe: frame.is_multiple_of(120),
+                        data: video.clone(),
+                    });
+                    for track in 0..audio_tracks {
+                        ring.push(MediaPacket {
+                            track: track as u8 + 2,
+                            pts_ns: start,
+                            duration_ns: duration,
+                            keyframe: true,
+                            data: audio.clone(),
+                        });
+                    }
+                    assert!(ring.bytes() <= budget);
+                    if frame >= 300 * 60 {
+                        assert!(
+                            ring.duration_ns() >= 300 * NS_PER_SECOND,
+                            "{bitrate}, {audio_tracks}, {frame}"
+                        );
+                        assert!(ring.duration_ns() <= 302 * NS_PER_SECOND);
+                    }
+                }
+                let saved = ring.snapshot(300);
+                assert!(saved
+                    .first()
+                    .is_some_and(|packet| packet.track == 1 && packet.keyframe));
+                assert_eq!(
+                    saved.iter().filter(|packet| packet.track != 1).count(),
+                    audio_tracks * 300 * 60
+                );
+            }
         }
     }
     #[test]

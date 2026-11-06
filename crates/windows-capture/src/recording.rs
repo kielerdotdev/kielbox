@@ -2,30 +2,64 @@ use crate::{
     audio::{self, AudioEvent, AudioWorkers},
     gpu::{Capture, CaptureRecoveryEvent, Converter, PreviewSurface},
     nvenc::Nvenc,
-    pipeline::{PipelineEvent, RecorderCommand, RunOptions},
+    pipeline::{observe, CapturePhase, PipelineEvent, RecorderCommand, RunOptions},
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use rcr_media_core::{
     AudioTrack, AvReplayBuffer, MediaPacket, PipelineStats, VideoCapture, VideoConfig, VideoEncoder,
 };
-use rcr_media_io::{MatroskaWriter, contains_sequence_header, save_snapshot};
+use rcr_media_io::{contains_sequence_header, save_snapshot, MatroskaWriter};
 use std::{
     path::PathBuf,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
     thread,
     time::{Duration, Instant},
 };
 
 type Events = Option<mpsc::SyncSender<PipelineEvent>>;
-struct ReplaySave {
-    worker: thread::JoinHandle<Result<PathBuf>>,
+pub struct ReplaySave {
+    worker: Option<thread::JoinHandle<Result<PathBuf>>>,
     cancel: Arc<AtomicBool>,
 }
+impl ReplaySave {
+    pub fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .is_none_or(thread::JoinHandle::is_finished)
+    }
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+    pub fn complete(mut self) -> Result<PathBuf> {
+        self.worker
+            .take()
+            .expect("owned replay worker")
+            .join()
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Replay writer panicked")))
+    }
+}
+impl Drop for ReplaySave {
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
 type SaveJob = Option<ReplaySave>;
+
+fn handoff_save(job: &mut SaveJob, events: &Events) {
+    if let Some(events) = events.as_ref() {
+        if let Some(job) = job.take() {
+            // Failed delivery drops the owning handle, cancelling and joining
+            // the worker instead of detaching an invisible replay save.
+            let _ = events.send(PipelineEvent::ReplayPending(job));
+        }
+    }
+}
 
 struct RecordingOutput {
     sender: mpsc::SyncSender<MediaPacket>,
@@ -244,9 +278,16 @@ fn writer(
     for packet in queue {
         muxer.packet(&packet)?;
     }
-    let mut statistics = serde_json::to_value(final_stats.recv().context("recording statistics sender stopped")?)?;
+    let mut statistics = serde_json::to_value(
+        final_stats
+            .recv()
+            .context("recording statistics sender stopped")?,
+    )?;
     // A moved clip must not carry a stale machine-local output pathname.
-    statistics.as_object_mut().expect("PipelineStats is an object").remove("output");
+    statistics
+        .as_object_mut()
+        .expect("PipelineStats is an object")
+        .remove("output");
     muxer.finish_with_metadata(&serde_json::json!({
         "statistics": statistics,
         "statistics_scope": "capture_stream_drain"
@@ -293,6 +334,7 @@ fn receive_audio(
         match event {
             AudioEvent::Packet(packet) => consume(packet, ring, output, stats, finalizing)?,
             AudioEvent::Discontinuity => stats.audio_discontinuities += 1,
+            AudioEvent::Notice(notice) => notify(events, PipelineEvent::Notice(notice)),
             AudioEvent::Error(error) => {
                 if !stats.audio_errors.contains(&error) {
                     stats.audio_errors.push(error.clone());
@@ -347,34 +389,36 @@ fn start_save(
     // Only one snapshot can be pinned: retained payload <= one additional ring budget.
     *job = Some(ReplaySave {
         cancel,
-        worker: thread::Builder::new()
-            .name("rcr-replay-save".into())
-            .spawn(move || {
-                // Offline CPU work must not compete with capture scheduling.
-                unsafe {
-                    let _ = windows::Win32::System::Threading::SetThreadPriority(
-                        windows::Win32::System::Threading::GetCurrentThread(),
-                        windows::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL,
-                    );
-                }
-                if suppress_microphone {
-                    rcr_media_io::suppress_microphone(&mut packets, &audio, || {
-                        worker_cancel.load(Ordering::Relaxed)
-                    })?;
-                    for track in &mut audio {
-                        if track.source == rcr_media_core::AudioSource::Microphone {
-                            track.name.push_str(" (DPDFNet)");
+        worker: Some(
+            thread::Builder::new()
+                .name("rcr-replay-save".into())
+                .spawn(move || {
+                    // Offline CPU work must not compete with capture scheduling.
+                    unsafe {
+                        let _ = windows::Win32::System::Threading::SetThreadPriority(
+                            windows::Win32::System::Threading::GetCurrentThread(),
+                            windows::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL,
+                        );
+                    }
+                    if suppress_microphone {
+                        rcr_media_io::suppress_microphone(&mut packets, &audio, || {
+                            worker_cancel.load(Ordering::Relaxed)
+                        })?;
+                        for track in &mut audio {
+                            if track.source == rcr_media_core::AudioSource::Microphone {
+                                track.name.push_str(" (DPDFNet)");
+                            }
                         }
                     }
-                }
-                save_snapshot(&path, &video, &audio, &packets)
-            })?,
+                    save_snapshot(&path, &video, &audio, &packets)
+                })?,
+        ),
     });
     Ok(())
 }
 fn finish_save(job: &mut SaveJob, stats: &mut PipelineStats, events: &Events, wait: bool) {
     if wait {
-        while job.as_ref().is_some_and(|j| !j.worker.is_finished()) {
+        while job.as_ref().is_some_and(|j| !j.is_finished()) {
             if let (Some(job), Some(events)) = (job.as_ref(), events) {
                 if matches!(
                     events.try_send(PipelineEvent::Stats(stats.clone())),
@@ -386,19 +430,15 @@ fn finish_save(job: &mut SaveJob, stats: &mut PipelineStats, events: &Events, wa
             thread::sleep(Duration::from_millis(25));
         }
     }
-    if job.as_ref().is_some_and(|j| j.worker.is_finished()) {
-        match job.take().unwrap().worker.join() {
-            Ok(Ok(path)) => {
+    if job.as_ref().is_some_and(ReplaySave::is_finished) {
+        match job.take().unwrap().complete() {
+            Ok(path) => {
                 stats.replay_saves += 1;
                 replay_notify(events, PipelineEvent::ReplaySaved(path));
             }
-            Ok(Err(error)) => replay_notify(
+            Err(error) => replay_notify(
                 events,
                 PipelineEvent::Notice(format!("Replay save failed: {error:#}")),
-            ),
-            Err(_) => replay_notify(
-                events,
-                PipelineEvent::Notice("Replay writer panicked".into()),
             ),
         }
     }
@@ -530,6 +570,7 @@ pub fn run(
         (None, None, None)
     };
     let start = Instant::now();
+    observe(&options, CapturePhase::CaptureStarted);
     let fps = u64::from(options.video.fps);
     let total = options.seconds.map(|s| (s * fps as f64).round() as u64);
     let mut pts = 0u64;
@@ -631,6 +672,7 @@ pub fn run(
         Ok(())
     })();
     stats.elapsed_seconds = start.elapsed().as_secs_f64();
+    observe(&options, CapturePhase::CaptureLoopStopped);
     let finalize = Instant::now();
     if let Some(output) = &mut output {
         // Any failure is retained below; neither stream may be skipped because
@@ -639,21 +681,40 @@ pub fn run(
     }
     let result = finalize_streams(result, |stream| match stream {
         FinalizeStream::Video => {
-            encoder.flush()?;
-            while encoder.pending() > 0 {
-                if let Some(packet) = encoder.receive(true)? {
-                    let mut packet = MediaPacket::video(packet, options.video.fps);
-                    packet.keyframe = packet.keyframe && contains_sequence_header(&packet.data);
-                    consume(packet, &mut ring, &mut output, &mut stats, true)?;
+            let started = Instant::now();
+            let result = (|| {
+                encoder.flush()?;
+                while encoder.pending() > 0 {
+                    if let Some(packet) = encoder.receive(true)? {
+                        let mut packet = MediaPacket::video(packet, options.video.fps);
+                        packet.keyframe = packet.keyframe && contains_sequence_header(&packet.data);
+                        consume(packet, &mut ring, &mut output, &mut stats, true)?;
+                    }
                 }
-            }
-            Ok(())
+                Ok(())
+            })();
+            stats.encoder_finalization_seconds = started.elapsed().as_secs_f64();
+            result
         }
         FinalizeStream::Audio => {
+            let started = Instant::now();
             audio.stop();
-            receive_audio(&audio, &mut ring, &mut output, &mut stats, &events, true)
+            let result = receive_audio(&audio, &mut ring, &mut output, &mut stats, &events, true);
+            stats.audio_finalization_seconds = started.elapsed().as_secs_f64();
+            result
         }
     });
+    // Release GPU capture before disk/replay processing. Previously the implicit
+    // encoder destructor ran after Finished, hiding its completion waits from
+    // both finalization statistics and the UI's "finishing" state.
+    let releasing = Instant::now();
+    drop(views);
+    drop(encoder);
+    drop(preview);
+    drop(converter);
+    drop(capture);
+    observe(&options, CapturePhase::GpuReleased);
+    stats.encoder_finalization_seconds += releasing.elapsed().as_secs_f64();
     let result = combine_failure(
         result,
         match output
@@ -671,18 +732,31 @@ pub fn run(
     // cancelled empty session rather than a recording failure.
     if stop.load(Ordering::Relaxed) && stats.encoded == 0 && result.is_ok() {
         drop(writer_stats);
-        if let Some(worker) = writer_thread { let _ = worker.join(); }
+        if let Some(worker) = writer_thread {
+            let _ = worker.join();
+        }
         stats.finalization_seconds = finalize.elapsed().as_secs_f64();
         return Ok(finish_empty_capture(stats, commands.as_ref(), &events));
     }
     stats.finalization_seconds = finalize.elapsed().as_secs_f64();
-    if let Err(error) = &result { stats.error = Some(format!("{error:#}")); }
+    if let Err(error) = &result {
+        stats.error = Some(format!("{error:#}"));
+    }
     // Publish the recording before waiting for offline replay cleaning. The
     // single snapshot describes capture drain, not later replay completions.
-    if let Some(sender) = writer_stats { let _ = sender.send(stats.clone()); }
+    if let Some(sender) = writer_stats {
+        let _ = sender.send(stats.clone());
+    }
+    let writer_started = Instant::now();
     let writer_result = writer_thread.map(|worker| {
-        worker.join().unwrap_or_else(|_| Err(anyhow::anyhow!("recording writer panicked")))
+        worker
+            .join()
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("recording writer panicked")))
     });
+    stats.writer_finalization_seconds = writer_started.elapsed().as_secs_f64();
+    if writer_result.as_ref().is_some_and(Result::is_ok) {
+        observe(&options, CapturePhase::RecordingPublished);
+    }
     // A SaveReplay accepted immediately before Stop is still owned by this
     // session. Drain it before destroying the ring, including replay→record.
     // Quit disconnects the UI first and cancels instead of launching new work.
@@ -697,6 +771,7 @@ pub fn run(
     } else {
         None
     };
+    let replay_started = Instant::now();
     finish_save(&mut save_job, &mut stats, &events, false);
     let failures = service_replay_commands(commands.as_ref(), rejection, |command| {
         let RecorderCommand::SaveReplay {
@@ -716,6 +791,17 @@ pub fn run(
     });
     for failure in failures {
         replay_notify(&events, PipelineEvent::Notice(failure));
+    }
+    // Desktop owns unfinished offline work across capture sessions. Handoff
+    // occurs only after GPU retirement and disk publication, so starting the
+    // next capture cannot overlap the old hardware session. CLI callers keep
+    // synchronous completion and save-on-stop still waits for its output.
+    if !options.save_on_stop && !closing {
+        let pending = save_job.is_some();
+        handoff_save(&mut save_job, &events);
+        if pending && save_job.is_none() {
+            observe(&options, CapturePhase::ReplayHandedOff);
+        }
     }
     finish_save(&mut save_job, &mut stats, &events, true);
     let result = if result.is_ok() && options.save_on_stop {
@@ -741,6 +827,7 @@ pub fn run(
     } else {
         result
     };
+    stats.replay_finalization_seconds = replay_started.elapsed().as_secs_f64();
     stats.finalization_seconds = finalize.elapsed().as_secs_f64();
     let result = combine_failure(
         result,
@@ -752,6 +839,7 @@ pub fn run(
         stats.error = Some(format!("{error:#}"));
     }
     result?;
+    observe(&options, CapturePhase::Finished);
     if let Some(events) = events {
         let _ = events.send(PipelineEvent::Finished(stats.clone()));
     }
@@ -761,6 +849,104 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gated_replay() -> (ReplaySave, mpsc::Sender<()>, mpsc::Receiver<bool>) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let (release, gate) = mpsc::channel();
+        let (finished, observed) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            while !worker_cancel.load(Ordering::Relaxed) && gate.try_recv().is_err() {
+                thread::yield_now();
+            }
+            let cancelled = worker_cancel.load(Ordering::Relaxed);
+            finished.send(cancelled).unwrap();
+            ensure!(!cancelled, "replay cancelled");
+            Ok(PathBuf::from("accepted-replay.mkv"))
+        });
+        (
+            ReplaySave {
+                worker: Some(worker),
+                cancel,
+            },
+            release,
+            observed,
+        )
+    }
+
+    #[test]
+    fn stop_hands_off_an_accepted_replay_without_waiting_or_cancelling() {
+        let (replay, release, observed) = gated_replay();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let mut job = Some(replay);
+        handoff_save(&mut job, &Some(tx));
+        assert!(job.is_none());
+        let PipelineEvent::ReplayPending(replay) = rx.recv().unwrap() else {
+            panic!("expected ownership of the pending replay");
+        };
+        drop(rx); // The capture receiver retires before the offline save.
+        assert!(!replay.is_finished());
+        assert!(!replay.cancel.load(Ordering::Relaxed));
+        release.send(()).unwrap();
+        assert_eq!(
+            replay.complete().unwrap(),
+            PathBuf::from("accepted-replay.mkv")
+        );
+        assert!(!observed.recv().unwrap());
+    }
+
+    #[test]
+    fn cli_keeps_ownership_until_the_replay_finishes() {
+        let (replay, release, observed) = gated_replay();
+        let mut job = Some(replay);
+        handoff_save(&mut job, &None);
+        assert!(job.is_some());
+        release.send(()).unwrap();
+        let mut stats = PipelineStats::default();
+        finish_save(&mut job, &mut stats, &None, true);
+        assert!(job.is_none());
+        assert_eq!(stats.replay_saves, 1);
+        assert!(!observed.recv().unwrap());
+    }
+
+    #[test]
+    fn late_replay_failure_survives_capture_receiver_retirement() {
+        let replay = ReplaySave {
+            worker: Some(thread::spawn(|| anyhow::bail!("fixture disk full"))),
+            cancel: Arc::new(AtomicBool::new(false)),
+        };
+        let (tx, rx) = mpsc::sync_channel(1);
+        let mut job = Some(replay);
+        handoff_save(&mut job, &Some(tx));
+        let PipelineEvent::ReplayPending(replay) = rx.recv().unwrap() else {
+            panic!("expected pending replay ownership");
+        };
+        drop(rx);
+        assert!(replay
+            .complete()
+            .unwrap_err()
+            .to_string()
+            .contains("fixture disk full"));
+    }
+
+    #[test]
+    fn closed_ui_and_dropped_owner_cancel_and_join_pending_replays() {
+        for failed_delivery in [false, true] {
+            let (replay, _release, observed) = gated_replay();
+            if failed_delivery {
+                let (tx, rx) = mpsc::sync_channel(1);
+                drop(rx);
+                let mut job = Some(replay);
+                handoff_save(&mut job, &Some(tx));
+                assert!(job.is_none());
+            } else {
+                drop(replay);
+            }
+            // Drop does not return until the worker observes cancellation.
+            assert!(observed.try_recv().unwrap());
+        }
+    }
+
     fn video_packet(pts_ns: u64) -> MediaPacket {
         MediaPacket {
             track: 1,
@@ -779,12 +965,22 @@ mod tests {
         let (stats_tx, stats_rx) = mpsc::sync_channel(1);
         tx.send(video_packet(0)).unwrap();
         drop(tx);
-        stats_tx.send(PipelineStats { encoded: 1, replay_saves: 2,
-            output: "machine-local-output-sentinel".into(), ..Default::default() }).unwrap();
+        stats_tx
+            .send(PipelineStats {
+                encoded: 1,
+                replay_saves: 2,
+                output: "machine-local-output-sentinel".into(),
+                ..Default::default()
+            })
+            .unwrap();
         writer(path.clone(), VideoConfig::default(), vec![], rx, stats_rx).unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        assert!(bytes.windows(b"\"replay_saves\":2".len()).any(|slice| slice == b"\"replay_saves\":2"));
-        assert!(!bytes.windows(b"machine-local-output-sentinel".len()).any(|slice| slice == b"machine-local-output-sentinel"));
+        assert!(bytes
+            .windows(b"\"replay_saves\":2".len())
+            .any(|slice| slice == b"\"replay_saves\":2"));
+        assert!(!bytes
+            .windows(b"machine-local-output-sentinel".len())
+            .any(|slice| slice == b"machine-local-output-sentinel"));
         assert!(!path.with_extension("stats.json").exists());
         assert!(!path.with_extension("mkv.partial").exists());
     }
@@ -815,16 +1011,14 @@ mod tests {
         let mut ring = AvReplayBuffer::new(1_000_000, 10).unwrap();
         let mut stats = PipelineStats::default();
         consume(video_packet(0), &mut ring, &mut output, &mut stats, false).unwrap();
-        assert!(
-            consume(
-                video_packet(16_666_667),
-                &mut ring,
-                &mut output,
-                &mut stats,
-                false
-            )
-            .is_err()
-        );
+        assert!(consume(
+            video_packet(16_666_667),
+            &mut ring,
+            &mut output,
+            &mut stats,
+            false
+        )
+        .is_err());
         assert_eq!(stats.encoded, 2);
         assert_eq!(
             output.as_ref().unwrap().deferred.as_ref().unwrap().pts_ns,
@@ -882,13 +1076,11 @@ mod tests {
         );
         let output = output.as_ref().unwrap();
         assert!(output.disconnected);
-        assert!(
-            output
-                .finalization_error
-                .as_ref()
-                .unwrap()
-                .contains("disconnected")
-        );
+        assert!(output
+            .finalization_error
+            .as_ref()
+            .unwrap()
+            .contains("disconnected"));
     }
 
     #[test]

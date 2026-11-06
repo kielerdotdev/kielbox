@@ -1,4 +1,7 @@
 //! Export graph generation and supervised FFmpeg jobs.
+#[cfg(test)]
+#[path = "export_fidelity_tests.rs"]
+mod fidelity_tests;
 use crate::{media_command, Clip, Content, Project, TrackKind, Transform};
 use anyhow::{ensure, Context, Result};
 use std::{
@@ -30,6 +33,19 @@ pub struct ExportOptions {
     pub end: Option<u64>,
     pub audio: AudioExport,
     pub bitrate: u32,
+    pub video_codec: ExportVideoCodec,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExportVideoCodec {
+    #[default]
+    Av1,
+    H264,
+}
+impl ExportVideoCodec {
+    fn encoder(self) -> &'static str {
+        match self { Self::Av1 => "av1_nvenc", Self::H264 => "h264_nvenc" }
+    }
 }
 
 pub struct RenderPlan {
@@ -84,6 +100,9 @@ fn expression(clip: &Clip, field: fn(Transform) -> f64, frame: &str) -> String {
     result
 }
 fn tempo(mut speed: f64) -> String {
+    // Even at 1x, WSOLA can change the last samples of a finite clip. A normal
+    // recording must retain its PCM instead of passing through time stretching.
+    if speed == 1. { return "anull".into(); }
     let mut parts = Vec::new();
     while speed > 2. {
         parts.push("atempo=2".to_owned());
@@ -635,6 +654,26 @@ fn publish_export(partial: &Path, destination: &Path, cancelled: impl Fn() -> bo
             )
         })
 }
+
+fn publish_verified_export(
+    partial: &Path,
+    destination: &Path,
+    project: &Project,
+    baseline: &[crate::SourceStamp],
+    cancelled: impl Fn() -> bool,
+) -> Result<()> {
+    ensure!(baseline.len() == project.assets.len(), "Export source baseline is incomplete");
+    for (asset, expected) in project.assets.iter().zip(baseline) {
+        ensure!(!cancelled(), "export cancelled before source verification");
+        // Resolve the original path again: checking only the old canonical path
+        // would miss an alias retargeted while FFmpeg was reading the source.
+        let current = crate::SourceStamp::read(&asset.path)?;
+        ensure!(&current == expected,
+            "Source changed during export; output was not published. Review the source and retry: {}",
+            asset.path.display());
+    }
+    publish_export(partial, destination, cancelled)
+}
 fn export_diagnostic(path: &Path) -> String {
     (|| -> std::io::Result<String> {
         let mut file = fs::File::open(path)?;
@@ -826,7 +865,7 @@ pub fn export(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    crate::validate_sources_cancellable(project, || progress.cancel.load(Ordering::Relaxed))?;
+    let verified_sources = crate::validate_sources_cancellable(project, || progress.cancel.load(Ordering::Relaxed))?;
     fs::create_dir_all(parent)?;
     let final_path = path_for_tool(parent)?.join(
         options
@@ -870,7 +909,7 @@ pub fn export(
     }
     command.args([
         "-c:v",
-        "av1_nvenc",
+        options.video_codec.encoder(),
         "-preset",
         "p3",
         "-rc",
@@ -980,7 +1019,7 @@ pub fn export(
         reader_result?;
         let error = export_diagnostic(&plan.directory.path().join("ffmpeg.log"));
         ensure!(status.success(), "export failed: {}", error);
-        publish_export(&partial, &final_path, || {
+        publish_verified_export(&partial, &final_path, project, &verified_sources, || {
             progress.cancel.load(Ordering::Relaxed)
         })?;
         progress
@@ -1293,6 +1332,51 @@ mod tests {
         }
     }
     use super::*;
+    fn publication_source(path: &Path) -> (Project, Vec<crate::SourceStamp>) {
+        let stamp = crate::SourceStamp::read(path).unwrap();
+        let project = Project { assets: vec![crate::MediaAsset {
+            id: 1, path: path.to_owned(), source_stamp: None,
+            duration_ns: 1_000_000_000, width: 16, height: 16, streams: vec![],
+        }], ..Default::default() };
+        (project, vec![stamp])
+    }
+
+    #[test]
+    fn export_publication_rejects_changed_or_missing_sources_and_preserves_partial() {
+        for removed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = dir.path().join("source.mkv");
+            let partial = dir.path().join("completed.partial");
+            let destination = dir.path().join("result.mp4");
+            fs::write(&source, b"original source").unwrap();
+            let (project, stamps) = publication_source(&source);
+            fs::write(&partial, b"already rendered media").unwrap();
+            if removed { fs::remove_file(&source).unwrap(); }
+            else { fs::write(&source, b"source replaced while encoder was running").unwrap(); }
+            assert!(publish_verified_export(&partial, &destination, &project, &stamps, || false).is_err());
+            assert!(!destination.exists());
+            assert_eq!(fs::read(&partial).unwrap(), b"already rendered media");
+        }
+    }
+
+    #[test]
+    fn export_publication_checks_final_cancellation_after_source_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mkv");
+        let partial = dir.path().join("completed.partial");
+        let destination = dir.path().join("result.mp4");
+        fs::write(&source, b"original source").unwrap();
+        let (project, stamps) = publication_source(&source);
+        fs::write(&partial, b"already rendered media").unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        assert!(publish_verified_export(&partial, &destination, &project, &stamps,
+            || calls.fetch_add(1, Ordering::Relaxed) > 0).is_err());
+        assert!(!destination.exists() && partial.exists());
+        publish_verified_export(&partial, &destination, &project, &stamps, || false).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"already rendered media");
+        assert_eq!(fs::read(&source).unwrap(), b"original source");
+    }
+
     #[test]
     fn completed_export_never_replaces_a_destination_that_appears_before_publication() {
         let dir = tempfile::tempdir().unwrap();
@@ -1383,6 +1467,7 @@ mod tests {
     }
     #[test]
     fn tempo_decomposes_extreme_speed_without_out_of_range_stages() {
+        assert_eq!(tempo(1.), "anull");
         assert_eq!(tempo(8.), "atempo=2,atempo=2,atempo=2.000000000");
         assert!(tempo(0.125).starts_with("atempo=0.5,atempo=0.5"));
     }

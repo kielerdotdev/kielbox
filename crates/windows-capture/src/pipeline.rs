@@ -29,12 +29,16 @@ pub struct RunOptions {
     pub output: PathBuf,
     pub preview: bool,
     pub replay_seconds: u64,
+    /// Zero sizes the bounded ring from duration, bitrate and audio sources.
+    /// A nonzero value remains an explicit caller ceiling.
     pub replay_max_bytes: usize,
     pub audio: Vec<AudioTrack>,
     pub record_to_disk: bool,
     pub save_on_stop: bool,
     /// Applies on replay save only. Live/continuous microphone PCM stays raw.
     pub suppress_microphone: bool,
+    /// Optional diagnostics only. Nonblocking lifecycle timestamps never gate capture.
+    pub lifecycle: Option<mpsc::SyncSender<CaptureLifecycle>>,
 }
 
 impl Default for RunOptions {
@@ -47,12 +51,41 @@ impl Default for RunOptions {
             output: PathBuf::from("recordings/proof.mkv"),
             preview: false,
             replay_seconds: 120,
-            replay_max_bytes: 512 * 1024 * 1024,
+            replay_max_bytes: 0,
             audio: Vec::new(),
             record_to_disk: true,
             save_on_stop: false,
             suppress_microphone: false,
+            lifecycle: None,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapturePhase {
+    CaptureStarted,
+    CaptureLoopStopped,
+    GpuReleased,
+    RecordingPublished,
+    ReplayHandedOff,
+    Finished,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CaptureLifecycle {
+    pub phase: CapturePhase,
+    pub at: Instant,
+}
+
+pub(crate) fn observe(options: &RunOptions, phase: CapturePhase) {
+    if let Some(observer) = &options.lifecycle {
+        let _ = observer.try_send(CaptureLifecycle { phase, at: Instant::now() });
+    }
+}
+impl RunOptions {
+    pub fn resolved_replay_budget(&self) -> Result<usize> {
+        if self.replay_max_bytes > 0 { return Ok(self.replay_max_bytes); }
+        rcr_media_core::replay_memory_budget(&self.video, self.replay_seconds, self.audio.len())
     }
 }
 
@@ -62,8 +95,11 @@ pub enum PipelineEvent {
     Finished(PipelineStats),
     Error(String),
     ReplaySaved(PathBuf),
+    ReplayPending(ReplaySave),
     Notice(String),
 }
+
+pub use crate::recording::ReplaySave;
 
 pub enum RecorderCommand {
     SaveReplay {
@@ -81,11 +117,12 @@ pub fn run(
     run_controlled(options, stop, events, None)
 }
 pub fn run_controlled(
-    options: RunOptions,
+    mut options: RunOptions,
     stop: Arc<AtomicBool>,
     events: Option<mpsc::SyncSender<PipelineEvent>>,
     commands: Option<mpsc::Receiver<RecorderCommand>>,
 ) -> Result<PipelineStats> {
+    options.replay_max_bytes = options.resolved_replay_budget()?;
     ensure!(
         !options.suppress_microphone
             || options
@@ -536,6 +573,23 @@ pub fn cli() -> Result<()> {
 #[cfg(test)]
 mod cli_tests {
     use super::*;
+    #[test]
+    fn five_minute_default_retains_high_bitrate_video_and_both_audio_sources() {
+        let options = RunOptions { replay_seconds: 300,
+            video: VideoConfig { bitrate: 50_000_000, ..Default::default() },
+            audio: vec![AudioTrack::system(), AudioTrack::microphone()], ..Default::default() };
+        let bytes_per_second = 50_000_000 / 8 + 2 * 48_000 * 8;
+        assert!(options.resolved_replay_budget().unwrap() as u64 >= 302 * bytes_per_second);
+    }
+    #[test]
+    fn explicit_replay_ceiling_is_preserved_and_oversized_auto_budget_is_rejected() {
+        let mut options = RunOptions { replay_max_bytes: 1024, ..Default::default() };
+        assert_eq!(options.resolved_replay_budget().unwrap(), 1024);
+        options.replay_max_bytes = 0;
+        options.replay_seconds = 3600;
+        options.video.bitrate = 200_000_000;
+        assert!(options.resolved_replay_budget().unwrap_err().to_string().contains("4 GiB"));
+    }
     fn ivf_packet() -> EncodedPacket {
         EncodedPacket {
             data: vec![1, 2, 3, 4].into(),

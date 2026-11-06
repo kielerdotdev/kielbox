@@ -477,7 +477,7 @@ impl RecordingSession {
         let queues = Queues {
             q1: Arc::new(Queue::new(cap1)),
             q2: Arc::new(Queue::new(3)),
-            qa: Arc::new(Queue::new(usize::MAX / 2)),
+            qa: Arc::new(Queue::new(AUDIO_QUEUE_BLOCKS)),
         };
 
         // Encoder thread first: it decides what the convert stage must produce.
@@ -965,6 +965,26 @@ fn convert_thread(
 
 // ---- audio stage ----------------------------------------------------------------------
 
+const AUDIO_QUEUE_BLOCKS: usize = 64;
+const AUDIO_BLOCK_FRAMES: usize = 4096;
+const AUDIO_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn enqueue_audio(sh: &Shared, qa: &Queue<Vec<f32>>, samples: &[f32], channels: u16, timeout: Duration) -> bool {
+    for block in samples.chunks(AUDIO_BLOCK_FRAMES * usize::from(channels).max(1)) {
+        let deadline = Instant::now() + timeout;
+        if qa.push_blocking(block.to_vec(), || sh.aborted() || Instant::now() >= deadline).is_err() {
+            if !sh.aborted() {
+                let message = "Audio encoder fell behind; capture stopped with the playable prefix. Some audio may be missing.";
+                sh.warn(message);
+                sh.finish_with(EndReason::Failed(message.into()));
+            }
+            qa.close();
+            return false;
+        }
+    }
+    true
+}
+
 fn audio_thread(
     sh: &Arc<Shared>,
     qa: &Queue<Vec<f32>>,
@@ -982,25 +1002,31 @@ fn audio_thread(
     flush_warnings(&mut pipe);
     loop {
         if sh.aborted() {
+            pipe.stop();
             qa.close_and_clear();
             return;
         }
         pipe.poll(sh.origin(), Duration::from_millis(10), &mut block);
         flush_warnings(&mut pipe);
         if !block.is_empty() {
-            let _ = qa.push_unbounded(std::mem::take(&mut block));
+            if !enqueue_audio(sh, qa, &block, format.channels, AUDIO_BACKPRESSURE_TIMEOUT) {
+                pipe.stop();
+                return;
+            }
+            block.clear();
         }
         if let Some(end) = sh.end() {
-            pipe.finish(sh.origin(), end, &mut block);
+            pipe.finish_in_chunks(sh.origin(), end, AUDIO_BLOCK_FRAMES, |block| {
+                enqueue_audio(sh, qa, block, format.channels, AUDIO_BACKPRESSURE_TIMEOUT)
+            });
             flush_warnings(&mut pipe);
-            if !block.is_empty() {
-                let _ = qa.push_unbounded(std::mem::take(&mut block));
-            }
             break;
         }
     }
     let s = pipe.stats();
     sh.counters.audio_silence_samples.fetch_add(s.gap_frames, Ordering::Relaxed);
+    sh.counters.audio_late_samples.fetch_add(s.late_frames, Ordering::Relaxed);
+    sh.counters.audio_resyncs.fetch_add(u64::from(s.resyncs), Ordering::Relaxed);
     qa.close();
 }
 
@@ -1052,8 +1078,10 @@ fn encoder_thread(
             enc.abort();
             return Ok(None);
         }
-        // Audio first: it is tiny and must never wait behind video.
-        loop {
+        // Prioritize audio, but service video after a bounded batch. A fast
+        // synthetic source (or a backlog) can otherwise keep qa nonempty
+        // forever and starve the video that establishes the recording end.
+        for _ in 0..8 {
             match ctx.qa.pop(Duration::ZERO) {
                 Ok(Some(block)) => {
                     if !has_audio || audio_failed {
@@ -1136,6 +1164,9 @@ fn encoder_thread(
     }
     match enc.finish(end) {
         Ok(mut s) => {
+            if has_audio && !s.has_audio {
+                sh.warn("Audio could not be finalized; saved video without sound.");
+            }
             sh.counters.file_bytes.store(s.bytes, Ordering::Relaxed);
             // The end of the timeline is what the recording covers, even if the last
             // slots were dropped.
@@ -1149,6 +1180,42 @@ fn encoder_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stalled_audio_consumer_has_a_memory_bound_and_reports_prefix_stop() {
+        let shared = Shared::new(Clock::start());
+        let queue = Queue::new(2);
+        let samples = vec![0.1; AUDIO_BLOCK_FRAMES * 2 * 5];
+        let started = Instant::now();
+        assert!(!enqueue_audio(&shared, &queue, &samples, 2, Duration::from_millis(80)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(queue.len(), 2);
+        assert!(matches!(shared.reason(), Some(EndReason::Failed(message)) if message.contains("playable prefix")));
+        let mut count = 0;
+        while let Ok(Some(block)) = queue.pop(Duration::ZERO) {
+            assert_eq!(block.len(), AUDIO_BLOCK_FRAMES * 2);
+            assert!(block.iter().all(|sample| *sample == 0.1));
+            count += 1;
+        }
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn abort_wakes_an_audio_producer_blocked_behind_an_encoder() {
+        let shared = Arc::new(Shared::new(Clock::start()));
+        let queue = Arc::new(Queue::new(1));
+        queue.push_unbounded(vec![0.; AUDIO_BLOCK_FRAMES * 2]).unwrap();
+        let (producer_shared, producer_queue) = (shared.clone(), queue.clone());
+        let producer = std::thread::spawn(move || enqueue_audio(&producer_shared, &producer_queue,
+            &vec![0.1; AUDIO_BLOCK_FRAMES * 2], 2, Duration::from_secs(10)));
+        let started = Instant::now();
+        shared.abort.store(true, Ordering::SeqCst);
+        queue.close_and_clear();
+        assert!(!producer.join().unwrap());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(queue.is_empty());
+        assert!(shared.reason().is_none(), "Intentional abort must not become an encoder failure");
+    }
 
     #[test]
     fn the_session_handle_can_move_between_threads() {

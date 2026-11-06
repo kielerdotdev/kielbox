@@ -5,6 +5,7 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+rcr-disk = { path = "../rcr-disk" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,7 +26,7 @@ image = { version = "0.25", default-features = false }
 rqrr = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+windows = { workspace = true, features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization"] }
 
 [dev-dependencies]
 rcr-workflows = { path = "../rcr-workflows", features = ["testing"] }

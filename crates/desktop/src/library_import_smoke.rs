@@ -138,12 +138,23 @@ fn persisted() -> anyhow::Result<Preferences> {
     )?)?)
 }
 
-fn settled(studio: &Studio) -> bool {
-    !studio.library.removal_pending
+fn settled(studio: &Studio, cx: &App) -> anyhow::Result<bool> {
+    let metadata_ready = !studio.library.removal_pending
         && !studio.library_scan.is_pending()
         && !studio.library.catalog_pending
         && !studio.library.catalog_dirty
-        && studio.library.catalog_paths == studio.files
+        && studio.library.catalog_paths == studio.files;
+    if !metadata_ready { return Ok(false); }
+    // Catalog completion and current-query publication are independent. Wait
+    // across normal proof ticks; never accept the previous filter's cards.
+    let search = studio.search.read(cx).value().trim().to_lowercase();
+    let current = studio.library.visible_snapshot(&studio.files, &studio.preferences, &search);
+    if current.is_none() {
+        let error = studio.library.visible_cache.borrow().as_ref().and_then(|entry| entry.error.clone());
+        ensure!(error.is_none(), "Imported Library view failed: {:?}", error);
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 fn key(window: &mut Window, cx: &mut App, name: &str) {
@@ -313,7 +324,7 @@ impl Library {
                     );
                     return Ok(false);
                 }
-                if !settled(state) {
+                if !settled(state, cx)? {
                     return Ok(false);
                 }
                 ensure!(
@@ -386,7 +397,7 @@ impl Library {
             }
             3 => {
                 let state = studio.read(cx);
-                if !settled(state) {
+                if !settled(state, cx)? {
                     return Ok(false);
                 }
                 ensure!(
@@ -424,7 +435,7 @@ impl Library {
             }
             4 => {
                 let state = studio.read(cx);
-                if !settled(state) {
+                if !settled(state, cx)? {
                     return Ok(false);
                 }
                 ensure!(
@@ -472,7 +483,7 @@ impl Library {
             }
             6 => {
                 let state = studio.read(cx);
-                if !settled(state) {
+                if !settled(state, cx)? {
                     return Ok(false);
                 }
                 if !state

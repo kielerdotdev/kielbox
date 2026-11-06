@@ -14,7 +14,7 @@ use std::{
 };
 
 #[cfg(windows)]
-mod native;
+pub(crate) mod native;
 #[cfg(windows)]
 mod proxy;
 
@@ -24,7 +24,8 @@ enum SeekQuality { Exact, Interactive, Original }
 struct Request { at: u64, serial: u64, quality: SeekQuality, size: Option<(u32, u32)>, queued_at: Option<Instant> }
 fn trace_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("RCR_TRACE_SEEK").is_some_and(|value| !value.is_empty()))
+    *ENABLED.get_or_init(|| std::env::var_os("RCR_TRACE_SEEK").is_some_and(|value| !value.is_empty())
+        || std::env::var_os("RCR_CLIP_SHOW_EVAL_OUTPUT").is_some())
 }
 fn memory_trace_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -200,10 +201,19 @@ pub struct ScrubSession {
     shared: Arc<Shared>,
     worker: Option<thread::JoinHandle<()>>,
     interactive_landing: bool,
+    prepare_proxy: bool,
 }
 
 impl ScrubSession {
     pub fn new(project: Project, size: (u32, u32)) -> Result<Self> {
+        Self::new_inner(project, size, true)
+    }
+    /// Viewing must not start a full-source transcode before its first seek.
+    /// Unsupported native requests retain the ordinary bounded frame fallback.
+    pub fn new_for_viewer(project: Project, size: (u32, u32)) -> Result<Self> {
+        Self::new_inner(project, size, false)
+    }
+    fn new_inner(project: Project, size: (u32, u32), prepare_proxy: bool) -> Result<Self> {
         project.validate()?;
         ensure!(project.duration() > 0, "Cannot seek an empty timeline");
         let size = preview_size(&project, size);
@@ -243,7 +253,7 @@ impl ScrubSession {
                     decoder.refresh_sources(&initial_project);
                 }
                 #[cfg(windows)]
-                let mut proxy = native.as_ref().and_then(|decoder| {
+                let mut proxy = native.as_ref().filter(|_| prepare_proxy).and_then(|decoder| {
                     proxy::Proxy::start(&initial_project, decoder, &state.cancel).ok()
                 });
                 #[cfg(windows)]
@@ -339,7 +349,7 @@ impl ScrubSession {
                             // serializes rapid close/reopen cycles across worker threads.
                             drop(proxy.take());
                             state.proxy_ready.store(false, Ordering::Release);
-                            proxy = native.as_ref().and_then(|decoder| {
+                            proxy = native.as_ref().filter(|_| prepare_proxy).and_then(|decoder| {
                                 proxy::Proxy::start(&project, decoder, &state.cancel).ok()
                             });
                             state.proxy_preparing.store(
@@ -445,8 +455,10 @@ impl ScrubSession {
             shared,
             worker: Some(worker),
             interactive_landing: std::env::var_os("RCR_SCRUB_INTERACTIVE_LANDING").is_some_and(|value| value == "1"),
+            prepare_proxy,
         })
     }
+    pub fn proxy_preparation_enabled(&self) -> bool { self.prepare_proxy }
     pub fn request(&self, frame: u64) {
         self.request_exact(frame);
     }

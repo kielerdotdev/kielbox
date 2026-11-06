@@ -6,6 +6,7 @@ use rcr_media_core::{
     NS_PER_SECOND,
 };
 use std::{
+    collections::VecDeque,
     ptr,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -340,7 +341,169 @@ impl Drop for ComApartment {
 pub enum AudioEvent {
     Packet(MediaPacket),
     Discontinuity,
+    Notice(String),
     Error(String),
+}
+
+const RECOVERY_ATTEMPTS: usize = 3;
+const RECOVERY_WINDOW: Duration = Duration::from_secs(5);
+const MAX_AUDIO_NOTICES: usize = 8;
+
+fn follows_default(track: &AudioTrack) -> bool {
+    matches!(track.source, AudioSource::System) && track.endpoint_id.is_none()
+}
+
+fn recoverable_device_error(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<windows::core::Error>()
+        .is_some_and(|error| {
+            // DEVICE_INVALIDATED and RESOURCES_INVALIDATED only. Permission,
+            // format, queue, application lifetime and microphone errors stay fatal.
+            matches!(error.code().0 as u32, 0x8889_0004 | 0x8889_0026)
+        })
+}
+
+fn queue_notice(notices: &Mutex<VecDeque<String>>, notice: String) {
+    let mut notices = notices.lock().unwrap_or_else(|e| e.into_inner());
+    if notices.len() == MAX_AUDIO_NOTICES {
+        notices.pop_front();
+    }
+    notices.push_back(notice.chars().take(512).collect());
+}
+
+fn optional_default_watch<W>(
+    track: &AudioTrack,
+    notices: &Mutex<VecDeque<String>>,
+    register: impl FnOnce() -> Result<W>,
+) -> Option<W> {
+    if !follows_default(track) {
+        return None;
+    }
+    match register() {
+        Ok(watch) => Some(watch),
+        Err(error) => {
+            queue_notice(notices, format!("{}: default-output change monitoring unavailable; capturing the current endpoint. Device invalidation can still retry the default output; restart recording if an output change is missed: {error:#}", track.name));
+            None
+        }
+    }
+}
+
+/// Three reopen attempts per recording, at most five seconds of retry
+/// scheduling per incident. Windows synchronous COM/driver calls themselves
+/// cannot be given a hard timeout without leaking an unowned worker.
+fn reopen_reader<R>(
+    source: &mut Option<R>,
+    attempts: &mut usize,
+    cancelled: &impl Fn() -> bool,
+    mut open: impl FnMut() -> Result<R>,
+    mut pause: impl FnMut(),
+    mut now: impl FnMut() -> Duration,
+) -> Result<bool> {
+    drop(source.take()); // Release the invalid client before activating another.
+    let start = now();
+    let mut last_error = None;
+    while *attempts < RECOVERY_ATTEMPTS && now().saturating_sub(start) < RECOVERY_WINDOW {
+        if cancelled() {
+            return Ok(false);
+        }
+        pause();
+        if cancelled() {
+            return Ok(false);
+        }
+        if now().saturating_sub(start) >= RECOVERY_WINDOW {
+            break;
+        }
+        *attempts += 1;
+        match open() {
+            Ok(reader) => {
+                if cancelled() {
+                    drop(reader);
+                    return Ok(false);
+                }
+                if now().saturating_sub(start) >= RECOVERY_WINDOW {
+                    drop(reader);
+                    anyhow::bail!("Default desktop audio recovery exceeded its retry window; check the default output and restart recording (Windows activation may block inside its driver)");
+                }
+                *source = Some(reader);
+                return Ok(true);
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    anyhow::bail!("Default desktop audio could not recover within {RECOVERY_ATTEMPTS} reopen attempts / 5-second retry window; check the default output and restart recording: {}", last_error.map_or_else(|| "retry budget exhausted".into(), |e| format!("{e:#}")))
+}
+
+/// Only the first packets after a reopen need overlap trimming. Keep their
+/// original QPC-derived PTS: a missing interval remains a real timeline gap.
+#[derive(Default)]
+struct RecoveryTimeline {
+    last_end_ns: u64,
+    joining: bool,
+}
+impl RecoveryTimeline {
+    fn packet(&mut self, mut packet: MediaPacket) -> Option<MediaPacket> {
+        if self.joining && packet.pts_ns < self.last_end_ns {
+            let skip = (u128::from(self.last_end_ns - packet.pts_ns) * u128::from(AUDIO_RATE))
+                .div_ceil(u128::from(NS_PER_SECOND));
+            let frames = packet.data.len() / AUDIO_FRAME_BYTES;
+            if skip >= frames as u128 {
+                return None;
+            }
+            let skip = skip as usize;
+            packet.data = packet.data[skip * AUDIO_FRAME_BYTES..].into();
+            packet.pts_ns += (skip as u64 * NS_PER_SECOND).div_ceil(u64::from(AUDIO_RATE));
+            packet.duration_ns = (frames - skip) as u64 * NS_PER_SECOND / u64::from(AUDIO_RATE);
+        }
+        self.joining = false;
+        self.last_end_ns = self
+            .last_end_ns
+            .max(packet.pts_ns.saturating_add(packet.duration_ns));
+        Some(packet)
+    }
+}
+
+trait CaptureReader {
+    fn wait_ready(&self) -> Result<()>;
+    fn read(&mut self, epoch: u64) -> Result<Option<MediaPacket>>;
+    fn discontinuities(&self) -> u64;
+}
+impl CaptureReader for WasapiCapture {
+    fn wait_ready(&self) -> Result<()> {
+        self.wait()
+    }
+    fn read(&mut self, epoch: u64) -> Result<Option<MediaPacket>> {
+        self.next_packet(epoch)
+    }
+    fn discontinuities(&self) -> u64 {
+        self.discontinuities
+    }
+}
+
+fn read_available<R: CaptureReader>(
+    source: &mut R,
+    epoch_and_generation: (u64, u64),
+    current_generation: impl Fn() -> u64,
+    cancelled: &impl Fn() -> bool,
+    timeline: &mut RecoveryTimeline,
+    mut send: impl FnMut(MediaPacket) -> Result<()>,
+) -> Result<bool> {
+    let (epoch, generation) = epoch_and_generation;
+    if current_generation() != generation {
+        return Ok(true);
+    }
+    source.wait_ready()?;
+    while !cancelled() {
+        if current_generation() != generation {
+            return Ok(true);
+        }
+        let Some(packet) = source.read(epoch)? else {
+            break;
+        };
+        if let Some(packet) = timeline.packet(packet) {
+            send(packet)?;
+        }
+    }
+    Ok(false)
 }
 
 pub struct WasapiCapture {
@@ -524,13 +687,19 @@ pub struct AudioWorkers {
 pub struct AudioReceiver {
     packets: mpsc::Receiver<AudioEvent>,
     errors: Arc<Mutex<Vec<String>>>,
+    notices: Arc<Mutex<VecDeque<String>>>,
+    discontinuities: Arc<AtomicU64>,
 }
 impl AudioReceiver {
     pub fn try_iter(&self) -> impl Iterator<Item = AudioEvent> + '_ {
         let errors = std::mem::take(&mut *self.errors.lock().unwrap_or_else(|e| e.into_inner()));
-        errors
+        let notices = std::mem::take(&mut *self.notices.lock().unwrap_or_else(|e| e.into_inner()));
+        let discontinuities = self.discontinuities.swap(0, Ordering::AcqRel);
+        notices
             .into_iter()
-            .map(AudioEvent::Error)
+            .map(AudioEvent::Notice)
+            .chain(errors.into_iter().map(AudioEvent::Error))
+            .chain((0..discontinuities).map(|_| AudioEvent::Discontinuity))
             .chain(self.packets.try_iter())
     }
 }
@@ -552,9 +721,13 @@ impl AudioWorkers {
         }
         let (tx, packets) = mpsc::sync_channel(512);
         let errors = Arc::new(Mutex::new(Vec::new()));
+        let notices = Arc::new(Mutex::new(VecDeque::new()));
+        let discontinuities = Arc::new(AtomicU64::new(0));
         let receiver = AudioReceiver {
             packets,
             errors: errors.clone(),
+            notices: notices.clone(),
+            discontinuities: discontinuities.clone(),
         };
         let (ready_tx, ready_rx) =
             mpsc::sync_channel::<std::result::Result<(), String>>(tracks.len().max(1));
@@ -570,6 +743,8 @@ impl AudioWorkers {
             let ready = ready_tx.clone();
             let epoch = result.epoch.clone();
             let errors = errors.clone();
+            let notices = notices.clone();
+            let discontinuities = discontinuities.clone();
             let external_stop = external_stop.clone();
             result.threads.push(
                 thread::Builder::new()
@@ -582,28 +757,58 @@ impl AudioWorkers {
                                     || external_stop.load(Ordering::Relaxed)
                             };
                             let _com = ComApartment::new()?;
-                            let mut source = WasapiCapture::open_cancellable(&track, &cancelled)?;
+                            let follow_default = follows_default(&track);
+                            let watch = optional_default_watch(&track, &notices, crate::audio_endpoint::DefaultRenderWatch::start);
+                            let generation = || watch.as_ref().map_or(0, |watch| watch.generation());
+                            // Read BEFORE open, so a default change during activation
+                            // is noticed even if activation happened to choose the old device.
+                            let mut source_generation = generation();
+                            let mut source = Some(WasapiCapture::open_cancellable(&track, &cancelled)?);
                             let _ = ready.send(Ok(()));
                             ready_sent = true;
-                            let mut discontinuities = 0;
+                            let mut previous_discontinuities = 0;
+                            let mut timeline = RecoveryTimeline::default();
+                            let mut attempts = 0;
+                            let clock = Instant::now();
                             while !cancelled() {
                                 let epoch = epoch.load(Ordering::Acquire);
                                 if epoch == 0 {
                                     thread::sleep(Duration::from_millis(1));
                                     continue;
                                 }
-                                source.wait()?;
-                                while let Some(packet) = source.next_packet(epoch)? {
-                                    if cancelled() {
-                                        break;
-                                    }
+                                let reader = source.as_mut().expect("active audio reader");
+                                let result = read_available(reader, (epoch, source_generation), generation, &cancelled, &mut timeline, |packet| {
                                     tx.try_send(AudioEvent::Packet(packet))
-                                        .context("audio queue overflow or recorder disconnected")?;
-                                }
-                                if source.discontinuities != discontinuities {
-                                    discontinuities = source.discontinuities;
-                                    let _ = tx.try_send(AudioEvent::Discontinuity);
-                                }
+                                        .context("audio queue overflow or recorder disconnected")
+                                });
+                                let observed = reader.discontinuities();
+                                discontinuities.fetch_add(observed.saturating_sub(previous_discontinuities), Ordering::Relaxed);
+                                previous_discontinuities = observed;
+                                if cancelled() { break; }
+                                let reason = match result {
+                                    Ok(false) => continue,
+                                    Ok(true) => "Windows default desktop output changed".to_string(),
+                                    Err(error) if follow_default && recoverable_device_error(&error) => format!("Windows default desktop audio was invalidated: {error:#}"),
+                                    Err(error) => return Err(error).context("Audio stopped; restore or reselect the selected source and restart recording; no other source was substituted"),
+                                };
+                                queue_notice(&notices, format!("{}: {reason}; attempting recovery, missing audio remains a timeline gap", track.name));
+                                discontinuities.fetch_add(1, Ordering::Relaxed);
+                                // Sample the notification generation for every reopen,
+                                // including unsuccessful ones. A later notification
+                                // during activation is picked up on the next poll.
+                                let recovered = reopen_reader(&mut source, &mut attempts, &cancelled, || {
+                                    source_generation = generation();
+                                    WasapiCapture::open_cancellable(&track, &cancelled)
+                                }, || {
+                                    for _ in 0..10 {
+                                        if cancelled() { break; }
+                                        thread::sleep(Duration::from_millis(10));
+                                    }
+                                }, || clock.elapsed())?;
+                                if !recovered { break; }
+                                timeline.joining = true;
+                                previous_discontinuities = 0;
+                                queue_notice(&notices, format!("{}: default desktop audio recovered; original recording clock retained", track.name));
                             }
                             Ok(())
                         };
@@ -647,6 +852,333 @@ impl Drop for AudioWorkers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    fn pcm(pts_ns: u64, frames: usize) -> MediaPacket {
+        MediaPacket {
+            track: 2,
+            pts_ns,
+            duration_ns: frames as u64 * NS_PER_SECOND / u64::from(AUDIO_RATE),
+            keyframe: true,
+            data: (0..frames)
+                .flat_map(|frame| (frame as u64).to_le_bytes())
+                .collect::<Vec<_>>()
+                .into(),
+        }
+    }
+
+    #[test]
+    fn recovery_is_only_default_system_and_only_typed_invalidation() {
+        assert!(follows_default(&AudioTrack::system()));
+        assert!(!follows_default(
+            &AudioTrack::system().with_endpoint("opaque-id").unwrap()
+        ));
+        assert!(!follows_default(&AudioTrack::microphone()));
+        assert!(!follows_default(&AudioTrack::process(42).unwrap()));
+        for code in [0x8889_0004_u32, 0x8889_0026] {
+            let error: anyhow::Error =
+                windows::core::Error::from_hresult(windows::core::HRESULT(code as i32)).into();
+            assert!(recoverable_device_error(&error.context("capture read")));
+        }
+        for code in [0x8007_0005_u32, 0x8889_0008, 0x8889_0010] {
+            let error: anyhow::Error =
+                windows::core::Error::from_hresult(windows::core::HRESULT(code as i32)).into();
+            assert!(!recoverable_device_error(&error));
+        }
+        assert!(!recoverable_device_error(&anyhow::anyhow!(
+            "device invalidated"
+        )));
+    }
+
+    #[test]
+    fn recovery_trims_overlap_but_keeps_qpc_gap_and_pcm_values() {
+        let mut timeline = RecoveryTimeline::default();
+        timeline.packet(pcm(1_000_000_000, 480)).unwrap();
+        timeline.joining = true;
+        assert!(timeline.packet(pcm(900_000_000, 480)).is_none());
+        let joined = timeline.packet(pcm(1_005_000_000, 480)).unwrap();
+        assert_eq!(joined.pts_ns, 1_010_000_000);
+        assert_eq!(joined.duration_ns, 5_000_000);
+        assert_eq!(joined.data.len(), 240 * AUDIO_FRAME_BYTES);
+        assert_eq!(
+            u64::from_le_bytes(joined.data[..8].try_into().unwrap()),
+            240
+        );
+        assert_eq!(timeline.last_end_ns, 1_015_000_000);
+        timeline.joining = true;
+        let gap = timeline.packet(pcm(1_115_000_000, 480)).unwrap();
+        assert_eq!(gap.pts_ns - 1_015_000_000, 100_000_000);
+        assert_eq!(gap.data.len(), 480 * AUDIO_FRAME_BYTES);
+        // Normal QPC quantization is not rounded/rebased or trimmed.
+        let normal = pcm(1_124_999_900, 480);
+        assert_eq!(timeline.packet(normal.clone()).unwrap().data, normal.data);
+    }
+
+    struct OwnedReader<'a>(&'a Cell<usize>);
+    impl Drop for OwnedReader<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() - 1);
+        }
+    }
+
+    #[test]
+    fn reopen_releases_old_reader_and_bounds_retries_across_incidents() {
+        let active = Cell::new(1);
+        let mut source = Some(OwnedReader(&active));
+        let mut attempts = 0;
+        let calls = Cell::new(0);
+        assert!(reopen_reader(
+            &mut source,
+            &mut attempts,
+            &|| false,
+            || {
+                assert_eq!(active.get(), 0, "old client remains active while reopening");
+                calls.set(calls.get() + 1);
+                if calls.get() < 3 {
+                    anyhow::bail!("default temporarily absent");
+                }
+                active.set(1);
+                Ok(OwnedReader(&active))
+            },
+            || {},
+            || Duration::ZERO
+        )
+        .unwrap());
+        assert_eq!(attempts, 3);
+        assert_eq!(active.get(), 1);
+        assert!(reopen_reader(
+            &mut source,
+            &mut attempts,
+            &|| false,
+            || panic!("budget allowed fourth open"),
+            || {},
+            || Duration::ZERO
+        )
+        .is_err());
+        assert!(source.is_none());
+        assert_eq!(active.get(), 0);
+    }
+
+    #[test]
+    fn reopen_cancel_before_during_pause_and_after_open_releases_every_reader() {
+        for stage in 0..3 {
+            let active = Cell::new(1);
+            let stop = Cell::new(stage == 0);
+            let mut source = Some(OwnedReader(&active));
+            let mut attempts = 0;
+            let result = reopen_reader(
+                &mut source,
+                &mut attempts,
+                &|| stop.get(),
+                || {
+                    assert_eq!(stage, 2);
+                    assert_eq!(active.get(), 0);
+                    active.set(1);
+                    stop.set(true);
+                    Ok(OwnedReader(&active))
+                },
+                || {
+                    if stage == 1 {
+                        stop.set(true);
+                    }
+                },
+                || Duration::ZERO,
+            )
+            .unwrap();
+            assert!(!result);
+            assert!(source.is_none());
+            assert_eq!(active.get(), 0);
+            assert_eq!(attempts, usize::from(stage == 2));
+        }
+    }
+
+    #[test]
+    fn reopen_window_stops_scheduling_and_rejects_late_success_without_claiming_driver_timeout() {
+        let clock = Cell::new(Duration::ZERO);
+        let mut source: Option<()> = None;
+        let mut attempts = 0;
+        assert!(reopen_reader(
+            &mut source,
+            &mut attempts,
+            &|| false,
+            || panic!("opened after deadline"),
+            || clock.set(RECOVERY_WINDOW),
+            || clock.get()
+        )
+        .is_err());
+        assert_eq!(attempts, 0);
+        let active = Cell::new(0);
+        clock.set(Duration::ZERO);
+        let mut source = None;
+        assert!(reopen_reader(
+            &mut source,
+            &mut attempts,
+            &|| false,
+            || {
+                active.set(1);
+                clock.set(RECOVERY_WINDOW + Duration::from_secs(1));
+                Ok(OwnedReader(&active))
+            },
+            || {},
+            || clock.get()
+        )
+        .is_err());
+        assert!(source.is_none());
+        assert_eq!(active.get(), 0);
+        assert_eq!(attempts, 1);
+    }
+
+    struct InjectedReader {
+        reads: usize,
+        expected_epoch: u64,
+        invalid: bool,
+    }
+    impl CaptureReader for InjectedReader {
+        fn wait_ready(&self) -> Result<()> {
+            Ok(())
+        }
+        fn read(&mut self, epoch: u64) -> Result<Option<MediaPacket>> {
+            assert_eq!(epoch, self.expected_epoch, "recording QPC epoch changed");
+            if self.invalid {
+                return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
+                    0x8889_0004_u32 as i32,
+                ))
+                .into());
+            }
+            self.reads += 1;
+            Ok((self.reads == 1).then(|| pcm(2_000_000_000, 480)))
+        }
+        fn discontinuities(&self) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn injected_reader_detects_change_before_old_data_and_preserves_epoch_after_reopen() {
+        let mut reader = InjectedReader {
+            reads: 0,
+            expected_epoch: 12345,
+            invalid: false,
+        };
+        let mut timeline = RecoveryTimeline::default();
+        let packets = Cell::new(0);
+        assert!(read_available(
+            &mut reader,
+            (12345, 1),
+            || 2,
+            &|| false,
+            &mut timeline,
+            |_| panic!("read stale default")
+        )
+        .unwrap());
+        assert_eq!(reader.reads, 0);
+        assert!(!read_available(
+            &mut reader,
+            (12345, 2),
+            || 2,
+            &|| false,
+            &mut timeline,
+            |_| {
+                packets.set(packets.get() + 1);
+                Ok(())
+            }
+        )
+        .unwrap());
+        assert_eq!(packets.get(), 1);
+        reader.invalid = true;
+        let error = read_available(
+            &mut reader,
+            (12345, 2),
+            || 2,
+            &|| false,
+            &mut timeline,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(recoverable_device_error(&error));
+    }
+
+    #[test]
+    fn failed_optional_notification_registration_does_not_stop_or_replace_audio() {
+        let notices = Mutex::new(VecDeque::new());
+        let track = AudioTrack::system();
+        let watch: Option<()> =
+            optional_default_watch(&track, &notices, || anyhow::bail!("registration denied"));
+        assert!(watch.is_none());
+        assert!(
+            follows_default(&track),
+            "typed invalidation recovery must remain eligible without a watch"
+        );
+        assert!(notices
+            .lock()
+            .unwrap()
+            .front()
+            .unwrap()
+            .contains("monitoring unavailable"));
+        let mut source = InjectedReader {
+            reads: 0,
+            expected_epoch: 12345,
+            invalid: false,
+        };
+        let mut packets = Vec::new();
+        assert!(!read_available(
+            &mut source,
+            (12345, 0),
+            || 0,
+            &|| false,
+            &mut RecoveryTimeline::default(),
+            |packet| {
+                packets.push(packet);
+                Ok(())
+            }
+        )
+        .unwrap());
+        assert_eq!(packets.len(), 1);
+        assert_eq!(packets[0].pts_ns, 2_000_000_000);
+        for track in [
+            AudioTrack::microphone(),
+            AudioTrack::system().with_endpoint("selected").unwrap(),
+            AudioTrack::process(42).unwrap(),
+        ] {
+            let watch: Option<()> = optional_default_watch(&track, &notices, || {
+                panic!("strict route registered a default follower")
+            });
+            assert!(watch.is_none());
+            assert!(!follows_default(&track));
+        }
+    }
+
+    #[test]
+    fn recovery_notices_are_bounded_and_terminal_error_wins_when_pcm_is_full() {
+        let (tx, packets) = mpsc::sync_channel(1);
+        tx.try_send(AudioEvent::Packet(pcm(0, 480))).ok().unwrap();
+        let notices = Arc::new(Mutex::new(VecDeque::new()));
+        for i in 0..100 {
+            queue_notice(&notices, format!("{i}:{}", "x".repeat(1024)));
+        }
+        let receiver = AudioReceiver {
+            packets,
+            notices,
+            errors: Arc::new(Mutex::new(vec!["recovery exhausted".into()])),
+            discontinuities: Arc::new(AtomicU64::new(3)),
+        };
+        let events = receiver.try_iter().collect::<Vec<_>>();
+        assert_eq!(events.len(), MAX_AUDIO_NOTICES + 1 + 3 + 1);
+        assert!(events[..MAX_AUDIO_NOTICES]
+            .iter()
+            .all(|event| matches!(event, AudioEvent::Notice(detail) if detail.len()==512)));
+        assert!(
+            matches!(&events[MAX_AUDIO_NOTICES], AudioEvent::Error(detail) if detail=="recovery exhausted")
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, AudioEvent::Discontinuity))
+                .count(),
+            3
+        );
+        assert_eq!(receiver.try_iter().count(), 0);
+    }
     #[test]
     fn source_dispatch_is_exhaustive_and_process_is_never_a_microphone() {
         assert_eq!(
@@ -714,7 +1246,12 @@ mod tests {
         let errors = Arc::new(Mutex::new(vec![
             "application audio stopped: PCM queue overflow".into(),
         ]));
-        let receiver = AudioReceiver { packets, errors };
+        let receiver = AudioReceiver {
+            packets,
+            errors,
+            notices: Arc::default(),
+            discontinuities: Arc::default(),
+        };
         let events = receiver.try_iter().collect::<Vec<_>>();
         assert!(matches!(&events[0], AudioEvent::Error(detail) if detail.contains("overflow")));
         assert!(matches!(events[1], AudioEvent::Discontinuity));

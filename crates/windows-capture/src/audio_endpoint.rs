@@ -6,7 +6,10 @@ use rcr_media_core::{
 };
 use std::{
     collections::BTreeSet,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 use windows::{
     core::{Interface, PCWSTR, PWSTR},
@@ -27,6 +30,86 @@ use windows::{
 pub const MAX_AUDIO_ENDPOINTS: usize = 128;
 pub const MAX_AUDIO_ENDPOINT_NAME_CHARS: usize = 256;
 static ENUMERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn note_default_render_change(generation: &AtomicU64, flow: EDataFlow, role: ERole) {
+    if flow == eRender && role == eConsole {
+        generation.fetch_add(1, Ordering::Release);
+    }
+}
+
+#[windows::core::implement(IMMNotificationClient)]
+struct DefaultRenderNotification {
+    generation: Arc<AtomicU64>,
+}
+impl IMMNotificationClient_Impl for DefaultRenderNotification_Impl {
+    fn OnDeviceStateChanged(&self, _: &PCWSTR, _: DEVICE_STATE) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnDeviceAdded(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnDeviceRemoved(&self, _: &PCWSTR) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnPropertyValueChanged(
+        &self,
+        _: &PCWSTR,
+        _: &windows::Win32::Foundation::PROPERTYKEY,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnDefaultDeviceChanged(
+        &self,
+        flow: EDataFlow,
+        role: ERole,
+        _: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        // Callback threads only signal. No endpoint activation, COM calls,
+        // opaque-ID reads, locks or unregister calls are made from a callback.
+        note_default_render_change(&self.generation, flow, role);
+        Ok(())
+    }
+}
+
+/// Worker-owned read-only notification registration. Only default SYSTEM
+/// capture constructs this; explicit endpoints and microphones never follow it.
+pub(crate) struct DefaultRenderWatch {
+    enumerator: IMMDeviceEnumerator,
+    callback: IMMNotificationClient,
+    generation: Arc<AtomicU64>,
+}
+impl DefaultRenderWatch {
+    pub(crate) fn start() -> Result<Self> {
+        let enumerator: IMMDeviceEnumerator =
+            unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
+        let generation = Arc::new(AtomicU64::new(0));
+        let callback: IMMNotificationClient = DefaultRenderNotification {
+            generation: generation.clone(),
+        }
+        .into();
+        unsafe { enumerator.RegisterEndpointNotificationCallback(&callback) }
+            .context("Cannot monitor Windows default desktop audio changes")?;
+        Ok(Self {
+            enumerator,
+            callback,
+            generation,
+        })
+    }
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+}
+impl Drop for DefaultRenderWatch {
+    fn drop(&mut self) {
+        // Drop this guard before the worker's COM apartment. A callback retains
+        // its own Arc even if Windows is completing a notification concurrently.
+        unsafe {
+            let _ = self
+                .enumerator
+                .UnregisterEndpointNotificationCallback(&self.callback);
+        }
+    }
+}
 #[derive(Debug)]
 pub struct AudioEndpointEnumerationBusy;
 impl std::fmt::Display for AudioEndpointEnumerationBusy {
@@ -298,6 +381,16 @@ pub(crate) fn resolve_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_the_existing_console_default_render_role_requests_recovery() {
+        let generation = AtomicU64::new(0);
+        note_default_render_change(&generation, eCapture, eConsole);
+        note_default_render_change(&generation, eRender, eCommunications);
+        note_default_render_change(&generation, eRender, eMultimedia);
+        assert_eq!(generation.load(Ordering::Acquire), 0);
+        note_default_render_change(&generation, eRender, eConsole);
+        assert_eq!(generation.load(Ordering::Acquire), 1);
+    }
     #[test]
     #[ignore = "opt-in read-only native MMDevice resolution; never activates audio"]
     fn native_explicit_endpoint_resolution_is_read_only() -> Result<()> {

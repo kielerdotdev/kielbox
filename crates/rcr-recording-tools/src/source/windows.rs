@@ -18,13 +18,14 @@
 //!   frames of changing size;
 //! * an HDR monitor is captured as `R16G16B16A16_FLOAT` scRGB (labelled from the texture
 //!   that arrives), which the session tone-maps like a screenshot;
-//! * the cursor is included by WGC when requested; the yellow capture border is turned off
-//!   where the OS allows it (Windows 11), and updates are limited to twice the target rate
+//! * the cursor is included by WGC when requested; the OS capture border stays enabled,
+//!   and updates are limited to twice the target rate
 //!   (Windows 11 22H2) so a 144 Hz display does not cost three times the read-backs.
 //!
 //! Everything decidable without the OS lives in `wgc_logic` (unit-tested on all platforms).
-//! This file is the glue and is **only compile- and lint-checked** here (Linux host,
-//! `cargo clippy --target x86_64-pc-windows-msvc`); it has never run on Windows.
+//! Initially compile-checked on Linux; now exercised on Windows by the desktop's
+//! `--smoke-quick-recorder` owned-window proof (pause/resume/stop and full decode).
+//! That proof does not validate desktop/region selection, HDR or physical audio.
 //!
 //! Limits: one item per source, so `Desktop` is the primary monitor and a region uses the
 //! monitor it overlaps most (see `wgc_logic::resolve_target`); there is no picker.
@@ -157,6 +158,10 @@ impl WgcSource {
 
     /// Whether this Windows build supports WGC (Windows 10 1903+ in practice).
     pub fn is_available() -> bool {
+        // The quick recorder starts on a fresh worker, before any screenshot backend
+        // initializes WinRT. Without an apartment IsSupported fails with
+        // CO_E_NOTINITIALIZED and used to masquerade as an unsupported OS.
+        let _com = ComGuard::init();
         GraphicsCaptureSession::IsSupported().unwrap_or(false)
     }
 
@@ -460,7 +465,6 @@ impl Capture {
             tracing::warn!(error = %e, "could not set cursor capture");
         }
         // Windows 11 / 22H2 only; older builds return an error, which is fine.
-        let _ = session.SetIsBorderRequired(false);
         let interval = setup.fps.frame_duration() / 2;
         let _ =
             session.SetMinUpdateInterval(TimeSpan { Duration: (interval.as_nanos() / 100) as i64 });
@@ -516,10 +520,13 @@ impl Capture {
         let Some(captured) = newest else { return Ok(None) };
         let arrival = clock.now();
         let result = self.read(&captured, setup, arrival, mapper);
+        // Frame metadata is invalid after Close, just like its texture. Save it
+        // before returning the pool buffer (real Windows returns RO_E_CLOSED).
+        let content = captured.ContentSize().map_err(api("Direct3D11CaptureFrame::ContentSize"));
         // Return the buffer to the pool promptly; failure is irrelevant here.
         let _ = captured.Close();
         // A resized window keeps arriving in the old buffer size until the pool is re-created.
-        let content = captured.ContentSize().map_err(api("Direct3D11CaptureFrame::ContentSize"))?;
+        let content = content?;
         if let PoolAction::Recreate { width, height } =
             pool_action(self.pool_size, (content.Width, content.Height))
         {

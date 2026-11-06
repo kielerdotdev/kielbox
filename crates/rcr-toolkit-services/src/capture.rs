@@ -293,6 +293,19 @@ impl ScreenCapturer {
         include_cursor: bool,
         hdr: &HdrConfig,
     ) -> Result<Captured, ServiceError> {
+        self.capture_explicit_with_cancel(target, include_cursor, hdr, &CancelToken::new())
+    }
+
+    /// Explicit capture with cancellation checked around native calls and
+    /// before remembering the new region. Native OS calls cannot be interrupted.
+    pub fn capture_explicit_with_cancel(
+        &self,
+        target: &ExplicitTarget,
+        include_cursor: bool,
+        hdr: &HdrConfig,
+        cancel: &CancelToken,
+    ) -> Result<Captured, ServiceError> {
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         let opts = CaptureOptions { include_cursor };
         let tonemap = tonemap_settings(hdr);
         let captured = self.with(|s| {
@@ -307,6 +320,7 @@ impl ScreenCapturer {
                 }
             }
         })?;
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         if let ExplicitTarget::Rect(r) = target {
             self.last_region.save(*r);
         }
@@ -335,6 +349,7 @@ impl ScreenCapturer {
             // Not every backend can enumerate (the portal cannot): the overlay copes.
             Ok((desktop, s.monitors().unwrap_or_default(), s.windows().unwrap_or_default()))
         })?;
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         let req = PickRequest {
             desktop: &desktop,
             monitors: &monitors,
@@ -345,6 +360,7 @@ impl ScreenCapturer {
         let Some(picked) = selector.pick(&req)? else {
             return Err(ServiceError::Cancelled);
         };
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         let clipped = picked
             .rect
             .intersect(desktop.rect())
@@ -354,28 +370,31 @@ impl ScreenCapturer {
             .crop_desktop(clipped)
             .map_err(|e| ServiceError::failed(format!("cannot crop the selection: {e}")))?;
         if let Some(mask) = &picked.mask {
-            apply_mask(&mut frame, picked.rect, clipped, mask);
+            apply_mask(&mut frame, picked.rect, clipped, mask)?;
         }
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         self.last_region.save(clipped);
         Ok(with_window_info(frame, picked.window.as_ref()))
     }
 }
 
 /// Makes every pixel of `frame` (the crop `clipped` of a selection whose bounding box is
-/// `full`) transparent where `mask` (row-major over `full`) is zero. A mask of the wrong
-/// size is ignored: a selection must not fail because of a bad mask.
-fn apply_mask(frame: &mut Frame, full: Rect, clipped: Rect, mask: &[u8]) {
+/// `full`) transparent where `mask` (row-major over `full`) is zero. Invalid masks
+/// fail before any pixels change: falling back to an unmasked rectangle would
+/// expose pixels outside the user's intended selection.
+fn apply_mask(frame: &mut Frame, full: Rect, clipped: Rect, mask: &[u8]) -> Result<(), ServiceError> {
     let (fw, fh) = (full.width as usize, full.height as usize);
+    let invalid = || ServiceError::failed("The selection mask does not match the selected region; try capturing the region again");
     let bpp = match frame.format() {
         rcr_image_types::PixelFormat::Rgba8 | rcr_image_types::PixelFormat::Bgra8 => 4,
-        rcr_image_types::PixelFormat::Rgba16F => return,
+        rcr_image_types::PixelFormat::Rgba16F => return Err(invalid()),
     };
-    if mask.len() != fw * fh || frame.size() != clipped.size() {
-        tracing::warn!("ignoring a selection mask that does not match the selection");
-        return;
+    if full.is_empty() || clipped.is_empty() || fw.checked_mul(fh) != Some(mask.len())
+        || frame.size() != clipped.size() || full.intersect(clipped) != Some(clipped) {
+        return Err(invalid());
     }
-    let dx = usize::try_from(i64::from(clipped.x) - i64::from(full.x)).unwrap_or(0);
-    let dy = usize::try_from(i64::from(clipped.y) - i64::from(full.y)).unwrap_or(0);
+    let dx = usize::try_from(i64::from(clipped.x) - i64::from(full.x)).map_err(|_| invalid())?;
+    let dy = usize::try_from(i64::from(clipped.y) - i64::from(full.y)).map_err(|_| invalid())?;
     for y in 0..clipped.height as usize {
         let row = frame.row_mut(y as u32);
         for x in 0..clipped.width as usize {
@@ -385,6 +404,7 @@ fn apply_mask(frame: &mut Frame, full: Rect, clipped: Rect, mask: &[u8]) {
             }
         }
     }
+    Ok(())
 }
 
 fn with_window_info(frame: Frame, info: Option<&WindowInfo>) -> Captured {
@@ -449,6 +469,9 @@ impl Capturer for ScreenCapturer {
                 })?
             }
         };
+        // Native calls may finish after Cancel was pressed. Never publish that
+        // stale image as a successful capture to the workflow engine.
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         Ok(captured)
     }
 }
@@ -591,6 +614,84 @@ mod tests {
             ScreenSource::new(Box::new(fake), TonemapSettings::default()),
             store,
         )
+    }
+
+    #[derive(Debug)]
+    struct CancelAfterNative {
+        inner: Fake,
+        cancel: CancelToken,
+    }
+    impl CaptureBackend for CancelAfterNative {
+        fn name(&self) -> &'static str { "cancel-after-native-fixture" }
+        fn capabilities(&self) -> Capabilities { self.inner.capabilities() }
+        fn monitors(&self) -> CaptureResult<Vec<Monitor>> { self.inner.monitors() }
+        fn windows(&self) -> CaptureResult<Vec<WindowInfo>> { self.inner.windows() }
+        fn capture_monitor(&self, id: &str, options: &CaptureOptions) -> CaptureResult<Frame> {
+            let frame = self.inner.capture_monitor(id, options)?;
+            self.cancel.cancel();
+            Ok(frame)
+        }
+        fn capture_window(&self, id: &str, options: &CaptureOptions) -> CaptureResult<Frame> {
+            let frame = self.inner.capture_window(id, options)?;
+            self.cancel.cancel();
+            Ok(frame)
+        }
+    }
+    fn cancelling_capturer(cancel: &CancelToken, store: LastRegionStore) -> ScreenCapturer {
+        ScreenCapturer::with_source(ScreenSource::new(Box::new(CancelAfterNative {
+            inner: Fake::standard(), cancel: cancel.clone(),
+        }), TonemapSettings::default()), store)
+    }
+
+    #[test]
+    fn native_capture_completing_after_cancel_cannot_report_success_or_change_last_region() {
+        for target in [CaptureTarget::Fullscreen, CaptureTarget::Monitor, CaptureTarget::Window, CaptureTarget::LastRegion] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = LastRegionStore::in_dir(dir.path());
+            let previous = Rect::new(1, 1, 4, 3);
+            store.save(previous);
+            let cancel = CancelToken::new();
+            let capturer = cancelling_capturer(&cancel, store);
+            assert!(capturer.capture(&request(target), &cancel).unwrap_err().is_cancelled(), "{target:?}");
+            assert_eq!(capturer.last_region(), Some(previous));
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = LastRegionStore::in_dir(dir.path());
+        let previous = Rect::new(1, 1, 4, 3);
+        store.save(previous);
+        let cancel = CancelToken::new();
+        let capturer = cancelling_capturer(&cancel, store);
+        assert!(capturer.capture_explicit_with_cancel(&ExplicitTarget::Rect(Rect::new(3, 4, 8, 9)),
+            false, &HdrConfig::default(), &cancel).unwrap_err().is_cancelled());
+        assert_eq!(capturer.last_region(), Some(previous), "Canceled explicit capture must not replace Last region");
+    }
+
+    #[test]
+    fn canceled_native_capture_does_not_open_a_selector() {
+        let cancel = CancelToken::new();
+        let selector = Arc::new(FixedSelector(Some(Rect::new(1, 1, 4, 3)), AtomicBool::new(false)));
+        let capturer = cancelling_capturer(&cancel, LastRegionStore::none()).with_selector(selector.clone());
+        assert!(capturer.capture(&request(CaptureTarget::Region), &cancel).unwrap_err().is_cancelled());
+        assert!(!selector.1.load(Ordering::SeqCst), "Do not open an overlay after Cancel");
+    }
+
+    #[test]
+    fn selector_returning_a_selection_after_cancel_does_not_persist_it() {
+        struct CancelSelector;
+        impl RegionSelector for CancelSelector {
+            fn select(&self, _: &[Monitor], _: &Frame) -> Result<Option<Rect>, ServiceError> { unreachable!() }
+            fn pick(&self, req: &PickRequest<'_>) -> Result<Option<Picked>, ServiceError> {
+                req.cancel.cancel();
+                Ok(Some(Picked::rect(Rect::new(3, 4, 8, 9))))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = LastRegionStore::in_dir(dir.path());
+        let previous = Rect::new(1, 1, 4, 3);
+        store.save(previous);
+        let capturer = capturer(Fake::standard(), store).with_selector(Arc::new(CancelSelector));
+        assert!(capturer.capture(&request(CaptureTarget::Region), &CancelToken::new()).unwrap_err().is_cancelled());
+        assert_eq!(capturer.last_region(), Some(previous));
     }
 
     fn request(target: CaptureTarget) -> CaptureRequest {
@@ -792,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mask_is_cropped_with_a_clipped_selection_and_a_bad_mask_is_ignored() {
+    fn a_mask_is_cropped_with_a_clipped_selection() {
         // Selection sticks out of the 60x30 desktop on the right: the mask must follow.
         let mut mask = vec![255u8; 10 * 2];
         mask[9] = 0; // (9, 0): outside the desktop anyway
@@ -806,14 +907,58 @@ mod tests {
         assert_eq!((got.frame.width(), got.frame.height()), (5, 2));
         assert_eq!(&got.frame.row(1)[..4], &[0, 0, 0, 0]);
         assert_eq!(got.frame.row(0)[3], 255);
+        for y in 0..2 {
+            for x in 0..5 {
+                let actual = &got.frame.row(y)[x as usize * 4..x as usize * 4 + 4];
+                if (x, y) == (0, 1) { assert_eq!(actual, [0, 0, 0, 0]); }
+                else {
+                    let [r, g, b] = pixel(55 + x as i32, 10 + y as i32);
+                    assert_eq!(actual, [r, g, b, 255]);
+                }
+            }
+        }
+    }
 
-        let sel = Arc::new(PickSelector(
-            Some(Picked { rect: Rect::new(5, 5, 4, 4), mask: Some(vec![0; 3]), window: None }),
-            Mutex::new(None),
-        ));
-        let c = capturer(Fake::standard(), LastRegionStore::none()).with_selector(sel);
-        let got = c.capture(&request(CaptureTarget::Region), &CancelToken::new()).unwrap();
-        assert_matches_pattern(&got.frame, (5, 5));
+    #[test]
+    fn malformed_masks_fail_capture_without_publishing_unmasked_pixels_or_changing_last_region() {
+        for (rect, length) in [
+            (Rect::new(5, 5, 4, 4), 0),
+            (Rect::new(5, 5, 4, 4), 3),
+            (Rect::new(5, 5, 4, 4), 15),
+            (Rect::new(5, 5, 4, 4), 17),
+            // A clipped capture still needs a mask over the original selection.
+            (Rect::new(55, 10, 10, 2), 10),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = LastRegionStore::in_dir(dir.path());
+            let previous = Rect::new(1, 2, 3, 4);
+            store.save(previous);
+            let before = std::fs::read(dir.path().join(LAST_REGION_FILE)).unwrap();
+            let selector = Arc::new(PickSelector(Some(Picked {
+                rect, mask: Some(vec![0; length]), window: None,
+            }), Mutex::new(None)));
+            let capturer = capturer(Fake::standard(), store).with_selector(selector);
+            let error = capturer.capture(&request(CaptureTarget::Region), &CancelToken::new()).unwrap_err();
+            assert!(error.to_string().contains("selection mask"), "{error}");
+            assert!(error.to_string().contains("capturing the region again"), "{error}");
+            assert_eq!(capturer.last_region(), Some(previous));
+            assert_eq!(std::fs::read(dir.path().join(LAST_REGION_FILE)).unwrap(), before);
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "Only the previous region file exists");
+        }
+    }
+
+    #[test]
+    fn invalid_mask_geometry_is_rejected_before_modifying_source_pixels() {
+        for (full, clipped, size) in [
+            (Rect::new(0, 0, 2, 2), Rect::new(-1, 0, 2, 2), Size::new(2, 2)),
+            (Rect::new(0, 0, 2, 2), Rect::new(0, 0, 2, 2), Size::new(3, 2)),
+            (Rect::new(0, 0, u32::MAX, u32::MAX), Rect::new(0, 0, 2, 2), Size::new(2, 2)),
+        ] {
+            let mut frame = Fake::standard().frame_for(Rect::new(0, 0, size.width, size.height));
+            let before = frame.clone();
+            assert!(apply_mask(&mut frame, full, clipped, &[0; 4]).is_err());
+            assert_eq!(frame, before);
+        }
     }
 
     #[test]

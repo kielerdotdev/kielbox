@@ -131,6 +131,12 @@ impl AudioPipeline {
     /// `origin` is the recording time of the first video frame (`None` until it is known:
     /// audio is buffered meanwhile).
     pub fn poll(&mut self, origin: Option<Duration>, timeout: Duration, out: &mut Vec<f32>) {
+        // The video origin can become known between audio polls. Preserve FIFO
+        // order: older pre-origin samples must reach drift correction and the
+        // mixer before the next freshly captured chunk from either source.
+        if let Some(origin) = origin {
+            self.flush_pending(origin);
+        }
         let per_lane = timeout / u32::try_from(self.lanes.len().max(1)).unwrap_or(1);
         for i in 0..self.lanes.len() {
             if !self.lanes[i].alive {
@@ -143,9 +149,6 @@ impl AudioPipeline {
                 Err(e) => self.retire(i, Some(e)),
             }
         }
-        if let Some(o) = origin {
-            self.flush_pending(o);
-        }
         let n = self.mixer.pop_ready(Instant::now(), out);
         self.emitted += n as u64;
     }
@@ -153,6 +156,38 @@ impl AudioPipeline {
     /// Drains the sources, stops them and pads the mix with silence up to `end`
     /// (recording time relative to the origin).
     pub fn finish(&mut self, origin: Option<Duration>, end: Duration, out: &mut Vec<f32>) {
+        self.stop_and_drain(origin);
+        let end_frames = (end.as_secs_f64() * f64::from(self.target.sample_rate)).round() as u64;
+        let n = self.mixer.flush(end_frames, out);
+        self.emitted += n as u64;
+    }
+
+    /// Session finalization must not allocate a whole recording of silence
+    /// when every device stopped delivering long before video ended.
+    pub(crate) fn finish_in_chunks(
+        &mut self,
+        origin: Option<Duration>,
+        end: Duration,
+        max_frames: usize,
+        mut emit: impl FnMut(&[f32]) -> bool,
+    ) {
+        self.stop_and_drain(origin);
+        let end_frames = (end.as_secs_f64() * f64::from(self.target.sample_rate)).round() as u64;
+        let mut out = Vec::new();
+        while self.emitted < end_frames {
+            out.clear();
+            let next = end_frames.min(self.emitted.saturating_add(max_frames.max(1) as u64));
+            let n = self.mixer.flush(next, &mut out);
+            self.emitted += n as u64;
+            if n == 0 || !emit(&out) { break; }
+        }
+    }
+
+    fn stop_and_drain(&mut self, origin: Option<Duration>) {
+        // Stop may be the first audio operation to observe the video origin.
+        if let Some(origin) = origin {
+            self.flush_pending(origin);
+        }
         for round in 0..64 {
             let mut any = false;
             for i in 0..self.lanes.len() {
@@ -169,20 +204,18 @@ impl AudioPipeline {
                     Err(e) => self.retire(i, Some(e)),
                 }
             }
-            if let Some(o) = origin {
-                self.flush_pending(o);
-            }
             if !any || round == 63 {
                 break;
             }
         }
+        self.stop();
+    }
+
+    pub(crate) fn stop(&mut self) {
         for l in &mut self.lanes {
             l.src.stop();
             l.alive = false;
         }
-        let end_frames = (end.as_secs_f64() * f64::from(self.target.sample_rate)).round() as u64;
-        let n = self.mixer.flush(end_frames, out);
-        self.emitted += n as u64;
     }
 
     fn retire(&mut self, i: usize, err: Option<AudioError>) {
@@ -356,6 +389,66 @@ mod tests {
             pipe.poll(origin, Duration::from_millis(1), &mut out);
         }
         out
+    }
+
+    #[test]
+    fn delayed_video_origin_preserves_both_tones_and_sample_order() {
+        let create = || AudioPipeline::new(
+            vec![tone_source(440., 0.2, 1000), tone_source(880., 0.2, 1000)],
+            AudioFormat::STEREO_48K, SharedTimeline::new(), Duration::from_millis(500));
+        let mut baseline = create();
+        let mut expected = run(&mut baseline, Some(Duration::ZERO));
+        baseline.finish(Some(Duration::ZERO), Duration::from_secs(1), &mut expected);
+        for buffered_polls in [1, 10, 40, 70] {
+            let mut pipe = create();
+            let mut actual = Vec::new();
+            for _ in 0..buffered_polls { pipe.poll(None, Duration::ZERO, &mut actual); }
+            assert!(actual.is_empty());
+            actual.extend(run(&mut pipe, Some(Duration::ZERO)));
+            pipe.finish(Some(Duration::ZERO), Duration::from_secs(1), &mut actual);
+            assert_eq!(actual.len(), expected.len());
+            let maximum = actual.iter().zip(&expected).map(|(actual, expected)| (actual - expected).abs()).fold(0_f32, f32::max);
+            assert_eq!(maximum, 0., "Audio changed after buffering {buffered_polls} chunks; stats={:?}", pipe.stats());
+            assert_eq!(pipe.stats().resyncs, 0);
+            assert_eq!(pipe.stats().late_frames, 0);
+            assert_eq!(pipe.stats().gap_frames, 0);
+        }
+        // Stop can race origin publication before a normal poll sees it.
+        // These prefixes leave <=64 source chunks for the bounded final drain.
+        for buffered_polls in [40, 70] {
+            let mut pipe = create();
+            let mut actual = Vec::new();
+            for _ in 0..buffered_polls { pipe.poll(None, Duration::ZERO, &mut actual); }
+            pipe.finish(Some(Duration::ZERO), Duration::from_secs(1), &mut actual);
+            assert_eq!(actual, expected, "Stopping changed buffered audio after {buffered_polls} chunks");
+            assert_eq!(pipe.stats().resyncs, 0);
+            assert_eq!(pipe.stats().late_frames, 0);
+        }
+    }
+
+    #[test]
+    fn chunked_finish_preserves_tone_and_silence_without_a_full_clip_buffer() {
+        let create = || AudioPipeline::new(vec![tone_source(440., 0.2, 100)],
+            AudioFormat::STEREO_48K, SharedTimeline::new(), Duration::from_millis(500));
+        let mut expected = Vec::new();
+        create().finish(Some(Duration::ZERO), Duration::from_secs(2), &mut expected);
+        let mut actual = Vec::new();
+        create().finish_in_chunks(Some(Duration::ZERO), Duration::from_secs(2), 4096, |samples| {
+            assert!(samples.len() <= 8192);
+            actual.extend_from_slice(samples);
+            true
+        });
+        assert_eq!(actual, expected);
+        assert!(actual[..9600].iter().any(|sample| sample.abs() > 0.1));
+        assert!(actual[9600..].iter().all(|sample| *sample == 0.));
+
+        let mut count = 0;
+        create().finish_in_chunks(Some(Duration::ZERO), Duration::from_secs(60), 4096, |samples| {
+            assert!(samples.len() <= 8192);
+            count += samples.len();
+            true
+        });
+        assert_eq!(count, 60 * 48_000 * 2);
     }
 
     #[test]

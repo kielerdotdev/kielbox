@@ -1,0 +1,16 @@
+[package]
+name = "rcr-disk"
+description = "Shared disk scanning and conservative developer artifact cleanup"
+version.workspace = true
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+rcr-workflows.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+
+[dev-dependencies]
+tempfile = "3"
+filetime = "0.2"

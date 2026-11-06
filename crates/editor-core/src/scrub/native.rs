@@ -189,7 +189,7 @@ api! {
     scale => sws_freeContext: unsafe extern "C" fn(Opaque),
 }
 
-pub(super) struct Decoder {
+pub(crate) struct Decoder {
     api: Arc<Api>,
     reader: Option<Reader>,
     disable_hardware: bool,
@@ -204,6 +204,7 @@ pub(super) struct Decoder {
 }
 
 static NATIVE_WORKER: AtomicBool = AtomicBool::new(false);
+static PLAYBACK_WORKER: AtomicBool = AtomicBool::new(false);
 #[derive(Debug)]
 struct NativeAdmissionBusy;
 impl std::fmt::Display for NativeAdmissionBusy {
@@ -302,7 +303,14 @@ impl RequestGeneration {
         self.desired.load(Ordering::Acquire) != self.serial
     }
 }
-enum FrameMode { Exact, Interactive, Original(RequestGeneration) }
+enum FrameMode { Exact, Interactive, Playback, Original(RequestGeneration) }
+fn held_sampling_compatible(rate: Rational, fps: u32, source_in_ns: u64) -> bool {
+    if rate.num <= 0 || rate.den <= 0 || fps == 0 { return false; }
+    let numerator = i128::from(rate.num);
+    let denominator = i128::from(rate.den);
+    (i128::from(fps) * denominator) % numerator == 0
+        && (i128::from(source_in_ns) * numerator) % (1_000_000_000 * denominator) == 0
+}
 impl SeekInterrupt {
     fn new(cancel: Arc<AtomicBool>) -> Self {
         Self {
@@ -476,6 +484,21 @@ impl Decoder {
             _admission: admission,
         })
     }
+    /// Playback keeps one software reader alive instead of launching a tool for
+    /// every session. It has a separate bounded lease from paused-frame seeking.
+    pub(crate) fn new_playback(cancel: &Arc<AtomicBool>) -> Result<Self> {
+        SeekInterrupt::new(cancel.clone()).check()?;
+        let admission = NativeAdmission::acquire_cancellable(&PLAYBACK_WORKER, cancel, Duration::from_millis(250))?;
+        let api = crate::ffmpeg_runtime::retry_busy(|| cancel.load(Ordering::Acquire),
+            Duration::from_millis(250), || unsafe { Api::load(cancel) })?;
+        Ok(Self { api: Arc::new(api), reader: None, disable_hardware: true,
+            software_threads: 2, software_slice_threads: true, proxy_profile: false,
+            source_revision: SourceRevision::default(), cancel: cancel.clone(), _admission: admission })
+    }
+    pub(crate) fn frame_playback(&mut self, project: &Project, at: u64, size: (u32, u32),
+        cancel: &AtomicBool) -> Result<PreviewFrame> {
+        self.frame_mode(project, at, size, cancel, FrameMode::Playback)
+    }
     pub fn frame(
         &mut self,
         project: &Project,
@@ -490,7 +513,7 @@ impl Decoder {
     ) -> Result<PreviewFrame> {
         self.frame_mode(project, at, size, cancel, FrameMode::Interactive)
     }
-    pub fn frame_original(
+    pub(super) fn frame_original(
         &mut self, project: &Project, at: u64, size: (u32, u32), cancel: &AtomicBool,
         generation: RequestGeneration,
     ) -> Result<PreviewFrame> {
@@ -503,6 +526,7 @@ impl Decoder {
         &mut self, project: &Project, at: u64, size: (u32, u32), cancel: &AtomicBool, mode: FrameMode,
     ) -> Result<PreviewFrame> {
         let interactive = matches!(&mode, FrameMode::Interactive);
+        let playback = matches!(&mode, FrameMode::Playback);
         let generation = match mode { FrameMode::Original(generation) => Some(generation), _ => None };
         let original = generation.is_some();
         let options = ReaderOptions { generation: generation.clone(), software_threads: self.software_threads,
@@ -584,17 +608,21 @@ impl Decoder {
             source_in_ns: clip.source_in_ns, fps: project.fps,
         });
         let rate = self.reader.as_ref().unwrap().rate;
+        let same_rate = i64::from(rate.num) == i64::from(project.fps) * i64::from(rate.den) && rate.den > 0;
+        let presentation_sampling = playback || !same_rate;
         ensure!(
-            i64::from(rate.num) == i64::from(project.fps) * i64::from(rate.den) && rate.den > 0,
+            same_rate || (!interactive && held_sampling_compatible(rate, project.fps, clip.source_in_ns)),
             "Frame-rate conversion requires filter graph"
         );
+        ensure!(!playback || held_sampling_compatible(rate, project.fps, clip.source_in_ns),
+            "Playback sampling requires aligned source frames");
         // All raw C pointers below are owned by this worker, never by the UI.
         self.reader.as_mut().unwrap().interrupt.generation = generation.clone();
         let result = unsafe {
             self.reader
                 .as_mut()
                 .unwrap()
-                .frame_mode(seconds, at, size, cancel, landing)
+                .frame_mode_with_sampling(seconds, at, size, cancel, landing, presentation_sampling)
         };
         if result.as_ref().is_err_and(is_stopped) {
             // Interrupted AVIO can retain an error/EOF state. Reopen only for a
@@ -1081,6 +1109,12 @@ impl Reader {
         &mut self, seconds: f64, at: u64, size: (u32, u32), cancel: &AtomicBool,
         landing: Option<LandingMap>,
     ) -> Result<PreviewFrame> {
+        self.frame_mode_with_sampling(seconds, at, size, cancel, landing, false)
+    }
+    unsafe fn frame_mode_with_sampling(
+        &mut self, seconds: f64, at: u64, size: (u32, u32), cancel: &AtomicBool,
+        landing: Option<LandingMap>, playback: bool,
+    ) -> Result<PreviewFrame> {
         // Explicit bounded diagnostic only; normal seeking emits no trace.
         self.decoded_frames = 0;
         self.video_packets = 0;
@@ -1095,6 +1129,11 @@ impl Reader {
             + (seconds * f64::from(self.base.den) / f64::from(self.base.num)).round() as i64;
         self.warm_until =
             Some(target + (0.75 * f64::from(self.base.den) / f64::from(self.base.num)) as i64);
+        if playback && self.position.is_some_and(|position| position >= target) {
+            if let Some(surface) = self.cache.iter().filter(|entry| entry.pts <= target).max_by_key(|entry| entry.pts) {
+                return self.output(surface.frame, at, size);
+            }
+        }
         if let Some(index) = self.cache.iter().position(|entry| entry.pts == target) {
             let surface = self.cache.remove(index).unwrap();
             let frame = surface.frame;
@@ -1125,6 +1164,13 @@ impl Reader {
             landing.and_then(|mapping| mapping.first_pts(self.origin, self.base)).unwrap_or(target)
         } else { target };
         self.decode_to(decode_target, cancel)?;
+        if playback {
+            let previous = self.cache.iter().filter(|entry| entry.pts <= target).max_by_key(|entry| entry.pts);
+            ensure!(previous.is_some() || self.position.is_some_and(|position| position <= target),
+                "Playback sample exceeds the retained surface budget");
+            let frame = previous.map_or(self.last, |entry| entry.frame);
+            return self.output(frame, at, size);
+        }
         let actual_frame = landing.and_then(|mapping| self.position.and_then(|pts| mapping.actual_frame(pts, self.origin, self.base)));
         // Out-of-clip landings never borrow the requested identity. Complete the
         // exact route instead; trimmed-away pixels must not be displayed.
@@ -1443,6 +1489,56 @@ impl Drop for Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn held_sampling_only_duplicates_aligned_integer_rate_source_frames() {
+        assert!(held_sampling_compatible(Rational { num: 30, den: 1 }, 60, 0));
+        assert!(held_sampling_compatible(Rational { num: 30, den: 1 }, 60, 1_000_000_000));
+        assert!(!held_sampling_compatible(Rational { num: 30, den: 1 }, 60, 5_000_000));
+        assert!(!held_sampling_compatible(Rational { num: 24, den: 1 }, 60, 0));
+        assert!(!held_sampling_compatible(Rational { num: 120, den: 1 }, 60, 0));
+        assert!(!held_sampling_compatible(Rational { num: 0, den: 1 }, 60, 0));
+    }
+    #[test]
+    #[ignore = "read-only CPU pixel parity; set RCR_NATIVE_PLAYBACK_PROOF_SOURCE to a generated 30fps video"]
+    fn native_cpu_playback_matches_external_integer_upsample_pixels() -> Result<()> {
+        let path = std::env::var_os("RCR_NATIVE_PLAYBACK_PROOF_SOURCE").map(PathBuf::from)
+            .context("Set RCR_NATIVE_PLAYBACK_PROOF_SOURCE to an absolute generated video")?;
+        ensure!(path.is_absolute(), "Pixel proof requires an absolute generated source");
+        let before = crate::SourceStamp::read(&path)?;
+        let asset = crate::probe(&path)?;
+        ensure!(asset.width <= 1280 && asset.height <= 720, "Use a small generated parity fixture");
+        let size = (asset.width, asset.height);
+        let mut editor = crate::Editor::default();
+        editor.execute(crate::Edit::Sequence(crate::QuickEdit::Add(asset)))?;
+        editor.project.width = size.0;
+        editor.project.height = size.1;
+        editor.project.fps = 60;
+        let plan = crate::export::playback_video_plan(&editor.project, 0, size.0, size.1, 60)?;
+        let output = plan.command().args(["-map", "[vout]", "-an", "-pix_fmt", "bgra",
+            "-frames:v", "8", "-f", "rawvideo", "pipe:1"]).output()?;
+        ensure!(output.status.success(), "External reference decode failed: {}", String::from_utf8_lossy(&output.stderr));
+        let bytes = size.0 as usize * size.1 as usize * 4;
+        ensure!(output.stdout.len() == bytes * 8, "Reference did not render eight frames");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut decoder = Decoder::new_playback(&cancel)?;
+        for at in 0..8 {
+            let native = decoder.frame_playback(&editor.project, at as u64, size, &cancel)?;
+            let reference = &output.stdout[at * bytes..(at + 1) * bytes];
+            let max_error = native.bgra.iter().zip(reference).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            ensure!(max_error <= 4, "Native frame {at} differs from external timeline sample (maximum byte error {max_error})");
+        }
+        // Seeking directly to an odd upsampled frame must match the same image
+        // as linear playback; it must not borrow pixels from the next sample.
+        drop(decoder);
+        let mut decoder = Decoder::new_playback(&cancel)?;
+        let sought = decoder.frame_playback(&editor.project, 3, size, &cancel)?;
+        ensure!(sought.bgra.iter().zip(&output.stdout[3 * bytes..4 * bytes]).all(|(a, b)| a.abs_diff(*b) <= 4),
+            "Direct native seek used a future source sample");
+        drop(decoder);
+        ensure!(crate::SourceStamp::read(&path)? == before, "Pixel proof changed source metadata");
+        println!("Native software playback pixel parity: eight 30→60 timeline frames and direct odd-frame seek passed; no audio or GPU");
+        Ok(())
+    }
     #[test]
     fn proxy_forward_budget_is_one_rounded_frame_while_source_retains_quarter_second() {
         let ms = Rational { num: 1, den: 1000 };

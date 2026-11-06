@@ -18,15 +18,25 @@ pub struct RegionOverlay {
     source: (i32, i32, u32, u32),
     focus: FocusHandle,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    start: Option<Point<Pixels>>,
-    end: Option<Point<Pixels>>,
+    selection: rcr_toolkit::selection::Selection,
     reply: Option<mpsc::SyncSender<Option<Rect>>>,
     cancel: CancelToken,
+    recording: bool,
+    probe: Option<crate::quick_recorder::menu_proof::Probe>,
 }
 pub fn open(
     frame: Frame,
     reply: mpsc::SyncSender<Option<Rect>>,
     cancel: CancelToken,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    open_kind(frame, reply, cancel, false, cx)
+}
+fn open_kind(
+    frame: Frame,
+    reply: mpsc::SyncSender<Option<Rect>>,
+    cancel: CancelToken,
+    recording: bool,
     cx: &mut App,
 ) -> anyhow::Result<()> {
     let scale = frame.scale_factor.max(0.5) as f32;
@@ -84,13 +94,18 @@ pub fn open(
                         frame.width(),
                         frame.height(),
                     ),
+                    selection: rcr_toolkit::selection::Selection::new(
+                        frame.width(),
+                        frame.height(),
+                        false,
+                    ),
                     image: frame_image(frame),
                     focus,
                     bounds: Rc::new(Cell::new(None)),
-                    start: None,
-                    end: None,
                     reply: Some(reply),
                     cancel,
+                    recording,
+                    probe: None,
                 }
             })
         },
@@ -128,6 +143,7 @@ pub fn open(
     }
     Ok(())
 }
+#[cfg(test)]
 fn selected(
     start: Point<Pixels>,
     end: Point<Pixels>,
@@ -151,81 +167,107 @@ fn selected(
     }
     Some(Rect::new(source.0 + left, source.1 + top, width, height))
 }
+impl RegionOverlay {
+    fn point(&self, point: Point<Pixels>) -> Option<rcr_toolkit::selection::Point> {
+        let bounds = self.bounds.get()?;
+        Some(rcr_toolkit::selection::Point {
+            x: ((f32::from(point.x - bounds.left()) / f32::from(bounds.size.width).max(1.))
+                * self.source.2 as f32)
+                .clamp(0., self.source.2 as f32),
+            y: ((f32::from(point.y - bounds.top()) / f32::from(bounds.size.height).max(1.))
+                * self.source.3 as f32)
+                .clamp(0., self.source.3 as f32),
+        })
+    }
+    fn confirm(&mut self, window: &mut Window) {
+        let rect = self
+            .selection
+            .rect
+            .map(|r| Rect::new(self.source.0 + r.x, self.source.1 + r.y, r.width, r.height));
+        if rect.is_some() {
+            if let Some(reply) = self.reply.take() {
+                let _ = reply.try_send(rect);
+            }
+            window.remove_window();
+        }
+    }
+    fn dismiss(&mut self, window: &mut Window) {
+        if let Some(reply) = self.reply.take() {
+            let _ = reply.try_send(None);
+        }
+        window.remove_window();
+    }
+}
 impl Render for RegionOverlay {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let image = self.image.clone();
         let measure = self.bounds.clone();
-        let selection = self.start.zip(self.end);
-        let dimensions = selection
-            .zip(self.bounds.get())
-            .and_then(|((start, end), bounds)| selected(start, end, bounds, self.source))
-            .map(|r| format!("{} × {} px · Release to capture", r.width, r.height));
-        div()
+        let selection = self.selection.rect;
+        let source = self.source;
+        let mut root = div()
             .id("screenshot-region-overlay")
             .size_full()
             .relative()
+            .font_family("Geist")
+            .text_size(px(13.))
+            .text_color(rgb(TEXT))
             .track_focus(&self.focus)
             .cursor(CursorStyle::Crosshair)
             .bg(rgb(0x000000))
-            .on_key_down(cx.listener(|this, e: &KeyDownEvent, w, _| {
-                if e.keystroke.key == "escape" {
-                    if let Some(reply) = this.reply.take() {
-                        let _ = reply.try_send(None);
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                match e.keystroke.key.as_str() {
+                    "escape" => this.dismiss(window),
+                    "enter" | "space" => {
+                        if !this.recording && this.selection.rect.is_none() {
+                            this.selection.full();
+                        }
+                        this.confirm(window);
                     }
-                    w.remove_window();
-                } else if matches!(e.keystroke.key.as_str(), "space" | "enter") {
-                    let selection = this.start.zip(this.end).zip(this.bounds.get()).and_then(
-                        |((start, end), bounds)| selected(start, end, bounds, this.source),
-                    );
-                    let rect = selection.unwrap_or_else(|| {
-                        Rect::new(this.source.0, this.source.1, this.source.2, this.source.3)
-                    });
-                    if let Some(reply) = this.reply.take() {
-                        let _ = reply.try_send(Some(rect));
-                    }
-                    w.remove_window();
+                    "left" => this.selection.nudge(-1, 0, e.keystroke.modifiers.shift),
+                    "right" => this.selection.nudge(1, 0, e.keystroke.modifiers.shift),
+                    "up" => this.selection.nudge(0, -1, e.keystroke.modifiers.shift),
+                    "down" => this.selection.nudge(0, 1, e.keystroke.modifiers.shift),
+                    _ => return,
                 }
+                cx.notify();
+                window.prevent_default();
+                cx.stop_propagation();
             }))
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, _, w, _| {
-                    if let Some(reply) = this.reply.take() {
-                        let _ = reply.try_send(None);
-                    }
-                    w.remove_window();
-                }),
+                cx.listener(|this, _, window, _| this.dismiss(window)),
             )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    this.start = Some(e.position);
-                    this.end = Some(e.position);
-                    cx.notify();
+                    if let Some(p) = this.point(e.position) {
+                        let tolerance = this.bounds.get().map_or(8., |b| {
+                            8. * this.source.2 as f32 / f32::from(b.size.width).max(1.)
+                        });
+                        this.selection.down(p, tolerance);
+                        cx.notify();
+                    }
                 }),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                if this.start.is_some() {
-                    this.end = Some(e.position);
+                if this.selection.dragging()
+                    && let Some(p) = this.point(e.position)
+                {
+                    this.selection.update(p, e.modifiers.shift);
                     cx.notify();
                 }
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, e: &MouseUpEvent, w, cx| {
-                    let selection =
-                        this.start
-                            .zip(this.bounds.get())
-                            .and_then(|(start, bounds)| {
-                                selected(start, e.position, bounds, this.source)
-                            });
-                    if selection.is_some() {
-                        if let Some(reply) = this.reply.take() {
-                            let _ = reply.try_send(selection);
+                cx.listener(|this, e: &MouseUpEvent, window, cx| {
+                    if this.selection.dragging() {
+                        if let Some(p) = this.point(e.position) {
+                            this.selection.update(p, e.modifiers.shift);
                         }
-                        w.remove_window();
-                    } else {
-                        this.start = None;
-                        this.end = None;
+                        this.selection.up();
+                        if !this.recording {
+                            this.confirm(window);
+                        }
                         cx.notify();
                     }
                 }),
@@ -237,12 +279,16 @@ impl Render for RegionOverlay {
                         if let Some(image) = image {
                             let _ = window.paint_image(area, Corners::default(), image, 0, false);
                         }
-                        if let Some((start, end)) = selection {
-                            let left = start.x.min(end.x).clamp(area.left(), area.right());
-                            let right = start.x.max(end.x).clamp(area.left(), area.right());
-                            let top = start.y.min(end.y).clamp(area.top(), area.bottom());
-                            let bottom = start.y.max(end.y).clamp(area.top(), area.bottom());
-                            for rect in [
+                        if let Some(rect) = selection {
+                            let left =
+                                area.left() + area.size.width * (rect.x as f32 / source.2 as f32);
+                            let right =
+                                left + area.size.width * (rect.width as f32 / source.2 as f32);
+                            let top =
+                                area.top() + area.size.height * (rect.y as f32 / source.3 as f32);
+                            let bottom =
+                                top + area.size.height * (rect.height as f32 / source.3 as f32);
+                            for mask in [
                                 Bounds::new(
                                     area.origin,
                                     size(area.size.width, (top - area.top()).max(px(0.))),
@@ -253,31 +299,43 @@ impl Render for RegionOverlay {
                                 ),
                                 Bounds::new(
                                     point(area.left(), top),
-                                    size(
-                                        (left - area.left()).max(px(0.)),
-                                        (bottom - top).max(px(0.)),
-                                    ),
+                                    size((left - area.left()).max(px(0.)), bottom - top),
                                 ),
                                 Bounds::new(
                                     point(right, top),
-                                    size(
-                                        (area.right() - right).max(px(0.)),
-                                        (bottom - top).max(px(0.)),
-                                    ),
+                                    size((area.right() - right).max(px(0.)), bottom - top),
                                 ),
                             ] {
-                                window.paint_quad(fill(rect, rgba(0x00000088)));
+                                window.paint_quad(fill(mask, rgba(0x00000088)));
                             }
-                            for rect in [
-                                Bounds::new(point(left, top), size(right - left, px(1.))),
-                                Bounds::new(point(left, bottom), size(right - left, px(1.))),
-                                Bounds::new(point(left, top), size(px(1.), bottom - top)),
-                                Bounds::new(point(right, top), size(px(1.), bottom - top)),
+                            for edge in [
+                                Bounds::new(point(left, top), size(right - left, px(2.))),
+                                Bounds::new(point(left, bottom), size(right - left, px(2.))),
+                                Bounds::new(point(left, top), size(px(2.), bottom - top)),
+                                Bounds::new(point(right, top), size(px(2.), bottom - top)),
                             ] {
-                                window.paint_quad(fill(rect, rgb(ACCENT)));
+                                window.paint_quad(fill(edge, rgb(TEXT)));
+                            }
+                            for (x, y) in [
+                                (left, top),
+                                ((left + right) * 0.5, top),
+                                (right, top),
+                                (left, (top + bottom) * 0.5),
+                                (right, (top + bottom) * 0.5),
+                                (left, bottom),
+                                ((left + right) * 0.5, bottom),
+                                (right, bottom),
+                            ] {
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        point(x - px(4.), y - px(4.)),
+                                        size(px(8.), px(8.)),
+                                    ),
+                                    rgb(TEXT),
+                                ));
                             }
                         } else {
-                            window.paint_quad(fill(area, rgba(0x00000044)));
+                            window.paint_quad(fill(area, rgba(0x00000055)));
                         }
                     },
                 )
@@ -291,13 +349,80 @@ impl Render for RegionOverlay {
                     .px_4()
                     .py_2()
                     .rounded_lg()
-                    .bg(rgba(0x131417dd))
+                    .bg(rgba(0x242529ee))
                     .text_color(rgb(TEXT))
                     .font_family("Geist")
-                    .child(dimensions.unwrap_or_else(|| {
-                        "Drag to capture · Space: full desktop · Esc / right click: cancel".into()
-                    })),
-            )
+                    .child(if let Some(rect) = selection {
+                        format!(
+                            "{} × {} · Drag to move · Handles to resize",
+                            rect.width, rect.height
+                        )
+                    } else if self.recording {
+                        "Drag an area to record · Esc to cancel".into()
+                    } else {
+                        "Drag to capture · Space: full desktop · Esc: cancel".into()
+                    }),
+            );
+        if self.recording {
+            root =
+                root.child(
+                    div()
+                        .absolute()
+                        .bottom(px(28.))
+                        .left_0()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id("record-area-bar")
+                                .flex()
+                                .items_center()
+                                .gap_5()
+                                .p_3()
+                                .px_5()
+                                .rounded(px(24.))
+                                .bg(rgb(0x242529))
+                                .border_1()
+                                .border_color(rgb(0x45464f))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .child(button("cancel-record-area", "Cancel").on_click(
+                                    cx.listener(|this, _, window, _| this.dismiss(window)),
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child("Record selection")
+                                        .child(muted("Enter to start · Esc to cancel")),
+                                )
+                                .child(
+                                    button("confirm-record-area", "")
+                                        .when_some(self.probe.clone(), |s, probe| {
+                                            s.relative().child(
+                                                crate::quick_recorder::menu_proof::measure(
+                                                    probe,
+                                                    "area-confirm",
+                                                ),
+                                            )
+                                        })
+                                        .size(px(60.))
+                                        .rounded_full()
+                                        .border_2()
+                                        .border_color(rgb(TEXT))
+                                        .p_1()
+                                        .opacity(if selection.is_some() { 1. } else { 0.4 })
+                                        .child(div().size(px(46.)).rounded_full().bg(rgb(0xf45b69)))
+                                        .on_click(
+                                            cx.listener(|this, _, window, _| this.confirm(window)),
+                                        ),
+                                ),
+                        ),
+                );
+        }
+        root
     }
 }
 impl Drop for RegionOverlay {

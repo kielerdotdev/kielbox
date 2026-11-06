@@ -19,12 +19,19 @@ fn audio_error_fixture_active(screen: &str) -> Option<bool> {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct FixtureOptions {
+    pub watch_share_stage: Option<u8>,
+    pub installation_preview: bool,
+}
+
 pub fn capture(
     window: WindowHandle<Studio>,
     screen: String,
     output: PathBuf,
     failed: Arc<AtomicBool>,
     size: Size<Pixels>,
+    options: FixtureOptions,
     cx: &mut App,
 ) {
     let window: AnyWindowHandle = window.into();
@@ -41,6 +48,9 @@ pub fn capture(
             }
             let started = Instant::now();
             let mut selection_seeded = false;
+            let mut share_seeded = false;
+            let mut setup_seeded = false;
+            let mut fixture_error = None;
             println!(
                 "Thumbnail cache: {}",
                 crate::library::thumbnail_cache_directory().display()
@@ -51,6 +61,25 @@ pub fn capture(
                     .await;
                 let ready = window.update(cx, |root, window, cx| {
                     let studio = root.downcast::<Studio>().expect("Studio snapshot root");
+                    if options.installation_preview && !setup_seeded {
+                        studio.update(cx, |studio, cx| {
+                            use crate::setup_diagnostics::{Check, Report, Status};
+                            let checks = [
+                                (Status::Ready, "Media tools are available", None),
+                                (Status::NotVerified, "Actual recording hardware was not activated by this check", None),
+                                (Status::Warning, "Development build depends on its source checkout", Some("Keep the checkout or use a release package.")),
+                            ].into_iter().enumerate().map(|(index, (status, summary, action))| Check {
+                                id: format!("fixture-{index}"), status, blocking: false,
+                                summary: summary.into(), action: action.map(str::to_owned),
+                                path: None, detail: None, elapsed_ms: 0,
+                            }).collect();
+                            studio.setup_report = Some(Report { schema_version: 1, app_version: "fixture".into(),
+                                build_profile: "fixture".into(), platform: "Windows".into(), executable: None,
+                                working_directory: "fixture-only".into(), checks, elapsed_ms: 0 });
+                            cx.notify();
+                        });
+                        setup_seeded = true;
+                    }
                     if ((screen.starts_with("library") && !screen.starts_with("library-trash"))
                         || screen.starts_with("capture"))
                         && studio.read(cx).library_scan.is_pending()
@@ -121,7 +150,28 @@ pub fn capture(
                             return false;
                         }
                     }
+                    // Bind any queued CPU frame before testing snapshot readiness.
+                    // Hidden windows only advance this path when explicitly drawn.
                     window.draw(cx).clear();
+                    if screen == "editor-clip-show" {
+                        let editor = studio.read(cx).editor.clone();
+                        if !editor.update(cx, |editor, cx| editor.seed_clip_show_snapshot(cx)) { return false; }
+                        if !share_seeded && let Some(stage) = options.watch_share_stage {
+                            if let Err(error) = editor.update(cx, |editor, cx| editor.seed_watch_share_status(stage, cx)) {
+                                fixture_error = Some(error);
+                                return true;
+                            }
+                            share_seeded = true;
+                        }
+                    }
+                    window.draw(cx).clear();
+                    if options.installation_preview {
+                        match studio.update(cx, |studio, cx| studio.snapshot_installation_visible(cx)) {
+                            Ok(true) => {},
+                            Ok(false) => return false,
+                            Err(error) => { fixture_error = Some(error); return true; }
+                        }
+                    }
                     if screen == "editor" {
                         studio.read(cx).editor.read(cx).smoke_ready()
                             && started.elapsed() > Duration::from_secs(5)
@@ -135,12 +185,15 @@ pub fn capture(
                         started.elapsed() > Duration::from_secs(3)
                     }
                 })?;
+                if let Some(error) = fixture_error.take() { return Err(error); }
                 if ready {
                     break;
                 }
                 anyhow::ensure!(
                     started.elapsed() < Duration::from_secs(25),
-                    "UI fixture did not become ready"
+                    "UI fixture did not become ready: {}", window.update(cx, |root, _, cx| {
+                        root.downcast::<Studio>().expect("Snapshot root").read(cx).editor.read(cx).snapshot_status()
+                    })?
                 );
             }
             let completion = window.update(cx, |root, window, cx| {
@@ -168,6 +221,10 @@ pub fn capture(
                     }), cx);
                 }
                 window.draw(cx).clear();
+                if screen == "editor-clip-show" {
+                    let studio = root.clone().downcast::<Studio>().expect("Clip show snapshot root");
+                    studio.read(cx).editor.read(cx).verify_clip_show_snapshot(window)?;
+                }
                 if screen == "capture-display-picker" {
                     let studio = root.clone().downcast::<Studio>().expect("Studio display diagnostic root");
                     let before = studio.read(cx).preferences.display.clone();

@@ -9,6 +9,7 @@ type Completion = Result<(), String>;
 pub type Receipt = async_channel::Receiver<Completion>;
 const MAX_REPORT_BYTES: usize = 256 * 1024;
 const MAX_LOG_BYTES: usize = 16 * 1024;
+const MAX_LOG_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 struct Job {
     path: PathBuf,
@@ -29,7 +30,9 @@ impl Writer {
             .name(name.into())
             .spawn(move || {
                 for job in receiver {
-                    let result = write(&job.path, &job.bytes).map_err(|error| error.to_string());
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        write(&job.path, &job.bytes).map_err(|error| error.to_string())
+                    })).unwrap_or_else(|_| Err("Diagnostic writer panicked; this report was not saved".into()));
                     // A dropped UI receipt does not interrupt or release an active write.
                     let _ = job.reply.try_send(result);
                 }
@@ -86,17 +89,7 @@ fn log_line(operation: &str, error: &str) -> Vec<u8> {
 pub fn log_editor_error(operation: &str, error: &str) {
     static LOGS: OnceLock<Result<Writer, String>> = OnceLock::new();
     let writer = LOGS.get_or_init(|| {
-        Writer::start("rcr-editor-log", 32, |path, bytes| {
-            use io::Write;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
-            file.write_all(bytes)
-        })
+        Writer::start("rcr-editor-log", 32, |path, bytes| append_log(path, bytes, MAX_LOG_FILE_BYTES))
     });
     if let Ok(writer) = writer {
         // Same best-effort contract as the old log; UI error details remain intact.
@@ -107,10 +100,89 @@ pub fn log_editor_error(operation: &str, error: &str) {
     }
 }
 
+/// One worker owns both files. Keep the previous log, and never grow either
+/// file without a bound when a failing source repeatedly produces diagnostics.
+fn append_log(path: &Path, bytes: &[u8], limit: u64) -> io::Result<()> {
+    use io::Write;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Log entry exceeds file limit"));
+    }
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+    let size = match std::fs::metadata(path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(error),
+    };
+    if size.saturating_add(bytes.len() as u64) > limit {
+        let backup = path.with_extension("log.1");
+        if size > limit {
+            // Migrate a log written by older versions without retaining an
+            // arbitrarily large backup. Stage the tail before removing source.
+            use io::{Read, Seek, SeekFrom};
+            let mut source = std::fs::File::open(path)?;
+            source.seek(SeekFrom::Start(size - limit))?;
+            let mut tail = Vec::with_capacity(limit as usize);
+            source.take(limit).read_to_end(&mut tail)?;
+            // The first line may start halfway through a UTF-8 character.
+            let start = tail.iter().position(|byte| *byte == b'\n').map_or(tail.len(), |index| index + 1);
+            let mut staged = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))?;
+            staged.write_all(&tail[start..])?;
+            staged.persist(&backup).map_err(|error| error.error)?;
+            std::fs::remove_file(path)?;
+        } else {
+            match std::fs::remove_file(&backup) {
+                Ok(()) => {},
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error),
+            }
+            std::fs::rename(path, backup)?;
+        }
+    }
+    std::fs::OpenOptions::new().create(true).append(true).open(path)?.write_all(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn panicked_diagnostic_job_reports_failure_without_disabling_future_reports() {
+        let writer = Writer::start("rcr-panic-recovery-test", 2, |_, bytes| {
+            assert_ne!(bytes, b"panic", "Injected diagnostic writer failure");
+            Ok(())
+        }).unwrap();
+        let failed = writer.submit("unused".into(), b"panic".to_vec()).unwrap();
+        assert!(failed.recv_blocking().unwrap().unwrap_err().contains("panicked"));
+        assert_eq!(writer.submit("unused".into(), b"next report".to_vec()).unwrap()
+            .recv_blocking().unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn repeated_errors_rotate_to_one_bounded_backup_and_keep_whole_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("editor-errors.log");
+        for entry in [b"first\n".as_slice(), b"second\n", b"third\n", b"fourth\n"] {
+            append_log(&path, entry, 13).unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"third\nfourth\n");
+        assert_eq!(std::fs::read(path.with_extension("log.1")).unwrap(), b"first\nsecond\n");
+        assert!(append_log(&path, &[0; 14], 13).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"third\nfourth\n");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn oversized_legacy_log_migrates_to_bounded_complete_line_tail() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("editor-errors.log");
+        std::fs::write(&path, "old entry\n🦀 partial\nrecent\n").unwrap();
+        append_log(&path, b"new\n", 16).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new\n");
+        let backup = std::fs::read(path.with_extension("log.1")).unwrap();
+        assert!(backup.len() <= 16);
+        assert_eq!(std::str::from_utf8(&backup).unwrap(), "recent\n");
+    }
 
     #[test]
     fn blocked_writer_is_bounded_and_dropped_receipt_does_not_release_job() {

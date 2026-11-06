@@ -570,10 +570,9 @@ impl FileSystem for StdFileSystem {
         crate::pattern::write_unique(dir, file_name, bytes)
     }
     fn write_file(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, bytes)
+        // Explicit Save As may replace an existing file, but a short write or
+        // full drive must not truncate the user's previous capture first.
+        crate::settings::atomic_write(path, bytes)
     }
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         std::fs::read(path)
@@ -764,6 +763,34 @@ mod tests {
         fs.write_file(&p, b"hi").unwrap();
         fs.write_file(&p, b"over").unwrap();
         assert_eq!(fs.read(&p).unwrap(), b"over");
+    }
+
+    #[test]
+    fn save_as_stages_replacement_and_preserves_original_on_disk_failure() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("capture.png");
+        let fs = StdFileSystem;
+        fs.write_file(&target, b"complete original screenshot").unwrap();
+        let error = crate::settings::atomic_write_with(&target, |staged| {
+            staged.write_all(b"partial new")?;
+            assert_eq!(std::fs::read(&target).unwrap(), b"complete original screenshot",
+                "The original must remain readable throughout staging");
+            Err(io::Error::new(io::ErrorKind::StorageFull, "injected full drive"))
+        }).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::StorageFull);
+        assert_eq!(fs.read(&target).unwrap(), b"complete original screenshot");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "Failed staging is cleaned up");
+        let missing = dir.path().join("not-yet-saved.png");
+        assert!(crate::settings::atomic_write_with(&missing, |staged| {
+            staged.write_all(b"partial new")?;
+            Err(io::Error::new(io::ErrorKind::StorageFull, "injected full drive"))
+        }).is_err());
+        assert!(!missing.exists(), "Failed first save must not publish partial output");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        fs.write_file(&target, b"complete replacement screenshot").unwrap();
+        assert_eq!(fs.read(&target).unwrap(), b"complete replacement screenshot", "Explicit overwrite still works");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]

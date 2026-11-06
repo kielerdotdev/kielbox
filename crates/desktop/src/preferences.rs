@@ -3,8 +3,31 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
     path::{Component, Path, PathBuf},
-    sync::OnceLock,
+    sync::{OnceLock, atomic::{AtomicBool, Ordering}},
 };
+#[path = "preferences_recovery.rs"]
+mod recovery;
+
+// Save and recovery must agree: never publish settings that startup will refuse
+// to read. Count encoded bytes while streaming, including JSON escaping.
+const MAX_PREFERENCES_BYTES: u64 = 8 * 1024 * 1024;
+
+struct SettingsWriter<W> {
+    inner: W,
+    written: u64,
+}
+impl<W: Write> Write for SettingsWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > MAX_PREFERENCES_BYTES.saturating_sub(self.written) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                "Settings exceed the 8 MiB save limit; existing settings were preserved"));
+        }
+        let count = self.inner.write(bytes)?;
+        self.written += count as u64;
+        Ok(count)
+    }
+    fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
+}
 
 /// Opaque endpoint identity plus a cached display label for unavailable devices.
 /// IDs must never be matched by friendly name or silently replaced at startup.
@@ -81,9 +104,10 @@ pub struct Preferences {
     pub display_names: BTreeMap<PathBuf, String>,
     pub list_view: bool,
     pub close_to_tray: bool,
-    pub hotkeys: [String; 6],
+    #[serde(deserialize_with = "deserialize_hotkeys")]
+    pub hotkeys: [String; 7],
 }
-pub fn default_hotkeys() -> [String; 6] {
+pub fn default_hotkeys() -> [String; 7] {
     [
         "Ctrl+Shift+F9",
         "Ctrl+Shift+F10",
@@ -91,8 +115,22 @@ pub fn default_hotkeys() -> [String; 6] {
         "Ctrl+PrintScreen",
         "Shift+PrintScreen",
         "Alt+PrintScreen",
+        "Ctrl+Shift+PrintScreen",
     ]
     .map(str::to_owned)
+}
+fn deserialize_hotkeys<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[String; 7], D::Error> {
+    let saved = Vec::<String>::deserialize(deserializer)?;
+    if !(6..=7).contains(&saved.len()) {
+        return Err(serde::de::Error::custom("Expected six legacy shortcuts or seven shortcuts"));
+    }
+    let mut bindings = default_hotkeys();
+    for (index, binding) in saved.into_iter().enumerate() { bindings[index] = binding; }
+    // A previously customized shortcut may already own the new default.
+    if bindings[..6].iter().any(|binding| binding.eq_ignore_ascii_case(&bindings[6])) { bindings[6].clear(); }
+    #[cfg(windows)]
+    if crate::hotkeys::quick_binding_conflicts(&bindings) { bindings[6].clear(); }
+    Ok(bindings)
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -145,10 +183,7 @@ impl Preferences {
     }
 
     pub fn load() -> Self {
-        let mut p: Self = std::fs::read("projects/preferences.json")
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let mut p = preference_load().preferences.clone();
         if ![1080, 1440, 2160].contains(&p.height) {
             p.height = 1440;
         }
@@ -174,7 +209,7 @@ impl Preferences {
     }
     pub(crate) fn save_to(&self, path: &Path) -> anyhow::Result<()> {
         atomic_write(path, |temp| {
-            serde_json::to_writer_pretty(temp, self)?;
+            serde_json::to_writer_pretty(SettingsWriter { inner: temp, written: 0 }, self)?;
             Ok(())
         })
     }
@@ -191,11 +226,28 @@ fn atomic_write(path: &Path, write: impl FnOnce(&mut tempfile::NamedTempFile) ->
 }
 
 static PREFERENCE_WRITER: OnceLock<Result<crate::preferences_io::PreferenceWriter, String>> = OnceLock::new();
+static PREFERENCE_LOAD: OnceLock<recovery::LoadedPreferences> = OnceLock::new();
+
+fn preference_load() -> &'static recovery::LoadedPreferences {
+    PREFERENCE_LOAD.get_or_init(|| recovery::load(Path::new("projects/preferences.json")))
+}
+
+/// Startup consumes this after `Preferences::load`; later save failures retain
+/// their existing barrier/layout feedback rather than replacing this notice.
+pub fn take_startup_notice() -> Option<String> {
+    static TAKEN: AtomicBool = AtomicBool::new(false);
+    if TAKEN.swap(true, Ordering::AcqRel) { return None; }
+    let mut notice = preference_load().notice.clone();
+    if let Some(Err(error)) = PREFERENCE_WRITER.get() {
+        let detail = format!("Settings cannot be saved: {error}. Restart RCR to retry.");
+        notice = Some(notice.map_or_else(|| detail.clone(), |notice| format!("{notice}\n{detail}")));
+    }
+    notice
+}
 
 fn preference_writer(initial: &Preferences) -> anyhow::Result<&'static crate::preferences_io::PreferenceWriter> {
-    PREFERENCE_WRITER.get_or_init(|| crate::preferences_io::PreferenceWriter::start(initial.clone(), |candidate| {
-        candidate.save_to(Path::new("projects/preferences.json")).map_err(|error| error.to_string())
-    })).as_ref().map_err(|error| anyhow::anyhow!(error.clone()))
+    PREFERENCE_WRITER.get_or_init(|| preference_load().start_writer(initial.clone()))
+        .as_ref().map_err(|error| anyhow::anyhow!(error.clone()))
 }
 
 pub fn set_list_view(initial: &Preferences, list_view: bool) -> Result<u64, String> {
@@ -314,6 +366,25 @@ where
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_shortcuts_keep_customizations_when_quick_recorder_is_added() {
+        let legacy = ["Ctrl+Alt+F1", "", "Ctrl+F3", "Ctrl+PrintScreen", "Shift+PrintScreen", "Alt+PrintScreen"];
+        let loaded: super::Preferences = serde_json::from_value(serde_json::json!({ "hotkeys": legacy, "replay_seconds": 300 })).unwrap();
+        assert_eq!(&loaded.hotkeys[..6], &legacy.map(str::to_owned));
+        assert_eq!(loaded.hotkeys[6], "Ctrl+Shift+PrintScreen");
+        assert_eq!(loaded.replay_seconds, 300);
+        let restored: super::Preferences = serde_json::from_slice(&serde_json::to_vec(&loaded).unwrap()).unwrap();
+        assert_eq!(restored.hotkeys, loaded.hotkeys);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn migration_disables_new_binding_if_a_legacy_action_owns_it() {
+        let legacy = ["Shift+Control+Snapshot", "", "Ctrl+F3", "Ctrl+PrintScreen", "Shift+PrintScreen", "Alt+PrintScreen"];
+        let loaded: super::Preferences = serde_json::from_value(serde_json::json!({ "hotkeys": legacy })).unwrap();
+        assert_eq!(loaded.hotkeys[0], legacy[0]);
+        assert!(loaded.hotkeys[6].is_empty());
+        assert!(crate::hotkeys::validate(&loaded.hotkeys).is_ok());
+    }
     use super::*;
     #[test]
     fn saved_display_migrates_to_primary_policy_and_roundtrips_opaque_identity() {
@@ -562,5 +633,28 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert!(serde_json::from_slice::<Preferences>(&bytes).unwrap().microphone);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn oversized_encoded_preferences_keep_previous_file_and_allow_smaller_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let previous = Preferences { microphone: true, ..Default::default() };
+        previous.save_to(&path).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let mut candidate = previous.clone();
+        // Each control character needs six JSON bytes. Limit the serialized
+        // stream, not just source string length or the number of saved entries.
+        candidate.hotkeys[0] = "\u{0001}".repeat((MAX_PREFERENCES_BYTES / 6 + 1) as usize);
+        let error = candidate.save_to(&path).unwrap_err();
+        assert!(error.to_string().contains("8 MiB save limit"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1, "Failed save leaked a temporary file");
+        let loaded = recovery::load(&path);
+        assert!(loaded.notice.is_none() && loaded.preferences.microphone);
+        let smaller = Preferences { fps: 30, ..previous };
+        smaller.save_to(&path).unwrap();
+        assert_eq!(recovery::load(&path).preferences.fps, 30);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

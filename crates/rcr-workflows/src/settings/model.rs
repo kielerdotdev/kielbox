@@ -124,7 +124,9 @@ impl General {
         EncodeOptions {
             format: self.image_format.to_types(),
             jpeg_quality: self.image_quality.clamp(1, 100),
-            ..EncodeOptions::default()
+            // Screenshot completion should not wait for maximum PNG compression.
+            // Fast encoding is still lossless; it trades file size for latency.
+            png_fast: true,
         }
     }
 }
@@ -292,6 +294,58 @@ mod tests {
         let o = g.encode_options();
         assert_eq!(o.format, ImageFormat::Jpeg);
         assert_eq!(o.jpeg_quality, 1, "clamped");
+    }
+
+    #[test]
+    fn saved_screenshots_use_fast_lossless_png() {
+        let options = General::default().encode_options();
+        assert_eq!(options.format, ImageFormat::Png);
+        assert!(options.png_fast);
+        let pixels: Vec<u8> = (0..257 * 4).map(|index| (index * 71 % 256) as u8).collect();
+        let frame = rcr_image_types::Frame::from_rgba8(257, 1, pixels).unwrap();
+        let encoded = frame.encode(options).unwrap();
+        assert_eq!(rcr_image_types::Frame::decode(&encoded).unwrap().data(), frame.data());
+    }
+
+    /// Synthetic pixels only; prints PNG size/latency tradeoff while requiring
+    /// identical decoded pixels for both the old and new encoder options.
+    #[test]
+    #[ignore = "synthetic screenshot PNG timing; run with --nocapture"]
+    fn timing_screenshot_png_compression() {
+        use std::time::Instant;
+        let (width, height) = (1280u32, 720u32);
+        for noise in [false, true] {
+            let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+            let mut random = 11u32;
+            for y in 0..height {
+                for x in 0..width {
+                    random ^= random << 13;
+                    random ^= random >> 17;
+                    random ^= random << 5;
+                    let rgb = if noise { random.to_le_bytes() } else {
+                        let tile = (x / 100 + y / 60) as u8;
+                        [tile * 7, tile * 5, tile * 3, 255]
+                    };
+                    pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+            }
+            let frame = rcr_image_types::Frame::from_rgba8(width, height, pixels).unwrap();
+            for fast in [false, true] {
+                let options = EncodeOptions { png_fast: fast, ..General::default().encode_options() };
+                let mut times = Vec::new();
+                let mut size = 0;
+                for _ in 0..3 {
+                    let start = Instant::now();
+                    let bytes = frame.encode(options).unwrap();
+                    times.push(start.elapsed().as_secs_f64() * 1000.);
+                    size = bytes.len();
+                    assert_eq!(rcr_image_types::Frame::decode(&bytes).unwrap().data(), frame.data());
+                }
+                times.sort_by(f64::total_cmp);
+                println!("PNG synthetic {width}x{height} fixture={} fast={fast} median_ms={:.3} bytes={size} identical_pixels=true",
+                    if noise { "noise" } else { "desktop-ui" }, times[1]);
+            }
+        }
     }
 
     #[test]

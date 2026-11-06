@@ -33,7 +33,7 @@
 //!
 //! Rows are converted in parallel with `rayon`. For pixels whose channels are all in the
 //! pass-through range (i.e. nearly all desktop content) the result is looked up from a
-//! 65536-entry table indexed by the raw half-float bits, built once per call from the very
+//! 65536-entry table indexed by the raw half-float bits, cached across calls from the very
 //! same functions the slow path uses, so both paths agree bit for bit. Other pixels run
 //! the full pipeline. `cargo test --release -- --ignored timing --nocapture` prints the
 //! measured time for a 3840×2160 frame.
@@ -47,6 +47,7 @@ pub mod srgb;
 
 use rayon::prelude::*;
 use rcr_image_types::{ColorSpace, Frame, PixelFormat};
+use std::{collections::VecDeque, sync::{Arc, Mutex, OnceLock}};
 
 pub use dither::{DITHER_DEAD_ZONE, dither_noise, encode_channel, quantize};
 pub use params::{
@@ -105,13 +106,20 @@ fn tonemap_frame(frame: &Frame, settings: &TonemapSettings) -> Result<Frame, Hdr
         }
     };
     let params = PixelParams::new(settings, sdr_white);
+    if frame.width() == 0 || frame.height() == 0 {
+        return tonemap_pixels(frame, &params, &[]);
+    }
+    let table = cached_table(&params);
+    tonemap_pixels(frame, &params, &table)
+}
+
+fn tonemap_pixels(frame: &Frame, params: &PixelParams, table: &[[f32; 2]]) -> Result<Frame, HdrError> {
     let (w, h) = (frame.width() as usize, frame.height());
     let mut out = vec![0u8; w * 4 * h as usize];
     if !out.is_empty() {
-        let table = build_table(&params);
         out.par_chunks_mut(w * 4).enumerate().with_min_len(8).for_each(|(y, dst)| {
             // `y < h`, so the row exists; `h` is a u32.
-            convert_row(frame.row(y as u32), dst, y as u32, &params, &table);
+            convert_row(frame.row(y as u32), dst, y as u32, params, table);
         });
     }
     let mut res = Frame::from_raw(frame.size(), w * 4, PixelFormat::Rgba8, ColorSpace::Srgb, out)?;
@@ -125,6 +133,45 @@ fn tonemap_frame(frame: &Frame, settings: &TonemapSettings) -> Result<Frame, Hdr
 
 /// Sentinel in the fast-path table: this channel value needs the full pipeline.
 const NEEDS_SLOW_PATH: f32 = -1.0;
+
+/// Eight 512-KiB tables cover mixed-DPI/HDR desktops without retaining pixels.
+/// The key includes every input read by `build_table`; curve/dither choices are
+/// applied later to each pixel and need not allocate another identical table.
+const TABLE_CACHE_ENTRIES: usize = 8;
+type Table = Arc<Vec<[f32; 2]>>;
+#[derive(Default)]
+struct TableCache(VecDeque<([u32; 3], Table)>);
+impl TableCache {
+    fn get(&mut self, key: [u32; 3]) -> Option<Table> {
+        let position = self.0.iter().position(|(cached, _)| *cached == key)?;
+        let entry = self.0.remove(position)?;
+        let table = entry.1.clone();
+        self.0.push_back(entry);
+        Some(table)
+    }
+    fn insert(&mut self, key: [u32; 3], table: Table) -> Table {
+        if let Some(existing) = self.get(key) { return existing; }
+        if self.0.len() == TABLE_CACHE_ENTRIES { self.0.pop_front(); }
+        self.0.push_back((key, table.clone()));
+        table
+    }
+}
+fn table_key(p: &PixelParams) -> [u32; 3] {
+    let limit = if p.mode == ShoulderMode::ChannelClip { 1.0 } else { p.knee };
+    [p.scale.to_bits(), p.peak.to_bits(), limit.to_bits()]
+}
+fn cached_table(p: &PixelParams) -> Table {
+    static CACHE: OnceLock<Mutex<TableCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = table_key(p);
+    if let Some(table) = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(key) {
+        return table;
+    }
+    // Build outside the lock: a different display's conversion must not wait
+    // for LUT generation. Concurrent misses converge on one retained entry.
+    let table = Arc::new(build_table(p));
+    cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, table)
+}
 
 /// Per half-float-bit-pattern cache: `[scaled, encoded]`.
 ///

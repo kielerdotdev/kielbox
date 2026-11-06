@@ -1,6 +1,10 @@
 use crate::{ACCENT, LINE, MUTED, PANEL, recordings, theme};
 #[path = "editor_playback_status.rs"]
 mod playback_status;
+#[path = "editor_watch_share.rs"]
+mod watch_share;
+#[path = "editor_watch_fullscreen.rs"]
+mod watch_fullscreen;
 use gpui::{prelude::*, *};
 use rcr_editor_core::{
     self as core, AudioExport, Content, Edit, Editor, ExportOptions, Id, JobProgress, MediaAsset,
@@ -248,12 +252,59 @@ actions!(
         ExportClip,
         ZoomTimelineIn,
         ZoomTimelineOut,
-        FitTimeline
+        FitTimeline,
+        ToggleClipShow,
+        PreviousRecording,
+        NextRecording,
+        ExitClipShow,
+        ToggleViewerMute,
+        SeekViewerStart,
+        SeekViewerEnd
     ]
 );
 pub struct BackToLibrary;
 pub struct ShareClip(pub PathBuf);
 pub const MAX_LIBRARY_CHOICES: usize = 64;
+fn adjacent_recording(choices: &[(PathBuf, String)], current: Option<&std::path::Path>, forward: bool) -> Option<usize> {
+    let current = current?;
+    let index = choices.iter().position(|(path, _)| path == current)?;
+    if forward { index.checked_add(1).filter(|next| *next < choices.len()) }
+    else { index.checked_sub(1) }
+}
+fn clip_show_seek_target(fraction: f32, duration: u64) -> u64 {
+    (f64::from(fraction.clamp(0., 1.)) * duration.saturating_sub(1) as f64).round() as u64
+}
+#[cfg(test)]
+mod clip_show_tests {
+    use super::adjacent_recording;
+    use std::path::PathBuf;
+
+    #[test]
+    fn clip_show_follows_library_order_and_stops_at_both_ends() {
+        let choices = ["third.mkv", "first.mp4", "second.mkv"].into_iter()
+            .map(|name| (PathBuf::from(name), name.to_owned())).collect::<Vec<_>>();
+        let first = Some(choices[0].0.as_path());
+        let middle = Some(choices[1].0.as_path());
+        let last = Some(choices[2].0.as_path());
+        assert_eq!(adjacent_recording(&choices, first, false), None);
+        assert_eq!(adjacent_recording(&choices, first, true), Some(1));
+        assert_eq!(adjacent_recording(&choices, middle, false), Some(0));
+        assert_eq!(adjacent_recording(&choices, middle, true), Some(2));
+        assert_eq!(adjacent_recording(&choices, last, true), None);
+        assert_eq!(adjacent_recording(&choices, None, true), None);
+        assert_eq!(adjacent_recording(&choices, Some(std::path::Path::new("missing.mp4")), true), None);
+        assert_eq!(adjacent_recording(&[], first, true), None);
+    }
+    #[test]
+    fn clip_show_seek_clamps_to_project_frames_without_timeline_zoom() {
+        assert_eq!(super::clip_show_seek_target(0., 120), 0);
+        assert_eq!(super::clip_show_seek_target(0.5, 121), 60);
+        assert_eq!(super::clip_show_seek_target(1., 120), 119);
+        assert_eq!(super::clip_show_seek_target(-2., 120), 0);
+        assert_eq!(super::clip_show_seek_target(3., 120), 119);
+        assert_eq!(super::clip_show_seek_target(1., 0), 0);
+    }
+}
 impl EventEmitter<ShareClip> for EditorView {}
 impl EventEmitter<BackToLibrary> for EditorView {}
 struct ExportFailure {
@@ -280,6 +331,7 @@ impl From<anyhow::Error> for ExportFailure {
     }
 }
 enum Event {
+    LoadPhase(u64, &'static str, Instant),
     Resolved(u64, PathBuf, PathBuf),
     Restored(u64, PathBuf, Box<Editor>, bool),
     RestoreFailed(u64, u64, PathBuf, Box<Editor>, String),
@@ -289,6 +341,7 @@ enum Event {
     Failed(u64, u64, String),
     EditFailed(u64, u64, String),
     Exported(u64, Result<PathBuf, ExportFailure>),
+    ExportSize(PathBuf, Option<u64>),
     SaveFinished(PathBuf, u64, Result<(), String>),
 }
 
@@ -317,6 +370,20 @@ fn save_label(title: &str) -> String {
         .collect::<String>()
         .trim()
         .to_owned()
+}
+fn completed_export_source(source: &str) -> String {
+    let source = save_label(source);
+    if source.is_empty() { "Previous clip".into() } else { source }
+}
+#[cfg(test)]
+mod export_receipt_tests {
+    use super::completed_export_source;
+    #[test]
+    fn export_receipt_keeps_source_identity_bounded_and_single_line() {
+        assert_eq!(completed_export_source("  Earlier clip\n\t 🎮  "), "Earlier clip 🎮");
+        assert_eq!(completed_export_source("\n\t"), "Previous clip");
+        assert_eq!(completed_export_source(&"ø".repeat(500)).chars().count(), 80);
+    }
 }
 
 /// Autosave notices remain available after an unrelated media error is dismissed.
@@ -751,6 +818,14 @@ impl EditorGpuPreview {
 }
 
 pub struct EditorView {
+    load_timing: HashMap<&'static str, Instant>,
+    clip_show: bool,
+    clip_show_bounds: Rc<RefCell<[Option<Bounds<Pixels>>; 4]>>,
+    clip_show_seek_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    clip_show_seek_focus: FocusHandle,
+    clip_show_seek_resume: bool,
+    clip_show_volume: f32,
+    clip_show_muted: bool,
     playback_details: playback_status::Details,
     shell_operation: u64,
     copy_operation: u64,
@@ -802,6 +877,7 @@ pub struct EditorView {
     scrubbing: bool,
     scrub_activation: Option<Subscription>,
     playing: bool,
+    preview_output: PlaybackOutput,
     preview_due: Option<(Instant, bool)>,
     image: Option<Arc<RenderImage>>,
     // GPU submissions update shown_frame without replacing this CPU image.
@@ -841,12 +917,120 @@ pub struct EditorView {
     export_details_previous_focus: Option<FocusHandle>,
     export_details_scroll: ScrollHandle,
     export_worker: Option<thread::JoinHandle<()>>,
+    export_source_title: String,
     export_total_us: f64,
     saved: Option<PathBuf>,
+    saved_source_title: Option<String>,
+    watch_share: watch_share::State,
+    watch_fullscreen: watch_fullscreen::State,
     copied: bool,
     error: Option<String>,
 }
 impl EditorView {
+    pub(crate) fn load_diagnostics(&self) -> serde_json::Value {
+        let Some(started) = self.load_timing.get("requested") else { return serde_json::Value::Null; };
+        let phases = self.load_timing.iter().map(|(name, at)| ((*name).to_owned(),
+            serde_json::json!(at.saturating_duration_since(*started).as_secs_f64() * 1000.))).collect::<serde_json::Map<_, _>>();
+        let seek = self.cpu_image_timing.map(|timing| {
+            let ms = |a: Instant, b: Instant| a.saturating_duration_since(b).as_secs_f64() * 1000.;
+            serde_json::json!({"queue_ms":ms(timing.core.started_at,timing.core.queued_at),
+                "decode_ms":ms(timing.core.decoded_at,timing.core.started_at),
+                "cache_ms":ms(timing.core.cached_ready_at,timing.core.decoded_at),
+                "handoff_ms":ms(timing.received_at,timing.core.cached_ready_at),
+                "bind_ms":ms(timing.bound_at,timing.received_at),
+                "paint_ms":self.painted_seek.get().map(|painted| ms(painted.at,timing.bound_at))})
+        });
+        serde_json::json!({"phases_ms":phases,"generation":self.generation.load(Ordering::Relaxed),
+            "playback":self.preview.as_ref().map(PlaybackSession::startup_diagnostics),
+            "audio":self.preview.as_ref().map(PlaybackSession::audio_diagnostics),
+            "seek":seek,
+            "scrub":self.scrub.as_ref().map(|scrub| serde_json::json!({"native":scrub.native_decoder(),
+                "proxy_enabled":scrub.proxy_preparation_enabled(), "proxy_preparing":scrub.seek_proxy_preparing(),
+                "proxy_ready":scrub.seek_proxy_ready()})),
+            "painted_ms":self.painted_frame.get().map(|(_, at)| at.saturating_duration_since(*started).as_secs_f64() * 1000.)})
+    }
+    fn viewer_gain(&self) -> f32 {
+        if !self.clip_show { 1. } else if self.clip_show_muted { 0. } else { self.clip_show_volume }
+    }
+    fn apply_viewer_gain(&self) {
+        if let Some(session) = &self.preview { session.set_monitor_gain(self.viewer_gain()); }
+    }
+    fn toggle_viewer_mute(&mut self, cx: &mut Context<Self>) {
+        self.clip_show_muted = !self.clip_show_muted;
+        self.apply_viewer_gain();
+        cx.notify();
+    }
+    fn adjust_viewer_volume(&mut self, amount: f32, cx: &mut Context<Self>) {
+        self.clip_show_volume = (self.clip_show_volume + amount).clamp(0., 1.);
+        self.clip_show_muted = false;
+        self.apply_viewer_gain();
+        cx.notify();
+    }
+    pub(crate) fn snapshot_status(&self) -> String {
+        format!("ready={}, loading={}, visible={}, image={}, queued_frame={}, source={:?}, error={:?}",
+            self.ready, self.loading, self.visible, self.image.is_some(), self.next_frame.is_some(), self.recording, self.error)
+    }
+    pub(crate) fn open_for_clip_show(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.clip_show = true;
+        self.open_media(path, cx);
+    }
+    pub(crate) fn seed_clip_show_snapshot(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.clip_show {
+            self.clip_show = true;
+            self.pause();
+            cx.notify();
+        }
+        if self.ready && (self.playing || self.preview_due.is_some_and(|(_, play)| play)) {
+            self.request_preview(false);
+        }
+        self.ready && self.image.is_some()
+    }
+    pub(crate) fn verify_clip_show_snapshot(&self, window: &Window) -> anyhow::Result<()> {
+        let bounds = self.clip_show_bounds.borrow().iter().flatten().copied().collect::<Vec<_>>();
+        anyhow::ensure!(bounds.len() == 4, "Clip show header did not paint all four controls");
+        for area in bounds.iter() {
+            anyhow::ensure!(area.left() >= px(0.) && area.right() <= window.viewport_size().width
+                && area.top() >= px(0.) && area.bottom() <= px(56.), "Clip show control overflowed its header: {area:?}");
+        }
+        for pair in bounds.windows(2) {
+            anyhow::ensure!(pair[0].right() <= pair[1].left(), "Clip show controls overlap");
+        }
+        let preview = self.preview_bounds.get().ok_or_else(|| anyhow::anyhow!("Clip show preview was not painted"))?;
+        anyhow::ensure!(preview.size.height > window.viewport_size().height * 0.6, "Clip show did not give most height to playback");
+        let seek = self.clip_show_seek_bounds.get().ok_or_else(|| anyhow::anyhow!("Clip show seek bar was not painted"))?;
+        anyhow::ensure!(seek.size.width > window.viewport_size().width * 0.8
+            && seek.left() >= px(0.) && seek.right() <= window.viewport_size().width,
+            "Clip show seek bar overflowed or did not fill the player width");
+        self.verify_watch_share_layout(window)?;
+        Ok(())
+    }
+    fn navigate_recording(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(index) = adjacent_recording(&self.library_choices, self.recording.as_deref(), forward) else { return; };
+        let (path, title) = self.library_choices[index].clone();
+        self.open_media(path, cx);
+        self.set_title(title);
+    }
+    fn toggle_clip_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_show && !self.prepare_watch_mode_exit(window, cx) { return; }
+        self.finish_scrubbing(cx);
+        self.finish_drag(cx);
+        self.clip_show = !self.clip_show;
+        // Retire the old mode's seek worker: watching cancels any edit proxy,
+        // and returning to editing restores its normal preparation policy.
+        self.scrub.take();
+        self.seek_refinement = None;
+        self.apply_viewer_gain();
+        self.picker = false;
+        self.preset_menu = false;
+        self.focus.focus(window);
+        if self.clip_show {
+            if self.ready && !self.playing { self.toggle_play(cx); }
+        } else {
+            self.queue_media();
+            if self.ready && !self.playing { self.request_preview(false); }
+        }
+        cx.notify();
+    }
     /// Applies to the next session; never restarts active audio or edits the project.
     pub fn set_gpu_preview_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         #[cfg(windows)]
@@ -1109,7 +1293,6 @@ impl EditorView {
         let choices = choices
             .into_iter()
             .filter(|(path, _)| recordings::is_supported(path) && !recordings::is_image(path))
-            .take(MAX_LIBRARY_CHOICES)
             .collect::<Vec<_>>();
         if self.library_choices == choices {
             return false;
@@ -1154,6 +1337,10 @@ impl EditorView {
                             || !worker_active.load(Ordering::Relaxed)
                             || epoch != worker_epoch.load(Ordering::Acquire)
                     };
+                    let phase = match &task { Task::Resolve(..) => Some("resolve_worker_started"),
+                        Task::Open(..) | Task::OpenOriginal(..) => Some("open_worker_started"),
+                        Task::Restore(..) => Some("restore_worker_started"), _ => None };
+                    if let Some(phase) = phase { let _ = events.send(Event::LoadPhase(g, phase, Instant::now())); }
                     let result: anyhow::Result<Event> = (|| match task {
                         Task::Resolve(g, path) => {
                             // Resolution also works for offline paths, allowing their
@@ -1175,12 +1362,14 @@ impl EditorView {
                                 }
                             } else {
                                 let mut e = Editor::default();
+                                let _ = events.send(Event::LoadPhase(g, "probe_started", Instant::now()));
                                 e.execute(Edit::Sequence(QuickEdit::Add(
                                     core::probe_cancellable(&path, || {
                                         g != worker_generation.load(Ordering::Relaxed)
                                             || !worker_active.load(Ordering::Relaxed)
                                     })?,
                                 )))?;
+                                let _ = events.send(Event::LoadPhase(g, "probe_finished", Instant::now()));
                                 e.project
                             };
                             Ok(restore_event(
@@ -1235,6 +1424,7 @@ impl EditorView {
                             })?,
                         )),
                     })();
+                    if phase.is_some() { let _ = events.send(Event::LoadPhase(g, "media_worker_finished", Instant::now())); }
                     let returns_history =
                         matches!(&result, Ok(Event::Restored(..) | Event::RestoreFailed(..)));
                     if !returns_history
@@ -1280,6 +1470,14 @@ impl EditorView {
         })
         .detach();
         Self {
+            load_timing: HashMap::new(),
+            clip_show: false,
+            clip_show_bounds: Rc::new(RefCell::new([None; 4])),
+            clip_show_seek_bounds: Rc::new(Cell::new(None)),
+            clip_show_seek_focus: cx.focus_handle().tab_stop(true),
+            clip_show_seek_resume: false,
+            clip_show_volume: 1.,
+            clip_show_muted: false,
             playback_details: playback_status::Details::new(cx),
             ignore_preview_click: false,
             model: Editor::default(),
@@ -1329,6 +1527,7 @@ impl EditorView {
             scrubbing: false,
             scrub_activation: None,
             playing: false,
+            preview_output: PlaybackOutput::Device,
             preview_due: None,
             image: None,
             cpu_image_frame: None,
@@ -1366,8 +1565,12 @@ impl EditorView {
             export_details_previous_focus: None,
             export_details_scroll: ScrollHandle::new(),
             export_worker: None,
+            export_source_title: String::new(),
             export_total_us: 0.,
             saved: None,
+            saved_source_title: None,
+            watch_share: Default::default(),
+            watch_fullscreen: Default::default(),
             shell_operation: 0,
             copy_operation: 0,
             copied: false,
@@ -1375,6 +1578,12 @@ impl EditorView {
         }
     }
     pub fn open_media(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.saved.is_some() && self.saved_source_title.is_none() {
+            self.saved_source_title = Some(completed_export_source(&self.title));
+        }
+        self.load_timing.clear();
+        self.load_timing.insert("requested", Instant::now());
+        self.clip_show_seek_resume = false;
         self.visible = true;
         self.playback_details.open = false;
         self.playback_details.reset_session();
@@ -1422,7 +1631,6 @@ impl EditorView {
         self.selected = None;
         self.playhead = 0;
         self.error = None;
-        self.saved = None;
         self.export_cancelled = false;
         self.clear_export_details();
         self.picker = false;
@@ -2512,6 +2720,7 @@ impl EditorView {
         }
     }
     fn loaded_session(&mut self, editor: Editor) {
+        self.load_timing.insert("project_loaded", Instant::now());
         self.edit_recovery = false;
         self.source_recovery = false;
         self.timeline_frames = editor.project.duration();
@@ -2520,7 +2729,7 @@ impl EditorView {
         self.ready = true;
         self.selected = core::pieces(&self.model.project).first().map(|c| c.id);
         self.queue_media();
-        self.request_preview(false);
+        self.request_preview(self.clip_show);
         self.remember();
     }
     fn remember(&mut self) {
@@ -2585,6 +2794,8 @@ impl EditorView {
         ))
     }
     fn queue_media(&mut self) {
+        // Watching clips does not need editor-only waveforms and timeline strips.
+        if self.clip_show { return; }
         let g = self.generation.load(Ordering::Relaxed);
         for a in &self.model.project.assets {
             if self.requested.insert(a.path.clone()) {
@@ -2608,6 +2819,8 @@ impl EditorView {
     pub fn is_visible(&self) -> bool { self.visible }
     pub fn hide(&mut self, cx: &mut Context<Self>) {
         if !self.visible { return; }
+        self.clip_show = false;
+        self.restore_watch_fullscreen_on_hide(cx);
         // Stop metadata readers as soon as Library returns, releasing source handles.
         // Export and autosave lifetimes remain independent of view visibility.
         self.media_active.store(false, Ordering::Relaxed);
@@ -2655,6 +2868,7 @@ impl EditorView {
         cx.notify();
     }
     fn request_preview(&mut self, resume: bool) {
+        self.load_timing.entry("preview_requested").or_insert_with(Instant::now);
         self.pause();
         self.preview.take();
         self.playback_details.reset_session();
@@ -2663,7 +2877,8 @@ impl EditorView {
         if self.visible && self.model.project.duration() > 0 {
             if resume {
                 if let Some(scrub) = &self.scrub { scrub.cancel_original_refinement(); }
-                self.preview_due = Some((Instant::now() + Duration::from_millis(60), true));
+                let delay = if self.clip_show { Duration::ZERO } else { Duration::from_millis(60) };
+                self.preview_due = Some((Instant::now() + delay, true));
             } else {
                 // Preserve the sharper 1080p proxy while bounding drag uploads.
                 // Settled refinement and playback retain physical preview size.
@@ -2679,7 +2894,9 @@ impl EditorView {
                 }
                 self.scrub_dirty = false;
                 if self.scrub.is_none() {
-                    match ScrubSession::new(self.model.project.clone(), size) {
+                    let scrub = if self.clip_show { ScrubSession::new_for_viewer(self.model.project.clone(), size) }
+                        else { ScrubSession::new(self.model.project.clone(), size) };
+                    match scrub {
                         Ok(scrub) => {
                             let wake = self.frame_waker.clone();
                             scrub.set_waker(move || {
@@ -2720,6 +2937,7 @@ impl EditorView {
         }
         self.remember();
         self.saved = None;
+        self.watch_share.clear_receipt();
         self.error = None;
         if audio_only {
             self.restart_audio();
@@ -2757,6 +2975,7 @@ impl EditorView {
         for event in self.rx.try_iter().collect::<Vec<_>>() {
             let g = self.generation.load(Ordering::Relaxed);
             match event {
+                Event::LoadPhase(generation, phase, at) if generation == g => { self.load_timing.entry(phase).or_insert(at); }
                 Event::Resolved(generation, path, sidecar) if generation == g && self.visible => {
                     self.recording = Some(path.clone());
                     self.sidecar = Some(sidecar.clone());
@@ -2901,7 +3120,10 @@ impl EditorView {
                         }
                     }
                 }
+                Event::ExportSize(path, bytes) => self.watch_share.set_size(&path, bytes),
                 Event::Exported(generation, result) => {
+                    let source_title = completed_export_source(&self.export_source_title);
+                    self.export_source_title.clear();
                     let cancelled = self
                         .export
                         .take()
@@ -2920,7 +3142,7 @@ impl EditorView {
                     self.export_cancelled = cancelled && result.is_err();
                     self.export_details_open = false;
                     self.export_details_copied = false;
-                    if generation != g {
+                    if generation != g && result.is_err() {
                         // The source clip may have changed while this job ran.
                         // Retained files still need a discoverable recovery action.
                         cx.notify();
@@ -2928,7 +3150,9 @@ impl EditorView {
                     }
                     match result {
                         Ok(p) => {
+                            self.watch_share.completed(&p);
                             self.saved = Some(p);
+                            self.saved_source_title = Some(source_title);
                             self.copied = false;
                         }
                         Err(e) => {
@@ -2998,6 +3222,7 @@ impl EditorView {
             self.preview_due = None;
             self.start_preview(play);
         }
+        let mut advance_show = false;
         if let Some(job) = &self.preview {
             if self.playing {
                 self.playhead = job
@@ -3005,6 +3230,7 @@ impl EditorView {
                     .min(self.model.project.duration().saturating_sub(1));
             }
             if let Some(frame) = job.frame() {
+                self.load_timing.entry("first_frame_received").or_insert_with(Instant::now);
                 self.next_frame = Some(frame.into());
             }
             #[cfg(windows)]
@@ -3085,9 +3311,11 @@ impl EditorView {
             if self.playing && job.finished() {
                 self.playing = false;
                 job.pause();
+                advance_show = self.clip_show;
                 cx.notify();
             }
         }
+        if advance_show { self.navigate_recording(true, cx); }
         if self.playing && !self.scrubbing && self.drag.is_none() {
             self.viewport.follow_playhead(
                 self.playhead,
@@ -3126,6 +3354,7 @@ impl EditorView {
         }
     }
     fn start_preview(&mut self, play: bool) {
+        self.load_timing.entry("preview_session_started").or_insert_with(Instant::now);
         if self.model.project.duration() == 0 {
             return;
         }
@@ -3163,7 +3392,7 @@ impl EditorView {
                 self.model.project.clone(),
                 self.playhead,
                 self.preview_size,
-                PlaybackOutput::Device,
+                self.preview_output,
                 config,
             )
         } else {
@@ -3171,7 +3400,7 @@ impl EditorView {
                 self.model.project.clone(),
                 self.playhead,
                 self.preview_size,
-                PlaybackOutput::Device,
+                self.preview_output,
             )
         };
         #[cfg(not(windows))]
@@ -3179,10 +3408,11 @@ impl EditorView {
             self.model.project.clone(),
             self.playhead,
             self.preview_size,
-            PlaybackOutput::Device,
+            self.preview_output,
         );
         match session {
             Ok(session) => {
+                session.set_monitor_gain(self.viewer_gain());
                 if play {
                     session.play();
                 }
@@ -3232,11 +3462,13 @@ impl EditorView {
         cx.notify();
     }
     fn scrub_to(&mut self, position: Point<Pixels>, initial: bool, cx: &mut Context<Self>) {
-        if let Some(bounds) = self.strip_bounds.get() {
+        let bounds = if self.clip_show { self.clip_show_seek_bounds.get() } else { self.strip_bounds.get() };
+        if let Some(bounds) = bounds {
             let fraction = (f32::from(position.x - bounds.left())
                 / f32::from(bounds.size.width).max(1.))
             .clamp(0., 1.);
-            let target = self.timeline_window().at(f64::from(fraction)).min(self.model.project.duration().saturating_sub(1));
+            let target = if self.clip_show { clip_show_seek_target(fraction, self.model.project.duration()) }
+                else { self.timeline_window().at(f64::from(fraction)).min(self.model.project.duration().saturating_sub(1)) };
             // Subframe motion must not clear a completed frame waiting to paint.
             // Down/explicit seeks still retry; dirty configuration must still apply.
             if !initial && target == self.playhead && self.scrub.is_some()
@@ -3249,7 +3481,8 @@ impl EditorView {
     }
     fn finish_scrubbing(&mut self, cx: &mut Context<Self>) -> bool {
         if !std::mem::replace(&mut self.scrubbing, false) { return false; }
-        self.request_preview(false);
+        let resume = self.clip_show && std::mem::take(&mut self.clip_show_seek_resume);
+        self.request_preview(resume);
         cx.notify();
         true
     }
@@ -3331,6 +3564,12 @@ impl EditorView {
         }
     }
     fn export(&mut self, cx: &mut Context<Self>) {
+        self.begin_export(false, cx);
+    }
+    fn prepare_watch_mp4(&mut self, cx: &mut Context<Self>) {
+        self.begin_export(true, cx);
+    }
+    fn begin_export(&mut self, compatible: bool, cx: &mut Context<Self>) {
         if !self.ready
             || self.export.is_some()
             || self.loading
@@ -3342,22 +3581,25 @@ impl EditorView {
         self.preset_menu = false;
         self.error = None;
         self.saved = None;
+        self.saved_source_title = None;
         self.export_cancelled = false;
         self.export_partial = None;
         self.clear_export_details();
-        let mut p = self.model.project.framed_export();
-        let bitrate = self.preset.bitrate(&p);
-        (p.width, p.height) = self.preset.size(&p);
+        let (mut p, bitrate) = if compatible { watch_share::compatible_project(&self.model.project) }
+            else { let p = self.model.project.framed_export(); let bitrate = self.preset.bitrate(&p); (p, bitrate) };
+        if !compatible { (p.width, p.height) = self.preset.size(&p); }
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let path = recordings::root()
             .join("exports")
-            .join(format!("clip-{stamp}.mp4"));
+            .join(format!("{}-{stamp}.mp4", if compatible { "share" } else { "clip" }));
+        self.watch_share.started(path.clone(), compatible);
         let progress = Arc::new(JobProgress::default());
         self.export_total_us = p.seconds(p.duration()) * 1e6;
         self.export = Some(progress.clone());
+        self.export_source_title = self.title.clone();
         let tx = self.tx.clone();
         let generation = self.generation.load(Ordering::Relaxed);
         self.export_worker = Some(thread::spawn(move || {
@@ -3367,11 +3609,14 @@ impl EditorView {
                 end: None,
                 audio: AudioExport::Mix,
                 bitrate,
+                video_codec: if compatible { core::ExportVideoCodec::H264 } else { core::ExportVideoCodec::Av1 },
             };
-            let _ = tx.send(Event::Exported(
-                generation,
-                core::export(&p, &options, &progress).map_err(ExportFailure::from),
-            ));
+            let result = core::export(&p, &options, &progress).map_err(ExportFailure::from);
+            if let Ok(path) = &result {
+                let bytes = std::fs::metadata(path).ok().map(|metadata| metadata.len());
+                let _ = tx.send(Event::ExportSize(path.clone(), bytes));
+            }
+            let _ = tx.send(Event::Exported(generation, result));
         }));
         cx.notify();
     }
@@ -4339,6 +4584,7 @@ impl EditorView {
 }
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.observe_watch_fullscreen(window);
         if self.scrub_activation.is_none() {
             self.scrub_activation = Some(cx.observe_window_activation(window, |this, window, cx| {
                 if !window.is_window_active() { this.finish_scrubbing(cx); }
@@ -4372,6 +4618,7 @@ impl Render for EditorView {
             self.show(cx);
         }
         if let Some(frame) = self.next_frame.take() {
+            self.load_timing.entry("first_frame_bound").or_insert_with(Instant::now);
             #[cfg(windows)]
             {
                 self.gpu_preview.surface = None;
@@ -4435,7 +4682,7 @@ impl Render for EditorView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, w, cx| {
-                    if !this.model.project.reframe.vertical {
+                    if this.clip_show || !this.model.project.reframe.vertical {
                         return;
                     }
                     this.focus.focus(w);
@@ -4544,7 +4791,7 @@ impl Render for EditorView {
                 )
                 .size_full(),
             )
-            .when(reframe.vertical, |s| {
+            .when(reframe.vertical && !self.clip_show, |s| {
                 s.cursor(CursorStyle::ResizeLeftRight).child(
                     div()
                         .absolute()
@@ -4587,6 +4834,24 @@ impl Render for EditorView {
                                 .on_click(cx.listener(|this, _, _, cx| this.open_original(cx))))
                         }),
                 )
+            })
+            .when(self.clip_show, |s| {
+                let previous = adjacent_recording(&self.library_choices, self.recording.as_deref(), false).is_some();
+                let next = adjacent_recording(&self.library_choices, self.recording.as_deref(), true).is_some();
+                s.child(button("show-previous-side", "‹", "Previous clip · Left arrow")
+                    .absolute().left_3().top(relative(0.5)).mt(px(-26.))
+                    .w(px(44.)).h(px(52.)).px_0().text_size(px(36.)).rounded_lg()
+                    .bg(rgba(0x111216a6)).text_color(rgb(theme::TEXT))
+                    .opacity(if previous { 0.85 } else { 0.2 })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(|this, _, _, cx| { cx.stop_propagation(); this.navigate_recording(false, cx); })))
+                 .child(button("show-next-side", "›", "Next clip · Right arrow")
+                    .absolute().right_3().top(relative(0.5)).mt(px(-26.))
+                    .w(px(44.)).h(px(52.)).px_0().text_size(px(36.)).rounded_lg()
+                    .bg(rgba(0x111216a6)).text_color(rgb(theme::TEXT))
+                    .opacity(if next { 0.85 } else { 0.2 })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(|this, _, _, cx| { cx.stop_propagation(); this.navigate_recording(true, cx); })))
             });
         let compact_controls = f32::from(window.viewport_size().width) < 1280.;
         let controls = div()
@@ -4705,6 +4970,45 @@ impl Render for EditorView {
                     .when(compact_controls, |s| s.w_full()),
             )
             .child(output_controls.when(compact_controls, |s| s.justify_end()));
+        let controls = if self.clip_show {
+            let bounds = self.clip_show_seek_bounds.clone();
+            let progress = self.playhead as f32 / self.model.project.duration().saturating_sub(1).max(1) as f32;
+            let seek = div().id("clip-show-seek").relative().w_full().h(px(22.)).cursor_pointer()
+                .track_focus(&self.clip_show_seek_focus).key_context("ClipShowSeek")
+                .rounded_md().focus(|s| s.bg(rgba(0x3ecf8e1a)))
+                .flex().items_center()
+                .tooltip(|_, cx| cx.new(|_| Tip("Click or drag to seek · Focused arrows: one second · Home/End · Space: play/pause".into())).into())
+                .on_action(cx.listener(|this, _: &TogglePlay, _, cx| this.toggle_play(cx)))
+                .child(canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {}).absolute().inset_0())
+                .child(div().relative().h(px(4.)).w_full().rounded_full().bg(rgb(0x34363d))
+                    .child(div().h_full().w(relative(progress)).rounded_full().bg(rgb(ACCENT)))
+                    .child(div().absolute().left(relative(progress)).top(px(-3.)).ml(px(-5.))
+                        .size(px(10.)).rounded_full().bg(rgb(theme::TEXT))))
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    if !this.ready { return; }
+                    this.clip_show_seek_focus.focus(window);
+                    this.clip_show_seek_resume = this.playing || this.preview_due.is_some_and(|(_, play)| play);
+                    this.scrubbing = true;
+                    this.scrub_to(event.position, true, cx);
+                    cx.stop_propagation();
+                }));
+            div().flex().flex_col().justify_center().gap_1().child(seek)
+                .child(div().flex().items_center().gap_3()
+                .child(button("show-play", if self.playing { "Pause" } else { "Play" }, "Play / pause · Space")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_play(cx))))
+                .child(label(format!("{} / {}", clock(self.playhead, self.model.project.fps), clock(self.model.project.duration(), self.model.project.fps))))
+                .child(div().flex_1())
+                .when(!compact_controls, |s| s.child(label("Space · play/pause    ← / → · previous/next")))
+                .child(button("viewer-volume-down", "−", "Lower playback volume")
+                    .px_2().on_click(cx.listener(|this, _, _, cx| this.adjust_viewer_volume(-0.1, cx))))
+                .child(button("viewer-mute", if self.clip_show_muted { "Unmute" } else { "Mute" }, "Mute playback · M; exports keep their audio")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_viewer_mute(cx))))
+                .child(label(format!("{:.0}%", if self.clip_show_muted { 0. } else { self.clip_show_volume * 100. })))
+                .child(button("viewer-volume-up", "+", "Raise playback volume")
+                    .px_2().on_click(cx.listener(|this, _, _, cx| this.adjust_viewer_volume(0.1, cx))))
+                .child(button("viewer-fullscreen", if window.is_fullscreen() { "Windowed" } else { "Fullscreen" }, "Toggle fullscreen · F11")
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_watch_fullscreen(window, cx)))))
+        } else { controls };
         let mut header = div()
             .h(px(56.))
             .flex_shrink_0()
@@ -4733,6 +5037,8 @@ impl Render for EditorView {
                     .truncate()
                     .child(format!("/   {}", self.title)),
             );
+        header = header.child(button("start-clip-show", "Clip show", "Watch Library clips in sequence · Ctrl+Enter; share this window with friends")
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_clip_show(window, cx))));
         header = header.when(self.ready, |s| match self.autosave_status() {
             SaveStatus::Failed => s.child(
                 button(
@@ -4832,7 +5138,8 @@ impl Render for EditorView {
                     .items_center()
                     .gap_2()
                     .child(theme::icon("check").text_color(rgb(ACCENT)))
-                    .child(label("Saved"))
+                    .child(label(self.saved_source_title.as_ref().map_or_else(|| "Saved".to_owned(),
+                        |title| format!("Saved · {title}"))).max_w(px(220.)).truncate())
                     .child(
                         button("show-saved", if self.shell_operation != 0 { "Opening…" } else { "Show in folder" }, "Show your saved clip").on_click(
                             cx.listener(move |this, _, _, cx| this.reveal_output(path.clone(), cx)),
@@ -4994,6 +5301,35 @@ impl Render for EditorView {
                     cx.notify();
                 })),
             );
+        if self.clip_show {
+            *self.clip_show_bounds.borrow_mut() = [None; 4];
+            let show_button = |index: usize, id: &'static str, text: &'static str, tip: &'static str| {
+                let bounds = self.clip_show_bounds.clone();
+                button(id, text, tip).relative().child(canvas(
+                    move |area, _, _| bounds.borrow_mut()[index] = Some(area), |_, _, _, _| {}).absolute().inset_0())
+            };
+            let position = self.library_choices.iter().position(|(path, _)| Some(path) == self.recording.as_ref());
+            let previous = adjacent_recording(&self.library_choices, self.recording.as_deref(), false).is_some();
+            let next = adjacent_recording(&self.library_choices, self.recording.as_deref(), true).is_some();
+            header = div().h(px(56.)).flex_shrink_0().px_5().border_b_1().border_color(rgb(LINE))
+                .flex().items_center().gap_3()
+                .child(show_button(0, "show-library", "Library", "Back to your recordings")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if !this.prepare_watch_mode_exit(window, cx) { return; }
+                        this.clip_show = false; this.hide(cx); cx.emit(BackToLibrary);
+                    })))
+                .child(label("CLIP SHOW").text_color(rgb(ACCENT)))
+                .child(div().flex_1().min_w_0().truncate().child(self.title.clone()))
+                .when_some(position, |s, index| s.child(label(format!("{} / {}", index + 1, self.library_choices.len()))))
+                .child(show_button(1, "previous-recording", "Previous", "Previous Library clip · Left arrow")
+                    .opacity(if previous { 1. } else { 0.35 })
+                    .on_click(cx.listener(|this, _, _, cx| this.navigate_recording(false, cx))))
+                .child(show_button(2, "next-recording", "Next", "Next Library clip · Right arrow")
+                    .opacity(if next { 1. } else { 0.35 })
+                    .on_click(cx.listener(|this, _, _, cx| this.navigate_recording(true, cx))))
+                .child(show_button(3, "end-clip-show", "Open in Editor", "Return to editing · Escape")
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_clip_show(window, cx))));
+        }
         let mut root = div()
             .id("quick-editor")
             // Bound actions are dispatched before raw key handlers. Removing the
@@ -5002,6 +5338,8 @@ impl Render for EditorView {
                 "PlaybackDetails"
             } else if self.export_details_open {
                 "ExportDetails"
+            } else if self.clip_show {
+                "ClipShow"
             } else {
                 "Editor"
             })
@@ -5105,7 +5443,19 @@ impl Render for EditorView {
                 cx.listener(|this, _: &ZoomTimelineOut, _, cx| this.zoom_timeline(false, 0.5, cx)),
             )
             .on_action(cx.listener(|this, _: &FitTimeline, _, cx| this.fit_timeline(cx)))
-            .child(header);
+            .on_action(cx.listener(|this, _: &ToggleClipShow, window, cx| this.toggle_clip_show(window, cx)))
+            .on_action(cx.listener(|this, _: &PreviousRecording, _, cx| this.navigate_recording(false, cx)))
+            .on_action(cx.listener(|this, _: &NextRecording, _, cx| this.navigate_recording(true, cx)))
+            .on_action(cx.listener(|this, _: &ExitClipShow, window, cx| {
+                if this.exit_watch_fullscreen(window, cx) { return; }
+                if this.clip_show { this.toggle_clip_show(window, cx); }
+            }))
+            .on_action(cx.listener(|this, _: &watch_fullscreen::ToggleViewerFullscreen, window, cx| this.toggle_watch_fullscreen(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleViewerMute, _, cx| this.toggle_viewer_mute(cx)))
+            .on_action(cx.listener(|this, _: &SeekViewerStart, _, cx| this.seek(0, cx)))
+            .on_action(cx.listener(|this, _: &SeekViewerEnd, _, cx| this.seek(this.model.project.duration().saturating_sub(1), cx)))
+            .child(header)
+            .when(self.clip_show, |root| root.child(self.watch_share_row(cx)));
         let mut popover = None;
         if self.preset_menu {
             let mut menu = div().w_full().flex().flex_col().gap_1();
@@ -5196,14 +5546,14 @@ impl Render for EditorView {
             .when(self.ready, |s| {
                 s.child(
                     controls
-                        .h(px(if compact_controls { 96. } else { 60. }))
+                        .h(px(if self.clip_show { 76. } else if compact_controls { 96. } else { 60. }))
                         .flex_shrink_0()
                         .px_6(),
                 )
-                .child(self.timeline(cx))
+                .when(!self.clip_show, |s| s.child(self.timeline(cx)))
             });
         root = root
-            .when_some(completion, |s, p| s.child(p))
+            .when_some(if self.clip_show { None } else { completion }, |s, p| s.child(p))
             .when_some(popover, |s, p| s.child(p));
         if self.picker {
             let mut picker = div()
@@ -5352,6 +5702,20 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-=", ZoomTimelineIn, Some("Editor")),
         KeyBinding::new("-", ZoomTimelineOut, Some("Editor")),
         KeyBinding::new("ctrl-0", FitTimeline, Some("Editor")),
+        KeyBinding::new("ctrl-enter", ToggleClipShow, Some("Editor")),
+        KeyBinding::new("space", TogglePlay, Some("ClipShow")),
+        KeyBinding::new("left", PreviousRecording, Some("ClipShow")),
+        KeyBinding::new("right", NextRecording, Some("ClipShow")),
+        KeyBinding::new("escape", ExitClipShow, Some("ClipShow")),
+        KeyBinding::new("m", ToggleViewerMute, Some("ClipShow")),
+        KeyBinding::new("f11", watch_fullscreen::ToggleViewerFullscreen, Some("ClipShow")),
+        KeyBinding::new("f11", watch_fullscreen::ToggleViewerFullscreen, Some("ClipShowSeek")),
+        KeyBinding::new("shift-left", SecondBack, Some("ClipShow")),
+        KeyBinding::new("shift-right", SecondForward, Some("ClipShow")),
+        KeyBinding::new("home", SeekViewerStart, Some("ClipShow")),
+        KeyBinding::new("end", SeekViewerEnd, Some("ClipShow")),
+        KeyBinding::new("left", SecondBack, Some("ClipShowSeek")),
+        KeyBinding::new("right", SecondForward, Some("ClipShowSeek")),
     ]);
 }
 impl Focusable for EditorView {
@@ -5714,3 +6078,7 @@ pub use autosave_smoke::AutosaveSmoke;
 #[path = "editor_keyboard_smoke.rs"]
 mod keyboard_smoke;
 pub use keyboard_smoke::EditorKeyboardSmoke;
+
+#[path = "editor_clip_show_eval.rs"]
+mod clip_show_eval;
+pub use clip_show_eval::ClipShowEvaluation;

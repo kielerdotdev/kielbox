@@ -34,6 +34,10 @@ type CaptureSmoke = (
 );
 type StandaloneSmoke = (u8, mpsc::Receiver<Option<rcr_toolkit::worker::StandaloneImage>>, Option<[u8; 32]>);
 pub struct Toolkit {
+    quick_recorder: Entity<crate::quick_recorder::QuickRecorder>,
+    capture_extras: bool,
+    capture_requests: Vec<(CaptureTarget, rcr_toolkit::worker::ScreenshotOptions)>,
+    capture_probe: Option<crate::quick_recorder::menu_proof::Probe>,
     smoke_image_refs: Vec<std::sync::Weak<RenderImage>>,
     shell_operation: u64,
     history_ui: history_ui::HistoryUi,
@@ -314,6 +318,19 @@ impl Toolkit {
         Ok(false)
     }
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let quick_recorder = cx.new(crate::quick_recorder::QuickRecorder::new);
+        cx.subscribe(&quick_recorder, |this, _, _: &crate::quick_recorder::ShowControls, cx| {
+            this.pane = 0;
+            cx.emit(ToolkitEvent::Activate);
+            cx.notify();
+        }).detach();
+        cx.subscribe(&quick_recorder, |this, _, event: &crate::quick_recorder::Screenshot, cx| {
+            if this.capture_probe.is_some() { this.capture_requests.push((event.target, event.options.clone())); return; }
+            if !this.submit(Action::Screenshot { target: event.target, edit: this.edit, upload: this.upload, options: Some(event.options.clone()) }, cx) {
+                cx.emit(ToolkitEvent::Activate);
+                activate_main(cx);
+            }
+        }).detach();
         let query = cx.new(|cx| TextInput::new(cx, ""));
         query.update(cx, |input, cx| input.set_placeholder("Search filename, link, app or window title…", cx));
         cx.observe(&query, |this, _, cx| this.schedule_history_search(cx)).detach();
@@ -390,6 +407,10 @@ impl Toolkit {
         })
         .detach();
         Self {
+            quick_recorder,
+            capture_extras: false,
+            capture_requests: vec![],
+            capture_probe: None,
             smoke_image_refs: Vec::new(),
             shell_operation: 0,
             history_ui: Default::default(),
@@ -423,6 +444,15 @@ impl Toolkit {
             result_url: None,
         }
     }
+    pub fn quick_recorder(&self) -> Entity<crate::quick_recorder::QuickRecorder> {
+        self.quick_recorder.clone()
+    }
+    pub(crate) fn capture_menu_proof(&mut self, probe: crate::quick_recorder::menu_proof::Probe, cx: &mut Context<Self>) {
+        self.quick_recorder.update(cx, |recorder, _| recorder.set_probe(probe.clone()));
+        self.capture_probe = Some(probe); self.pane = 0; cx.notify();
+    }
+    pub(crate) fn capture_requests(&self) -> &[(CaptureTarget, rcr_toolkit::worker::ScreenshotOptions)] { &self.capture_requests }
+    pub(crate) fn capture_menu_ready(&self) -> bool { self.snapshot.is_some() && self.error.is_none() }
     pub fn screen_utility(
         &mut self,
         mode: crate::screen_tools::Mode,
@@ -542,6 +572,7 @@ impl Toolkit {
                 target,
                 edit: self.edit,
                 upload: self.upload,
+                options: None,
             },
             cx,
         )
@@ -802,134 +833,25 @@ impl Toolkit {
         self.submit(Action::SaveSettings(Box::new(settings)), cx);
     }
     fn home(&self, cx: &mut Context<Self>) -> Div {
-        let mut captures = div().flex().flex_wrap().gap_3();
-        for (i, (name, description, target)) in [
-            (
-                "Region",
-                "Pick an area on a frozen desktop",
-                CaptureTarget::Region,
-            ),
-            (
-                "Full screen",
-                "All displays with per-monitor HDR tone mapping",
-                CaptureTarget::Fullscreen,
-            ),
-            (
-                "Monitor",
-                "Capture the focused or primary display",
-                CaptureTarget::Monitor,
-            ),
-            (
-                "Active window",
-                "Capture the foreground window",
-                CaptureTarget::Window,
-            ),
-            (
-                "Last region",
-                "Repeat the previous selection",
-                CaptureTarget::LastRegion,
-            ),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            captures = captures.child(
-                div()
-                    .id(("screenshot-action", i))
-                    .w(px(280.))
-                    .min_h(px(100.))
-                    .p_4()
-                    .rounded_lg()
-                    .bg(rgb(PANEL))
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(rgb(SOFT)))
-                    .child(div().flex().gap_2().child(icon("monitor")).child(name))
-                    .child(muted(description).mt_2())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if this.capture(target, cx) {
-                            window.minimize_window();
-                        }
-                    })),
-            );
-        }
-        div()
-            .flex()
-            .flex_col()
-            .gap_5()
-            .child(div().text_size(px(22.)).child("Your capture toolkit"))
-            .child(muted(
-                "Screenshots, annotations, workflows and sharing — alongside your recorder.",
-            ))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(toggle("edit-screenshot", self.edit).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.edit = !this.edit;
-                            cx.notify();
-                        },
-                    )))
-                    .child("Annotate full-screen / window captures")
-                    .child(
-                        toggle("share-screenshot", self.upload).on_click(cx.listener(
-                            |this, _, _, cx| {
-                                this.upload = !this.upload;
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .child("Upload after capture"),
-            )
-            .child(captures)
-            .child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .child(
-                        button("open-image-tool", "Open image / project")
-                            .child(icon("folder"))
-                            .on_click(cx.listener(|this, _, w, cx| this.choose_files(0, w, cx))),
-                    )
-                    .child(
-                        button("share-files-tool", "Share files")
-                            .child(icon("download"))
-                            .on_click(cx.listener(|this, _, w, cx| this.choose_files(3, w, cx))),
-                    )
-                    .child(
-                        button("open-recorder-tool", "Record / replay")
-                            .on_click(cx.listener(|_, _, _, cx| cx.emit(ToolkitEvent::Recorder))),
-                    ),
-            )
-            .child(
-                panel()
-                    .child("QR code")
-                    .child(muted(
-                        "Create a QR image from text or a URL, then annotate, copy or save it.",
-                    ))
-                    .child(self.qr.clone())
-                    .child(button("make-qr", "Create QR code").on_click(cx.listener(
-                        |this, _, _, cx| {
-                            let text = this.qr.read(cx).value();
-                            if !text.trim().is_empty() {
-                                this.submit(Action::Qr(text), cx);
-                            }
-                        },
-                    ))),
-            )
-            .child(
-                button("edit-clipboard-image", "Edit clipboard image").on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.submit(Action::EditClipboard, cx);
-                    },
-                )),
-            )
-            .child(mono(
-                "Global screenshot shortcuts can be changed in Settings.",
-            ))
+        let extras = div().flex().flex_col().gap_4()
+            .child(div().flex().flex_wrap().gap_3()
+                .child(toggle("edit-screenshot", self.edit).on_click(cx.listener(|this, _, _, cx| { this.edit = !this.edit; cx.notify(); })))
+                .child("Annotate captures")
+                .child(toggle("share-screenshot", self.upload).on_click(cx.listener(|this, _, _, cx| { this.upload = !this.upload; cx.notify(); })))
+                .child("Upload after capture"))
+            .child(div().flex().flex_wrap().gap_2()
+                .child(button("last-region-tool", "Last area").on_click(cx.listener(|this, _, window, cx| { if this.capture(CaptureTarget::LastRegion, cx) { window.minimize_window(); } })))
+                .child(button("desktop-tool", "All displays").on_click(cx.listener(|this, _, window, cx| { if this.capture(CaptureTarget::Fullscreen, cx) { window.minimize_window(); } })))
+                .child(button("edit-clipboard-image", "Edit clipboard image").on_click(cx.listener(|this, _, _, cx| { this.submit(Action::EditClipboard, cx); }))))
+            .child(panel().child("QR code").child(self.qr.clone())
+                .child(button("make-qr", "Create QR code").on_click(cx.listener(|this, _, _, cx| { let text = this.qr.read(cx).value(); if !text.trim().is_empty() { this.submit(Action::Qr(text), cx); } }))));
+        div().w_full().min_w_0().flex().flex_col().gap_4().py_3()
+            .child(self.quick_recorder.clone())
+            .child(div().flex().flex_wrap().gap_2()
+                .child(button("open-image-tool", "Open image").child(icon("folder")).on_click(cx.listener(|this, _, w, cx| this.choose_files(0, w, cx))))
+                .child(button("share-files-tool", "Share files").child(icon("download")).on_click(cx.listener(|this, _, w, cx| this.choose_files(3, w, cx))))
+                .child(button("capture-extras", "More tools").on_click(cx.listener(|this, _, _, cx| { this.capture_extras = !this.capture_extras; cx.notify(); }))))
+            .when(self.capture_extras, |s| s.child(div().w_full().max_w(px(520.)).child(extras)))
     }
     fn destinations(&self, cx: &mut Context<Self>) -> Div {
         let mut root=div().flex().flex_col().gap_4().child(div().text_size(px(22.)).child("Upload destinations"))

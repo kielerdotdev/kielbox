@@ -42,7 +42,7 @@ fn audio_error_scroll_y(key: &str, current: f32, viewport: f32) -> Option<f32> {
 
 fn persist_hotkeys<E>(
     preferences: &mut crate::preferences::Preferences,
-    bindings: [String; 6],
+    bindings: [String; 7],
     persist: impl FnOnce(&crate::preferences::Preferences) -> Result<(), E>,
 ) -> Result<(), E> {
     let previous = std::mem::replace(&mut preferences.hotkeys, bindings);
@@ -140,7 +140,7 @@ impl Studio {
             self.restore_hotkeys(cx);
         }
     }
-    fn apply_hotkeys(&mut self, bindings: [String; 6], window: &mut Window, cx: &mut Context<Self>) {
+    fn apply_hotkeys(&mut self, bindings: [String; 7], window: &mut Window, cx: &mut Context<Self>) {
         if let Err(error) = crate::hotkeys::validate(&bindings) {
             self.notice = Some(error);
             cx.notify();
@@ -929,6 +929,43 @@ impl Studio {
             )
     }
     fn settings_ui(&self, cx: &mut Context<Self>) -> Div {
+        let installation_bounds = self.installation_bounds.clone();
+        let checking = self.setup_inspection.is_some();
+        let cancelling = self.setup_inspection.as_ref().is_some_and(|check| check.cancel.is_cancelled());
+        let mut installation = div().flex().flex_col().gap_2()
+            .child(muted("CHECK INSTALLATION"))
+            .child(muted("Inspect media tools and data locations. This does not start recording or change settings."))
+            .child(div().flex().gap_2()
+                .child(button("check-installation", if cancelling { "Cancelling…" } else if checking { "Checking…" } else { "Check installation" })
+                    .tab_stop(!checking).opacity(if checking { 0.5 } else { 1. })
+                    .on_click(cx.listener(|this, _, _, cx| this.check_installation(cx))))
+                .when(checking && !cancelling, |row| row.child(button("cancel-installation-check", "Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(check) = &this.setup_inspection { check.cancel.cancel(); }
+                        cx.notify();
+                    })))));
+        if let Some(error) = &self.setup_error {
+            installation = installation.child(div().child(error.clone()).text_color(rgb(0xf08b8b)));
+        }
+        if let Some(report) = &self.setup_report {
+            for check in &report.checks {
+                use crate::setup_diagnostics::Status;
+                let (prefix, color) = match check.status {
+                    Status::Ready => ("OK", ACCENT),
+                    Status::Error => ("Needs attention", 0xf08b8b),
+                    Status::Warning => ("Check", 0xfbbf24),
+                    Status::NotVerified => ("Not tested", MUTED),
+                    Status::Cancelled => ("Cancelled", MUTED),
+                };
+                installation = installation.child(div().flex().flex_col().gap_1()
+                    .child(div().child(format!("{prefix}: {}", check.summary)).text_color(rgb(color)))
+                    .when_some(check.action.clone(), |row, action| row.child(muted(action))));
+            }
+        }
+        let installation = installation.relative().child(canvas(
+            move |bounds, _, _| installation_bounds.set(Some(bounds)),
+            |_, _, _, _| {},
+        ).absolute().inset_0());
         let mut resolution = div().flex().gap_1().p_1().rounded_lg().bg(rgb(SOFT));
         for height in [1080, 1440, 2160] {
             resolution = resolution.child(
@@ -1146,12 +1183,15 @@ impl Studio {
                 )),
             ))
             .child(row(
-                "Replay video budget",
-                "Approximate compressed video size at the selected replay length",
-                mono(format!(
-                    "{:.0} MB / replay",
-                    self.preferences.bitrate as f64 * self.preferences.replay_seconds as f64 / 8e6
-                )),
+                "Replay memory budget",
+                "Includes bitrate headroom, enabled audio sources and the preceding keyframe",
+                mono(rcr_media_core::replay_memory_budget(
+                    &rcr_media_core::VideoConfig { bitrate: self.preferences.bitrate,
+                        fps: self.preferences.fps,
+                        keyframe_interval: self.preferences.capture_priority.keyframe_interval(self.preferences.fps),
+                        ..Default::default() }, self.preferences.replay_seconds,
+                    usize::from(self.system_audio) + usize::from(self.microphone))
+                    .map_or_else(|error| error.to_string(), |bytes| format!("{:.0} MiB", bytes as f64 / 1_048_576.))),
             ));
         let mut shortcuts = panel().gap_0().py_0();
         for (index, title) in crate::hotkeys::ACTIONS.iter().enumerate() {
@@ -1225,7 +1265,7 @@ impl Studio {
                     )),
                 ),
         );
-        div().flex_1().min_h_0().child(div().id("settings-scroll").track_focus(&self.hotkey_focus).on_key_down(cx.listener(Self::hotkey_key)).size_full().min_h_0().overflow_y_scroll().px_6().py_8().child(div().max_w(px(880.)).w_full().mx_auto().flex().flex_col().gap_6()
+        div().flex_1().min_h_0().child(div().id("settings-scroll").track_scroll(&self.settings_scroll).track_focus(&self.hotkey_focus).on_key_down(cx.listener(Self::hotkey_key)).size_full().min_h_0().overflow_y_scroll().px_6().py_8().child(div().max_w(px(880.)).w_full().mx_auto().flex().flex_col().gap_6()
             .child(div().flex().items_center().justify_between()
                 .child(div().text_size(px(24.)).font_weight(FontWeight::MEDIUM).child("Settings"))
                 .child(button("recommended-capture", "Use 1440p60 defaults").on_click(cx.listener(|this,_,_,cx| {
@@ -1251,9 +1291,31 @@ impl Studio {
             .child(div().flex().flex_col().gap_2().child(muted("AUDIO · SEPARATE TRACKS")).child(audio))
             .child(div().flex().flex_col().gap_2().child(muted("EDITOR PLAYBACK")).child(playback))
             .child(div().flex().flex_col().gap_2().child(muted("STORAGE")).child(saving))
+            .child(installation)
             .child(div().flex().flex_col().gap_2().child(muted("GLOBAL SHORTCUTS")).child(shortcuts))
             .child(row("Keep running in tray", "Closing the window keeps recording and global shortcuts available", toggle("close-to-tray",self.preferences.close_to_tray).on_click(cx.listener(|this,_,_,cx|{this.preferences.close_to_tray= !this.preferences.close_to_tray;this.save_preferences();cx.notify();}))))
             .child(button("screenshot-settings","Screenshot, workflow and sharing settings").on_click(cx.listener(|this,_,_,cx|{this.tab=4;this.toolkit.update(cx,|toolkit,cx|toolkit.preferences(cx));cx.notify();})))))
+    }
+
+    /// Explicit visual fixture only. Align the measured installation section,
+    /// then require its entire report to be inside the painted scroll viewport.
+    pub(crate) fn snapshot_installation_visible(&mut self, cx: &mut Context<Self>) -> anyhow::Result<bool> {
+        let Some(section) = self.installation_bounds.get() else { return Ok(false); };
+        let viewport = self.settings_scroll.bounds();
+        if viewport.size.height <= px(0.) { return Ok(false); }
+        anyhow::ensure!(section.size.height <= viewport.size.height - px(32.),
+            "Installation fixture is too tall for the Settings viewport: section={section:?}, viewport={viewport:?}");
+        anyhow::ensure!(section.left() >= viewport.left() && section.right() <= viewport.right(),
+            "Installation fixture exceeds Settings viewport width: section={section:?}, viewport={viewport:?}");
+        if section.top() >= viewport.top() + px(8.) && section.bottom() <= viewport.bottom() - px(8.) {
+            return Ok(true);
+        }
+        let mut offset = self.settings_scroll.offset();
+        offset.y = (offset.y + viewport.top() + px(16.) - section.top())
+            .clamp(-self.settings_scroll.max_offset().height, px(0.));
+        self.settings_scroll.set_offset(offset);
+        cx.notify();
+        Ok(false)
     }
 }
 impl Render for Studio {
@@ -1294,7 +1356,7 @@ impl Render for Studio {
                     .text_color(rgb(if self.tab == i { TEXT } else { MUTED }))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.cancel_hotkey_edit(cx);
-                        this.tab = i;
+                                    this.tab = i;
                         this.refresh_files();
                         cx.notify();
                     })),

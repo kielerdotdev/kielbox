@@ -9,7 +9,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.99"
-repository = "https://github.com/kielerdotdev/rcr"
+repository = "https://github.com/kielerdotdev/kielbox"
 
 [workspace.dependencies]
 rcr-screenshot-app = { path = "crates/rcr-screenshot-app" }
@@ -80,6 +80,8 @@ opt-level = 3
 opt-level = 3
 # Screenshot alpha normalization and channel conversion touch every desktop pixel.
 [profile.dev.package.rcr-image-types]
+opt-level = 3
+[profile.dev.package.rcr-hdr]
 opt-level = 3
 [profile.dev.package.tiny-skia]
 opt-level = 3

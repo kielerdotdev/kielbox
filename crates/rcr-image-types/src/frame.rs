@@ -1,6 +1,6 @@
 //! CPU pixel buffers.
 
-use std::{io::Cursor, path::Path, time::Duration};
+use std::{borrow::Cow, io::Cursor, path::Path, time::Duration};
 
 use image::{ImageEncoder, codecs};
 use serde::{Deserialize, Serialize};
@@ -282,39 +282,47 @@ impl Frame {
 
     /// Converts an 8-bit sRGB frame to tightly packed [`PixelFormat::Rgba8`].
     /// Float / non-sRGB frames must be tonemapped first (see the `rcr-hdr` crate).
-    pub fn into_rgba8(mut self) -> Result<Frame, FrameError> {
+    pub fn into_rgba8(self) -> Result<Frame, FrameError> {
+        self.into_sdr8_layout(PixelFormat::Rgba8)
+    }
+
+    /// Converts an 8-bit sRGB frame to tightly packed BGRA for GPU previews.
+    /// Packed input keeps its allocation; metadata and alpha are preserved.
+    pub fn into_bgra8(self) -> Result<Frame, FrameError> {
+        self.into_sdr8_layout(PixelFormat::Bgra8)
+    }
+
+    fn into_sdr8_layout(mut self, target: PixelFormat) -> Result<Frame, FrameError> {
         if !self.is_sdr8() {
             return Err(FrameError::NotSdr8(self.format, self.color_space));
         }
         // Captured frames are usually already packed. Reuse their allocation;
-        // RGBA needs no work and BGRA only needs an in-place channel swap.
+        // Matching layouts need no work; other layouts swap channels in place.
         if self.stride == self.row_bytes() {
             self.data.truncate(self.row_bytes() * self.size.height as usize);
-            if self.format == PixelFormat::Bgra8 {
-                for pixel in self.data.chunks_exact_mut(4) {
+            if self.format != target {
+                for pixel in self.data.as_chunks_mut::<4>().0 {
                     pixel.swap(0, 2);
                 }
-                self.format = PixelFormat::Rgba8;
+                self.format = target;
             }
             return Ok(self);
         }
         let mut out = Vec::with_capacity(self.row_bytes() * self.size.height as usize);
         for y in 0..self.size.height {
             let row = self.row(y);
-            match self.format {
-                PixelFormat::Rgba8 => out.extend_from_slice(row),
-                PixelFormat::Bgra8 => {
-                    for px in row.chunks_exact(4) {
-                        out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
-                    }
+            if self.format == target {
+                out.extend_from_slice(row);
+            } else {
+                for px in row.as_chunks::<4>().0 {
+                    out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
                 }
-                PixelFormat::Rgba16F => unreachable!("rejected above"),
             }
         }
         let mut f = Frame::from_raw(
             self.size,
             self.size.width as usize * 4,
-            PixelFormat::Rgba8,
+            target,
             ColorSpace::Srgb,
             out,
         )?;
@@ -333,7 +341,7 @@ impl Frame {
             PixelFormat::Rgba8 | PixelFormat::Bgra8 => {
                 for y in 0..h as usize {
                     let row = &mut self.data[y * stride..y * stride + w * 4];
-                    for px in row.chunks_exact_mut(4) {
+                    for px in row.as_chunks_mut::<4>().0 {
                         px[3] = 255;
                     }
                 }
@@ -342,7 +350,7 @@ impl Frame {
                 let one = half::f16::from_f32(1.0).to_le_bytes();
                 for y in 0..h as usize {
                     let row = &mut self.data[y * stride..y * stride + w * 8];
-                    for px in row.chunks_exact_mut(8) {
+                    for px in row.as_chunks_mut::<8>().0 {
                         px[6] = one[0];
                         px[7] = one[1];
                     }
@@ -366,21 +374,22 @@ impl Frame {
 
     /// Encodes to an in-memory image file. Requires an 8-bit sRGB frame.
     pub fn encode(&self, opts: EncodeOptions) -> Result<Vec<u8>, FrameError> {
-        let img = self.to_image()?;
-        let (w, h) = img.dimensions();
+        let (w, h) = (self.width(), self.height());
         let mut out = Vec::new();
         match opts.format {
             ImageFormat::Png => {
+                let pixels = self.packed_rgba_bytes()?;
                 let (compression, filter) = if opts.png_fast {
                     (codecs::png::CompressionType::Fast, codecs::png::FilterType::Sub)
                 } else {
                     (codecs::png::CompressionType::Best, codecs::png::FilterType::Adaptive)
                 };
                 codecs::png::PngEncoder::new_with_quality(&mut out, compression, filter)
-                    .write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgba8)?;
+                    .write_image(&pixels, w, h, image::ExtendedColorType::Rgba8)?;
             }
             ImageFormat::Jpeg => {
                 // JPEG has no alpha channel.
+                let img = self.to_image()?;
                 let rgb = image::DynamicImage::ImageRgba8(img).into_rgb8();
                 codecs::jpeg::JpegEncoder::new_with_quality(
                     &mut out,
@@ -389,18 +398,32 @@ impl Frame {
                 .write_image(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)?;
             }
             ImageFormat::WebP => {
+                let pixels = self.packed_rgba_bytes()?;
                 codecs::webp::WebPEncoder::new_lossless(&mut out).write_image(
-                    img.as_raw(),
+                    &pixels,
                     w,
                     h,
                     image::ExtendedColorType::Rgba8,
                 )?;
             }
             ImageFormat::Bmp => {
+                let img = self.to_image()?;
                 img.write_to(&mut Cursor::new(&mut out), image::ImageFormat::Bmp)?;
             }
         }
         Ok(out)
+    }
+
+    /// PNG and WebP accept packed RGBA directly. Most screenshots already have
+    /// this layout, so avoid cloning another desktop-sized pixel allocation.
+    fn packed_rgba_bytes(&self) -> Result<Cow<'_, [u8]>, FrameError> {
+        if !self.is_sdr8() {
+            return Err(FrameError::NotSdr8(self.format, self.color_space));
+        }
+        if self.format == PixelFormat::Rgba8 && self.stride == self.row_bytes() {
+            return Ok(Cow::Borrowed(&self.data[..self.row_bytes() * self.height() as usize]));
+        }
+        Ok(Cow::Owned(self.clone().into_rgba8()?.into_data()))
     }
 
     /// Encodes and writes to `path`; the container is chosen from the extension.
@@ -482,6 +505,103 @@ mod tests {
         }
         let jpg = f.encode(EncodeOptions::new(ImageFormat::Jpeg)).unwrap();
         assert_eq!(Frame::decode(&jpg).unwrap().size(), Size::new(2, 1));
+    }
+
+    #[test]
+    fn borrowed_encoders_preserve_alpha_and_padded_bgra_rows() {
+        let rgba = [3, 17, 91, 0, 200, 70, 45, 127, 8, 9, 10, 255, 67, 89, 123, 1];
+        for format in [PixelFormat::Rgba8, PixelFormat::Bgra8] {
+            for padding in [0, 4] {
+                let mut data = Vec::new();
+                for row in rgba.chunks_exact(8) {
+                    for pixel in row.chunks_exact(4) {
+                        if format == PixelFormat::Bgra8 {
+                            data.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+                        } else { data.extend_from_slice(pixel); }
+                    }
+                    data.extend(std::iter::repeat_n(222, padding));
+                }
+                let frame = Frame::from_raw(Size::new(2, 2), 8 + padding, format, ColorSpace::Srgb, data).unwrap();
+                let original = frame.clone();
+                assert_eq!(frame.packed_rgba_bytes().unwrap().as_ref(), rgba);
+                for format in [ImageFormat::Png, ImageFormat::WebP] {
+                    let bytes = frame.encode(EncodeOptions { png_fast: true, ..EncodeOptions::new(format) }).unwrap();
+                    assert_eq!(Frame::decode(&bytes).unwrap().data(), rgba);
+                }
+                assert_eq!(frame, original, "Encoding must not modify the source");
+            }
+        }
+    }
+
+    #[test]
+    fn bgra_preview_conversion_preserves_layout_metadata_and_packed_allocation() {
+        for width in [0, 2] {
+            for height in [0, 2] {
+                for padding in [0, 4] {
+                    for format in [PixelFormat::Rgba8, PixelFormat::Bgra8] {
+                        let mut data = Vec::new();
+                        for _ in 0..height {
+                            for _ in 0..width {
+                                data.extend_from_slice(if format == PixelFormat::Rgba8 { &[12, 34, 56, 1] } else { &[56, 34, 12, 1] });
+                            }
+                            data.extend(std::iter::repeat_n(222, padding));
+                        }
+                        let mut frame = Frame::from_raw(Size::new(width, height), width as usize * 4 + padding,
+                            format, ColorSpace::Srgb, data).unwrap();
+                        frame.origin = Point::new(-1920, 120);
+                        frame.scale_factor = 1.5;
+                        frame.sdr_white_nits = Some(203.0);
+                        frame.timestamp = Some(Duration::from_millis(17));
+                        let expected = frame.clone().into_rgba8().unwrap();
+                        let allocation = frame.data().as_ptr();
+                        let converted = frame.into_bgra8().unwrap();
+                        assert_eq!(converted.format(), PixelFormat::Bgra8);
+                        assert_eq!(converted.stride(), width as usize * 4);
+                        if padding == 0 {
+                            assert_eq!(converted.data().as_ptr(), allocation, "Packed previews reuse storage");
+                        }
+                        assert_eq!(converted.into_rgba8().unwrap(), expected);
+                    }
+                }
+            }
+        }
+        assert!(Frame::new(Size::new(1, 1), PixelFormat::Rgba16F, ColorSpace::ScRgbLinear).into_bgra8().is_err());
+    }
+
+    #[test]
+    #[ignore = "synthetic screenshot allocation timing; run with --nocapture"]
+    fn timing_borrowed_png_encode() {
+        use std::time::Instant;
+        for (width, height) in [(1920u32, 1080u32), (3840, 2160)] {
+            let data: Vec<u8> = (0..height).flat_map(|y| (0..width).flat_map(move |x| {
+                let value = (x / 100 + y / 60) as u8;
+                [value, value.wrapping_mul(5), value.wrapping_mul(3), 255]
+            })).collect();
+            let frame = Frame::from_rgba8(width, height, data).unwrap();
+            let options = EncodeOptions { png_fast: true, ..Default::default() };
+            let baseline = || {
+                let image = frame.to_image().unwrap();
+                let mut bytes = Vec::new();
+                codecs::png::PngEncoder::new_with_quality(&mut bytes, codecs::png::CompressionType::Fast, codecs::png::FilterType::Sub)
+                    .write_image(image.as_raw(), width, height, image::ExtendedColorType::Rgba8).unwrap();
+                bytes
+            };
+            assert_eq!(baseline(), frame.encode(options).unwrap(), "Identical encoder output");
+            let mut cloned = Vec::new();
+            let mut borrowed = Vec::new();
+            for _ in 0..7 {
+                let start = Instant::now();
+                std::hint::black_box(baseline());
+                cloned.push(start.elapsed().as_secs_f64() * 1000.);
+                let start = Instant::now();
+                std::hint::black_box(frame.encode(options).unwrap());
+                borrowed.push(start.elapsed().as_secs_f64() * 1000.);
+            }
+            cloned.sort_by(f64::total_cmp);
+            borrowed.sort_by(f64::total_cmp);
+            println!("PNG synthetic {width}x{height}: median cloned_ms={:.3} borrowed_ms={:.3} avoided_pixel_allocation_bytes={} identical_encoded_bytes=true",
+                cloned[3], borrowed[3], width as usize * height as usize * 4);
+        }
     }
 
     #[test]

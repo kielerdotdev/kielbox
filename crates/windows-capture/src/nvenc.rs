@@ -10,6 +10,7 @@ use std::{
     marker::PhantomData,
     ptr,
     rc::Rc,
+    time::{Duration, Instant},
 };
 use windows::{
     core::Interface,
@@ -21,6 +22,12 @@ use windows::{
 };
 
 const POOL: usize = 4;
+
+fn completion_timeout_ms(deadline: Option<Instant>, now: Instant) -> u32 {
+    deadline.map_or(5000, |deadline| {
+        deadline.saturating_duration_since(now).as_millis().min(5000) as u32
+    })
+}
 
 struct Slot {
     texture: ID3D11Texture2D,
@@ -41,6 +48,8 @@ pub struct Nvenc {
     pending: VecDeque<usize>,
     config: VideoConfig,
     flushing: bool,
+    completion_failed: bool,
+    drain_deadline: Option<Instant>,
     eos_event: HANDLE,
     eos_registered: bool,
     _thread_affinity: PhantomData<Rc<()>>,
@@ -81,6 +90,8 @@ impl Nvenc {
                 pending: VecDeque::new(),
                 config: config.clone(),
                 flushing: false,
+                completion_failed: false,
+                drain_deadline: None,
                 eos_event: HANDLE::default(),
                 eos_registered: false,
                 _thread_affinity: PhantomData,
@@ -316,11 +327,47 @@ impl VideoEncoder for Nvenc {
         Ok(())
     }
     fn receive(&mut self, wait: bool) -> Result<Option<EncodedPacket>> {
+        // An auto-reset completion event may already have been consumed when
+        // locking/unmapping fails. Retrying that slot during finalization or
+        // Drop can only repeat the timeout, not recover its packet.
+        ensure!(!self.completion_failed, "NVENC completion previously failed");
+        let result = self.receive_packet(wait);
+        if result.is_err() {
+            self.completion_failed = true;
+        }
+        result
+    }
+    fn flush(&mut self) -> Result<()> {
+        if self.flushing {
+            return Ok(());
+        }
+        self.drain_deadline = Some(Instant::now() + Duration::from_secs(5));
+        unsafe {
+            let mut pic: NV_ENC_PIC_PARAMS = std::mem::zeroed();
+            pic.version = NV_ENC_PIC_PARAMS_VER;
+            pic.encodePicFlags = NV_ENC_PIC_FLAGS::NV_ENC_PIC_FLAG_EOS.0 as u32;
+            pic.completionEvent = self.eos_event.0;
+            self.check(
+                self.api.nvEncEncodePicture.unwrap()(self.session, &mut pic),
+                "flush",
+            )?;
+        }
+        self.flushing = true;
+        Ok(())
+    }
+}
+
+impl Nvenc {
+    fn completion_timeout_ms(&self) -> u32 {
+        completion_timeout_ms(self.drain_deadline, Instant::now())
+    }
+
+    fn receive_packet(&mut self, wait: bool) -> Result<Option<EncodedPacket>> {
         let Some(&i) = self.pending.front() else {
             return Ok(None);
         };
         unsafe {
-            let signaled = WaitForSingleObject(self.slots[i].event, if wait { 5000 } else { 0 });
+            let signaled = WaitForSingleObject(self.slots[i].event, if wait { self.completion_timeout_ms() } else { 0 });
             if signaled == WAIT_TIMEOUT && !wait {
                 return Ok(None);
             }
@@ -357,23 +404,6 @@ impl VideoEncoder for Nvenc {
             }))
         }
     }
-    fn flush(&mut self) -> Result<()> {
-        if self.flushing {
-            return Ok(());
-        }
-        unsafe {
-            let mut pic: NV_ENC_PIC_PARAMS = std::mem::zeroed();
-            pic.version = NV_ENC_PIC_PARAMS_VER;
-            pic.encodePicFlags = NV_ENC_PIC_FLAGS::NV_ENC_PIC_FLAG_EOS.0 as u32;
-            pic.completionEvent = self.eos_event.0;
-            self.check(
-                self.api.nvEncEncodePicture.unwrap()(self.session, &mut pic),
-                "flush",
-            )?;
-        }
-        self.flushing = true;
-        Ok(())
-    }
 }
 
 impl Drop for Nvenc {
@@ -384,13 +414,13 @@ impl Drop for Nvenc {
         unsafe {
             let _ = self.flush();
             // Drain before destroying mapped textures. Bound waits protect shutdown on device loss.
-            while !self.pending.is_empty() {
+            while !self.completion_failed && !self.pending.is_empty() {
                 if self.receive(true).is_err() {
                     break;
                 }
             }
-            if self.flushing && !self.eos_event.is_invalid() {
-                let _ = WaitForSingleObject(self.eos_event, 5000);
+            if !self.completion_failed && self.flushing && !self.eos_event.is_invalid() {
+                let _ = WaitForSingleObject(self.eos_event, self.completion_timeout_ms());
             }
             for slot in &mut self.slots {
                 if !slot.mapped.is_null() {
@@ -425,5 +455,22 @@ impl Drop for Nvenc {
             }
             let _ = self.api.nvEncDestroyEncoder.unwrap()(self.session);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn final_packets_and_eos_share_one_completion_wait_budget() {
+        let start = Instant::now();
+        let deadline = Some(start + Duration::from_secs(5));
+        assert_eq!(completion_timeout_ms(None, start), 5000);
+        assert_eq!(completion_timeout_ms(deadline, start), 5000);
+        assert_eq!(completion_timeout_ms(deadline, start + Duration::from_millis(4500)), 500);
+        assert_eq!(completion_timeout_ms(deadline, start + Duration::from_secs(5)), 0);
+        // EOS and destructor cleanup cannot start another five-second wait.
+        assert_eq!(completion_timeout_ms(deadline, start + Duration::from_secs(20)), 0);
     }
 }

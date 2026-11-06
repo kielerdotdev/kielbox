@@ -281,6 +281,7 @@ mod tests {
             end: None,
             audio: crate::AudioExport::Mix,
             bitrate: 10_000_000,
+            video_codec: crate::ExportVideoCodec::Av1,
         };
         let progress = crate::JobProgress::default();
         assert!(crate::export(&project, &options, &progress).is_err());

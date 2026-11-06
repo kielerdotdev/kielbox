@@ -2,6 +2,11 @@
 
 ## Disk usage
 
+For developer artifact cleanup, use the separate [rcr-clean CLI](../crates/rcr-clean/README.md):
+`rcr-clean C:\src --apply` removes eligible dependencies, build output, project
+caches and Git worktrees older than 30 days. Omit `--apply` to preview. It shares
+the disk scanner with the desktop explorer and runs without the UI.
+
 **Explore** pairs a sunburst or large treemap with a ranked folder list. Click a folder sector or list row to enter it; click the sunburst center, **↑**, or a breadcrumb to go back. Hovering a sector or row previews its size and counts. Branch colors connect the sunburst with the list, which retains native Windows file-type icons. Chart work is bounded to five rings and 512 sectors; remaining entries keep their proportional area in grouped sectors, while the list retains every item. This interaction takes inspiration from [SquirrelDisk](https://github.com/adileo/squirreldisk).
 
 Open **Tools → Disk usage**, choose a drive or folder, and scan it. **Tree View** shows compact size-sorted rows with parent-percentage bars, logical size and file/folder counts beside the file-type table. **File View** shows the largest individual files and their paths across the full width; clicking a file type filters this view. Expand tree rows or double-click folders to explore them; **↑** and **Root** navigate back. **Reveal** and **Copy path** act on the selection. **Stop** keeps partial results; **Rescan** refreshes them; **Clear** releases results from memory.

@@ -35,6 +35,8 @@ use serde::{Deserialize, Serialize};
 pub use destinations::{DestinationOverride, DestinationType, Destinations};
 pub use hotkey::{Hotkey, HotkeyError, Modifier};
 pub use io::atomic_write;
+#[cfg(test)]
+pub(crate) use io::atomic_write_with;
 pub use migrate::{CURRENT_VERSION, MigrateError};
 pub use model::{
     CaptureSettings, FolderPolicy, General, HdrConfig, HistorySettings, Hotkeys, ImageFormatKind,

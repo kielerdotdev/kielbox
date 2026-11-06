@@ -19,7 +19,7 @@ libloading = "0.8.9"
 rcr-nvenc-sys = { path = "../nvenc-sys" }
 
 [target.'cfg(windows)'.dev-dependencies]
-windows = { workspace = true, features = ["Win32_System_StationsAndDesktops", "Win32_System_RemoteDesktop"] }
+windows = { workspace = true, features = ["Win32_System_StationsAndDesktops", "Win32_System_RemoteDesktop", "Win32_System_Power"] }
 
 [[bin]]
 name = "rcr-capture"

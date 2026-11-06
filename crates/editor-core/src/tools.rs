@@ -2,12 +2,14 @@ use crate::{MediaAsset, MediaStream, TrackKind};
 use anyhow::{ensure, Context, Result};
 use serde::Deserialize;
 use std::{
+    collections::VecDeque,
+    ffi::OsString,
     io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex, OnceLock,
     },
     thread,
     time::Duration,
@@ -192,6 +194,59 @@ pub fn probe(path: &Path) -> Result<MediaAsset> {
     probe_cancellable(path, || false)
 }
 
+const PROBE_CACHE_ENTRIES: usize = 64;
+const PROBE_CACHE_BYTES: usize = 4 * 1024 * 1024;
+struct CachedProbe {
+    program: OsString,
+    stamp: crate::SourceStamp,
+    asset: MediaAsset,
+    bytes: usize,
+}
+#[derive(Default)]
+struct ProbeCache {
+    entries: VecDeque<CachedProbe>,
+    bytes: usize,
+}
+impl ProbeCache {
+    fn get(&mut self, program: &OsString, stamp: &crate::SourceStamp) -> Option<MediaAsset> {
+        let index = self.entries.iter().position(|entry|
+            &entry.program == program && entry.stamp.canonical_path == stamp.canonical_path)?;
+        let entry = self.entries.remove(index)?;
+        if &entry.stamp != stamp {
+            self.bytes = self.bytes.saturating_sub(entry.bytes);
+            return None;
+        }
+        let asset = entry.asset.clone();
+        self.entries.push_back(entry);
+        Some(asset)
+    }
+    fn insert(&mut self, program: OsString, asset: &MediaAsset) {
+        let Some(stamp) = asset.source_stamp.clone() else { return; };
+        let bytes = std::mem::size_of::<CachedProbe>()
+            .saturating_add(program.as_encoded_bytes().len())
+            .saturating_add(asset.path.as_os_str().as_encoded_bytes().len().saturating_mul(3))
+            .saturating_add(asset.streams.iter().map(|stream|
+                std::mem::size_of::<MediaStream>().saturating_add(stream.name.len())).sum::<usize>());
+        if bytes > PROBE_CACHE_BYTES { return; }
+        if let Some(index) = self.entries.iter().position(|entry|
+            entry.program == program && entry.stamp.canonical_path == stamp.canonical_path)
+        {
+            let old = self.entries.remove(index).expect("matched cached probe");
+            self.bytes = self.bytes.saturating_sub(old.bytes);
+        }
+        while self.entries.len() >= PROBE_CACHE_ENTRIES || self.bytes.saturating_add(bytes) > PROBE_CACHE_BYTES {
+            let Some(old) = self.entries.pop_front() else { break; };
+            self.bytes = self.bytes.saturating_sub(old.bytes);
+        }
+        self.bytes += bytes;
+        self.entries.push_back(CachedProbe { program, stamp, asset: asset.clone(), bytes });
+    }
+}
+fn probe_cache() -> &'static Mutex<ProbeCache> {
+    static CACHE: OnceLock<Mutex<ProbeCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub fn probe_cancellable(path: &Path, cancelled: impl Fn() -> bool) -> Result<MediaAsset> {
     ensure!(!cancelled(), "Media task cancelled");
     #[derive(Deserialize)]
@@ -219,6 +274,18 @@ pub fn probe_cancellable(path: &Path, cancelled: impl Fn() -> bool) -> Result<Me
     }
     let path = path.canonicalize().context("media file is unavailable")?;
     let source_stamp = crate::SourceStamp::read(&path)?;
+    let program = std::env::var_os("RCR_FFPROBE").unwrap_or_else(|| "ffprobe".into());
+    // Library thumbnails and the editor request the same metadata. Keep only
+    // successful, bounded descriptions; every use still checks the source on
+    // its worker, so replacements/deletions never reuse an old description.
+    let cached = probe_cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&program, &source_stamp);
+    if let Some(asset) = cached {
+        ensure!(!cancelled(), "Media task cancelled");
+        ensure!(crate::SourceStamp::read(&path)? == source_stamp,
+            "Source changed while reading metadata: {}", path.display());
+        return Ok(asset);
+    }
     let output=cancellable_output(media_command("ffprobe").args(["-v","error","-show_entries",
         "format=duration:stream=index,codec_type,width,height,duration:stream_tags=title,handler_name","-of","json","-i"])
         .arg(&path), &cancelled).context("FFprobe is required for importing media; install it or set RCR_FFPROBE")?;
@@ -287,7 +354,7 @@ pub fn probe_cancellable(path: &Path, cancelled: impl Fn() -> bool) -> Result<Me
         "Source changed while reading metadata: {}",
         path.display()
     );
-    Ok(MediaAsset {
+    let asset = MediaAsset {
         id: 0,
         path,
         source_stamp: Some(source_stamp),
@@ -295,7 +362,9 @@ pub fn probe_cancellable(path: &Path, cancelled: impl Fn() -> bool) -> Result<Me
         width,
         height,
         streams,
-    })
+    };
+    probe_cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(program, &asset);
+    Ok(asset)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -509,6 +578,58 @@ pub fn recordings_dir() -> PathBuf {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+    fn cached_asset(name: &str) -> MediaAsset {
+        let path = PathBuf::from(name);
+        MediaAsset {
+            id: 0, path: path.clone(),
+            source_stamp: Some(crate::SourceStamp { canonical_path: path, bytes: 100,
+                modified: std::time::UNIX_EPOCH }),
+            duration_ns: 1_000_000_000, width: 640, height: 360,
+            streams: vec![MediaStream { index: 0, kind: TrackKind::Video, name: "Video".into() }],
+        }
+    }
+    #[test]
+    fn probe_cache_invalidates_replacements_and_keeps_tool_choices_separate() {
+        let mut cache = ProbeCache::default();
+        let asset = cached_asset("unchanged.mp4");
+        let program = OsString::from("ffprobe");
+        cache.insert(program.clone(), &asset);
+        let stamp = asset.source_stamp.as_ref().unwrap();
+        let mut copy = cache.get(&program, stamp).unwrap();
+        copy.id = 42;
+        copy.streams[0].name = "Changed by caller".into();
+        assert_eq!(cache.get(&program, stamp).unwrap().streams[0].name, "Video");
+        assert_eq!(cache.get(&program, stamp).unwrap().id, 0);
+        assert!(cache.get(&OsString::from("other-ffprobe"), stamp).is_none());
+        let mut changed = stamp.clone();
+        changed.bytes += 1;
+        assert!(cache.get(&program, &changed).is_none());
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.bytes, 0);
+        cache.insert(program.clone(), &asset);
+        changed = stamp.clone();
+        changed.modified += Duration::from_secs(1);
+        assert!(cache.get(&program, &changed).is_none());
+    }
+    #[test]
+    fn probe_cache_bounds_entries_and_metadata_bytes_without_caching_large_descriptions() {
+        let mut cache = ProbeCache::default();
+        let program = OsString::from("ffprobe");
+        for index in 0..PROBE_CACHE_ENTRIES + 4 {
+            cache.insert(program.clone(), &cached_asset(&format!("{index}.mp4")));
+        }
+        assert_eq!(cache.entries.len(), PROBE_CACHE_ENTRIES);
+        assert!(cache.bytes <= PROBE_CACHE_BYTES);
+        assert!(cache.get(&program, cached_asset("0.mp4").source_stamp.as_ref().unwrap()).is_none());
+        assert!(cache.get(&program, cached_asset("4.mp4").source_stamp.as_ref().unwrap()).is_some());
+        cache.insert(program.clone(), &cached_asset("next.mp4"));
+        assert!(cache.get(&program, cached_asset("4.mp4").source_stamp.as_ref().unwrap()).is_some(), "Recent metadata was evicted");
+        let mut oversized = cached_asset("oversized.mp4");
+        oversized.streams[0].name = "x".repeat(PROBE_CACHE_BYTES + 1);
+        cache.insert(program.clone(), &oversized);
+        assert!(cache.get(&program, oversized.source_stamp.as_ref().unwrap()).is_none());
+        assert!(cache.bytes <= PROBE_CACHE_BYTES);
+    }
     #[test]
     #[ignore = "owned subprocess fixture, invoked only by the pipe supervisor test"]
     fn blocked_stdout_fixture() {

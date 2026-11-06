@@ -93,6 +93,7 @@ fn main() -> Result<()> {
         },
         audio: AudioExport::MixAndSeparate,
         bitrate: 12_000_000,
+        video_codec: ExportVideoCodec::Av1,
     };
     let progress = JobProgress::default();
     let path = export(&editor.project, &options, &progress)?;

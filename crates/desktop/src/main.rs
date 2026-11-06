@@ -18,6 +18,10 @@ mod editor;
 mod capture_retirement;
 mod diagnostics_io;
 #[cfg(windows)]
+mod setup_diagnostics;
+#[cfg(windows)]
+mod hardware_stop_proof;
+#[cfg(windows)]
 mod disk_usage;
 #[cfg(windows)]
 mod shell_icons;
@@ -31,6 +35,12 @@ mod disk_sunburst;
 mod gpu_surface_proof;
 #[cfg(windows)]
 mod hotkeys;
+#[cfg(windows)]
+mod quick_recording;
+#[cfg(windows)]
+mod quick_recorder;
+#[cfg(windows)]
+mod quick_recorder_proof;
 #[cfg(windows)]
 mod image_editor;
 #[cfg(windows)]
@@ -134,7 +144,23 @@ fn replay_save_request(path: PathBuf, seconds: u64, microphone: bool, cleanup: b
 }
 
 #[cfg(windows)]
+struct SetupInspection {
+    cancel: rcr_toolkit::core::workflow::CancelToken,
+    result: mpsc::Receiver<Result<setup_diagnostics::Report, String>>,
+}
+#[cfg(windows)]
+impl Drop for SetupInspection {
+    fn drop(&mut self) { self.cancel.cancel(); }
+}
+
+#[cfg(windows)]
 struct Studio {
+    setup_inspection: Option<SetupInspection>,
+    setup_report: Option<setup_diagnostics::Report>,
+    setup_error: Option<String>,
+    settings_scroll: ScrollHandle,
+    installation_bounds: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    quick_recorder: Entity<quick_recorder::QuickRecorder>,
     editor_suspended: bool,
     shell_operation: u64,
     toolkit: Entity<toolkit::Toolkit>,
@@ -156,6 +182,7 @@ struct Studio {
     stop: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
     capture_terminal_seen: bool,
+    pending_replays: Vec<pipeline::ReplaySave>,
     audio_error_focus: FocusHandle,
     audio_error_scroll: ScrollHandle,
     capture_options_scroll: ScrollHandle,
@@ -216,10 +243,16 @@ impl Studio {
         })
         .detach();
         let preferences = preferences::Preferences::load();
+        let startup_notice = preferences::take_startup_notice();
         recordings::set_root(preferences.folder.clone());
         let search = cx.new(|cx| text_input::TextInput::new(cx, ""));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
         let toolkit = cx.new(toolkit::Toolkit::new);
+        let quick_recorder = toolkit.read(cx).quick_recorder();
+        cx.subscribe(&quick_recorder, |this, _, _: &quick_recorder::Saved, cx| {
+            this.refresh_files();
+            cx.notify();
+        }).detach();
         cx.subscribe(&toolkit, |this, _, event: &toolkit::ToolkitEvent, cx| {
             match event {
                 toolkit::ToolkitEvent::Activate => {
@@ -230,7 +263,7 @@ impl Studio {
                     this.toolkit_files = paths.clone();
                     this.refresh_files();
                 }
-                toolkit::ToolkitEvent::Recorder => this.tab = 0,
+                toolkit::ToolkitEvent::Recorder => this.quick_recorder.update(cx, |recorder, cx| recorder.show(cx)),
             }
             cx.notify();
         })
@@ -255,6 +288,12 @@ impl Studio {
         })
         .detach();
         let mut this = Self {
+            setup_inspection: None,
+            setup_report: None,
+            setup_error: None,
+            settings_scroll: ScrollHandle::new(),
+            installation_bounds: Default::default(),
+            quick_recorder,
             editor_suspended: false,
             shell_operation: 0,
             toolkit,
@@ -290,6 +329,7 @@ impl Studio {
             stop: Arc::new(AtomicBool::new(false)),
             worker: None,
             capture_terminal_seen: false,
+            pending_replays: Vec::new(),
             audio_error_focus: cx.focus_handle().tab_stop(true),
             audio_error_scroll: ScrollHandle::new(),
             capture_options_scroll: ScrollHandle::new(),
@@ -305,7 +345,7 @@ impl Studio {
             files: Vec::new(),
             commands: None,
             record_to_disk: true,
-            notice: None,
+            notice: startup_notice,
             saved_replay: None,
             editor,
             hotkeys: None,
@@ -323,7 +363,11 @@ impl Studio {
             match hotkeys::Hotkeys::start_with(&this.preferences.hotkeys) {
                 Ok(hotkeys) => this.hotkeys = Some(hotkeys),
                 Err(error) => {
-                    this.notice = Some(format!("Global shortcuts unavailable: {error:#}"))
+                    let message = format!("Global shortcuts unavailable: {error:#}");
+                    this.notice = Some(match this.notice.take() {
+                        Some(previous) => format!("{previous}\n{message}"),
+                        None => message,
+                    });
                 }
             }
         }
@@ -355,11 +399,10 @@ impl Studio {
         if self.tab != 2 {
             return;
         }
-        let choices = self
-            .files
+        let visible = self.visible_library_files(cx);
+        let choices = visible
             .iter()
             .filter(|path| recordings::is_supported(path) && !recordings::is_image(path))
-            .take(editor::MAX_LIBRARY_CHOICES)
             .map(|path| (path.clone(), self.capture_title(path)))
             .collect();
         self.editor.update(cx, |editor, cx| {
@@ -647,6 +690,20 @@ impl Studio {
         cx.notify();
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
+        if self.tab != 3 && let Some(check) = &self.setup_inspection { check.cancel.cancel(); }
+        let setup_result = self.setup_inspection.as_ref().and_then(|check| match check.result.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err("Installation check stopped before returning a result. Try again.".into())),
+        });
+        if let Some(result) = setup_result {
+            self.setup_inspection = None;
+            match result {
+                Ok(report) => { self.setup_report = Some(report); self.setup_error = None; }
+                Err(error) => self.setup_error = Some(error),
+            }
+            cx.notify();
+        }
         if let Some(ack) = preferences::take_layout_ack(&self.preferences)
             && ack.revision == self.layout_save_revision {
             self.layout_save_pending = false;
@@ -679,6 +736,7 @@ impl Studio {
             .unwrap_or_default();
         for command in tray_events {
             match command.as_str() {
+                "quick-record" => self.quick_recorder.update(cx, |recorder, cx| recorder.toggle(cx)),
                 command if command.starts_with("screen-tool-") => {
                     self.tab = 4;
                     let mode = match command {
@@ -737,7 +795,8 @@ impl Studio {
                     }
                     cx.notify();
                 }
-                "region" | "fullscreen" => {
+                "region" => self.quick_recorder.update(cx, |r, cx| r.launch(false, cx)),
+                "fullscreen" => {
                     let target = if command == "region" {
                         rcr_toolkit::core::workflow::CaptureTarget::Region
                     } else {
@@ -782,6 +841,8 @@ impl Studio {
                     }
                 }
                 hotkeys::Event::ToggleRecord => self.toggle_record(cx),
+                hotkeys::Event::ToggleQuickRecord => self.quick_recorder.update(cx, |recorder, cx| recorder.toggle(cx)),
+                hotkeys::Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Region) => self.quick_recorder.update(cx, |recorder, cx| recorder.launch(false, cx)),
                 hotkeys::Event::Screenshot(target) => {
                     let started = self
                         .toolkit
@@ -800,6 +861,8 @@ impl Studio {
             cx.notify();
         }
         let batch = capture_retirement::poll(&mut self.worker, self.receiver.as_ref());
+        let mut replay_outcomes = Vec::new();
+        let mut replay_saved = false;
         for event in batch.events {
             match event {
                 PipelineEvent::Started(surface) => match WindowsGpuSurface::new(surface.texture) {
@@ -822,11 +885,34 @@ impl Studio {
                 }
                 PipelineEvent::ReplaySaved(path) => {
                     self.saved_replay = Some(path);
-                    self.notice = Some("Replay saved to your Library.".into());
-                    self.refresh_files();
+                    replay_outcomes.push("Replay saved to your Library.".to_owned());
+                    replay_saved = true;
                 }
-                PipelineEvent::Notice(message) => self.notice = Some(message),
+                PipelineEvent::ReplayPending(job) => {
+                    self.pending_replays.push(job);
+                    replay_outcomes.push("Capture stopped. Your replay is still saving in the background.".to_owned());
+                }
+                PipelineEvent::Notice(message) => replay_outcomes.push(message),
             }
+            cx.notify();
+        }
+        let mut index = 0;
+        while index < self.pending_replays.len() {
+            if !self.pending_replays[index].is_finished() { index += 1; continue; }
+            match self.pending_replays.swap_remove(index).complete() {
+                Ok(path) => {
+                    self.saved_replay = Some(path);
+                    replay_outcomes.push("Replay saved to your Library.".to_owned());
+                    replay_saved = true;
+                }
+                Err(error) => replay_outcomes.push(format!("Replay save failed: {error:#}")),
+            }
+        }
+        if !replay_outcomes.is_empty() {
+            // Two offline jobs may finish together. Keep every outcome so a
+            // later success cannot overwrite a failure before it is displayed.
+            self.notice = Some(replay_outcomes.join("\n"));
+            if replay_saved { self.refresh_files(); }
             cx.notify();
         }
         if self.active && self.tab == 0 && self.surface.is_some() {
@@ -886,10 +972,34 @@ impl Studio {
             }
         }
         let state = self.capture_state();
+        let quick = self.quick_recorder.read(cx);
+        if let Some(tray) = &mut self.tray {
+            tray.update_quick_recorder(quick.recording(), quick.busy(), &self.preferences.hotkeys[6]);
+        }
         if let Some(tray) = &mut self.tray
             && let Err(error) = tray.update(state, &self.preferences.hotkeys) {
             eprintln!("tray state: {error:#}");
         }
+    }
+    fn check_installation(&mut self, cx: &mut Context<Self>) {
+        if self.setup_inspection.is_some() { return; }
+        let config = setup_diagnostics::Config::capture(recordings::root());
+        let cancel = rcr_toolkit::core::workflow::CancelToken::new();
+        let worker_cancel = cancel.clone();
+        let (sender, result) = mpsc::sync_channel(1);
+        let spawned = std::thread::Builder::new().name("rcr-installation-check".into()).spawn(move || {
+            let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(||
+                setup_diagnostics::collect(config, &worker_cancel)))
+                .map_err(|_| "Installation check failed unexpectedly. Try again.".to_owned());
+            let _ = sender.try_send(report);
+        });
+        self.setup_report = None;
+        self.setup_error = None;
+        match spawned {
+            Ok(_) => self.setup_inspection = Some(SetupInspection { cancel, result }),
+            Err(error) => self.setup_error = Some(format!("Could not start installation check: {error}")),
+        }
+        cx.notify();
     }
     fn save_preferences(&mut self) -> bool {
         self.preferences.system_audio = self.system_audio;
@@ -949,6 +1059,11 @@ impl Studio {
         cx.notify();
     }
     fn save_replay(&mut self, cx: &mut Context<Self>) {
+        if self.pending_replays.len() >= 2 {
+            self.notice = Some("Two replays are still saving. Wait for one to finish before saving another.".into());
+            cx.notify();
+            return;
+        }
         if !self.active || self.stop.load(Ordering::Relaxed) || self.stats.encoded == 0 {
             self.notice = Some(
                 if !self.active {
@@ -999,6 +1114,7 @@ impl Studio {
 #[cfg(windows)]
 impl Drop for Studio {
     fn drop(&mut self) {
+        if let Some(check) = &self.setup_inspection { check.cancel.cancel(); }
         self.library_scan.cancel();
         self.stop.store(true, Ordering::Relaxed);
         // Disconnect before joining: a worker's terminal event must not block UI shutdown.
@@ -1007,6 +1123,10 @@ impl Drop for Studio {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+        // Signal every offline job before joining any, so cancellation runs in
+        // parallel and no accepted save outlives application shutdown.
+        for job in &self.pending_replays { job.cancel(); }
+        self.pending_replays.clear();
     }
 }
 
@@ -1032,6 +1152,71 @@ fn main() {
     #[cfg(windows)]
     {
         let args: Vec<_> = std::env::args().collect();
+        if args.iter().any(|arg| arg == "--diagnose") {
+            let directory = args.windows(2).find(|pair| pair[0] == "--data-folder")
+                .map(|pair| PathBuf::from(&pair[1])).unwrap_or_else(|| PathBuf::from("recordings"));
+            let report = setup_diagnostics::collect(setup_diagnostics::Config::capture(directory),
+                &rcr_toolkit::core::workflow::CancelToken::new());
+            use std::io::Write as _;
+            let bytes = if args.iter().any(|arg| arg == "--human") {
+                Some(report.human_summary().into_bytes())
+            } else { serde_json::to_vec_pretty(&report).ok() };
+            let printed = bytes.is_some_and(|mut bytes| {
+                bytes.push(b'\n');
+                std::io::stdout().lock().write_all(&bytes).is_ok()
+            });
+            if !printed || report.has_blocking_issues() { std::process::exit(1); }
+            return;
+        }
+        if args.iter().any(|arg| arg == "--eval-hardware-stop") {
+            let output = args.windows(2).find(|pair| pair[0] == "--proof-output")
+                .map(|pair| PathBuf::from(&pair[1]))
+                .unwrap_or_else(|| PathBuf::from(format!(".downloads/hardware-stop-{}",
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())));
+            let failed = Arc::new(AtomicBool::new(false));
+            let result = failed.clone();
+            Application::new().with_assets(theme::Assets).run(move |cx| {
+                if let Err(error) = hardware_stop_proof::run(output.clone(), result.clone(), cx) {
+                    eprintln!("Desktop hardware Stop proof initialization: {error:#}");
+                    result.store(true, Ordering::Release);
+                    cx.quit();
+                }
+            });
+            if failed.load(Ordering::Acquire) { std::process::exit(1); }
+            return;
+        }
+        if args.iter().any(|arg| arg == "--smoke-capture-menu") {
+            let original = std::env::current_dir().expect("working directory");
+            let output = args.windows(2).find(|pair| pair[0] == "--proof-output").map(|pair| PathBuf::from(&pair[1]))
+                .unwrap_or_else(|| original.join(".downloads/capture-menu-proof"));
+            let output = if output.is_absolute() { output } else { original.join(output) };
+            let profile = tempfile::Builder::new().prefix("rcr-menu-profile-").tempdir().expect("isolated profile");
+            std::env::set_current_dir(profile.path()).expect("isolate profile");
+            let failed = Arc::new(AtomicBool::new(false)); let result = failed.clone();
+            Application::new().with_assets(theme::Assets).run(move |cx| {
+                theme::init(cx); text_input::init(cx); editor::init(cx);
+                if let Err(error) = quick_recorder::menu_proof::run(output.clone(), result.clone(), cx) {
+                    eprintln!("Capture menu proof: {error:#}"); result.store(true, Ordering::Relaxed); cx.quit();
+                }
+            });
+            let _ = std::env::set_current_dir(original);
+            if failed.load(Ordering::Relaxed) { std::process::exit(1); }
+            return;
+        }
+        if args.iter().any(|arg| arg == "--smoke-quick-recorder") {
+            let output = args.windows(2).find(|pair| pair[0] == "--proof-output").map(|pair| PathBuf::from(&pair[1]))
+                .unwrap_or_else(|| PathBuf::from(format!(".downloads/quick-recorder-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())));
+            let failed = Arc::new(AtomicBool::new(false));
+            let result = failed.clone();
+            Application::new().with_assets(theme::Assets).run(move |cx| {
+                theme::init(cx);
+                if let Err(error) = quick_recorder_proof::run(output.clone(), result.clone(), cx) {
+                    eprintln!("Quick recorder proof: {error:#}"); result.store(true, Ordering::Relaxed); cx.quit();
+                }
+            });
+            if failed.load(Ordering::Relaxed) { std::process::exit(1); }
+            return;
+        }
         if args.iter().any(|arg| arg == "--smoke-atlas-churn") {
             let require_reuse = args.iter().any(|arg| arg == "--require-atlas-reuse");
             let video_preview = args.iter().any(|arg| arg == "--atlas-video-preview");
@@ -1089,7 +1274,9 @@ fn main() {
         let smoke_library = smoke_library_selection || args.iter().any(|a| a == "--smoke-library");
         let smoke_library_import = args.iter().any(|a| a == "--smoke-library-import");
         let smoke_recovery = args.iter().any(|a| a == "--smoke-recovery");
-        let smoke_editor_keyboard = args.iter().any(|a| a == "--smoke-editor-keyboard");
+        let smoke_editor_native_fullscreen = args.iter().any(|a| a == "--smoke-editor-native-fullscreen");
+        let smoke_editor_keyboard = smoke_editor_native_fullscreen || args.iter().any(|a| a == "--smoke-editor-keyboard");
+        let eval_clip_show = args.iter().any(|a| a == "--eval-clip-show");
         let smoke_editor_resources = args.iter().any(|a| a == "--smoke-editor-resources");
         let smoke_gpu_eof = args.iter().any(|a| a == "--smoke-gpu-playback-eof");
         let smoke_gpu_automatic = args.iter().any(|a| a == "--smoke-gpu-playback-automatic");
@@ -1103,6 +1290,19 @@ fn main() {
             .windows(2)
             .find(|a| a[0] == "--snapshot-output")
             .map(|a| PathBuf::from(&a[1]));
+        let watch_share_stage = args.windows(2).find(|pair| pair[0] == "--watch-share-state")
+            .and_then(|pair| pair[1].parse::<u8>().ok()).filter(|stage| *stage <= 3);
+        if args.iter().any(|arg| arg == "--watch-share-state")
+            && (watch_share_stage.is_none() || snapshot.as_deref() != Some("editor-clip-show")) {
+            eprintln!("--watch-share-state requires 0..3 and --ui-snapshot editor-clip-show");
+            std::process::exit(1);
+        }
+        let installation_preview = args.iter().any(|arg| arg == "--installation-preview");
+        if installation_preview && snapshot.as_deref() != Some("settings") {
+            eprintln!("--installation-preview requires --ui-snapshot settings");
+            std::process::exit(1);
+        }
+        let fixture_options = ui_proof::FixtureOptions { watch_share_stage, installation_preview };
         if let Some(route) = snapshot.as_deref() {
             if !matches!(
                 route,
@@ -1128,6 +1328,7 @@ fn main() {
                     | "library-trash"
                     | "library-trash-warnings"
                     | "editor"
+                    | "editor-clip-show"
                     | "editor-source-recovery"
                     | "editor-source-recovery-dismissed"
                     | "editor-export-failed"
@@ -1163,7 +1364,7 @@ fn main() {
                 eprintln!("Unknown UI snapshot route: {route}");
                 std::process::exit(2);
             }
-            if route == "editor" && open.is_none() {
+            if matches!(route, "editor" | "editor-clip-show") && open.is_none() {
                 eprintln!("Editor snapshots require --open <recording>");
                 std::process::exit(2);
             }
@@ -1190,6 +1391,7 @@ fn main() {
             || smoke_library_import
             || smoke_recovery
             || smoke_editor_keyboard
+            || eval_clip_show
             || smoke_editor_resources
             || smoke_gpu_playback
             || smoke_autosave
@@ -1213,7 +1415,7 @@ fn main() {
             eprintln!("--smoke-library-import requires --open <recording>");
             std::process::exit(2);
         }
-        let smoke_recording = if smoke_library_import || smoke_gpu_playback {
+        let smoke_recording = if smoke_library_import || smoke_gpu_playback || eval_clip_show {
             Some(
                 open.as_ref()
                     .expect("owned fixture source")
@@ -1223,7 +1425,9 @@ fn main() {
         } else {
             open.clone()
         };
-        let fixture_kind = if smoke_library_import {
+        let fixture_kind = if eval_clip_show {
+            Some("clip-show-eval")
+        } else if smoke_library_import {
             Some("library-import")
         } else if smoke_gpu_playback {
             Some("gpu-playback")
@@ -1304,8 +1508,8 @@ fn main() {
                             focus: !smoke,
                             window_bounds: Some(WindowBounds::Windowed(bounds)),
                             window_min_size: Some(size(
-                                px(if snapshot.is_some() { 900. } else { 1100. }),
-                                px(if snapshot.is_some() { 600. } else { 680. }),
+                                px(if snapshot.is_some() || eval_clip_show { 900. } else { 1100. }),
+                                px(if snapshot.is_some() || eval_clip_show { 600. } else { 680. }),
                             )),
                             titlebar: Some(TitlebarOptions {
                                 title: Some("rcr".into()),
@@ -1339,6 +1543,7 @@ fn main() {
                                         | "library-trash"
                                         | "library-trash-warnings" => 1,
                                         "editor"
+                                        | "editor-clip-show"
                                         | "editor-source-recovery"
                                         | "editor-source-recovery-dismissed"
                                         | "editor-export-failed"
@@ -1407,10 +1612,14 @@ fn main() {
                                             editor.snapshot_playback_details(screen == "editor-playback-fallback", window, cx)
                                         });
                                     }
-                                    if screen == "editor"
+                                    if matches!(screen.as_str(), "editor" | "editor-clip-show")
                                         && let Some(path) = &open
                                     {
-                                        studio.open_recording(path.clone(), cx);
+                                        if screen == "editor-clip-show" {
+                                            studio.watch_recording(path.clone(), cx);
+                                        } else {
+                                            studio.open_recording(path.clone(), cx);
+                                        }
                                     }
                                     if screen.starts_with("editor-source-recovery") {
                                         studio.editor.update(cx, |editor, cx| {
@@ -1489,13 +1698,13 @@ fn main() {
                             cx.quit();
                         }
                     } else {
-                        ui_proof::capture(window, screen, output, smoke_result, requested, cx);
+                        ui_proof::capture(window, screen, output, smoke_result, requested, fixture_options, cx);
                     }
                 } else if smoke {
                     let window: AnyWindowHandle = window.into();
                     // Pressure tests must exercise their requested viewport;
                     // the other fixtures retain their established dimensions.
-                    let pressure_size = if smoke_pressure || smoke_editor_resources { snapshot_size } else { (1440, 900) };
+                    let pressure_size = if smoke_pressure || smoke_editor_resources || eval_clip_show { snapshot_size } else { (1440, 900) };
                     let _ = window.update(cx, |_, window, _| {
                         window.resize(size(px(pressure_size.0 as f32), px(pressure_size.1 as f32)));
                     });
@@ -1507,7 +1716,10 @@ fn main() {
                         let mut audio_device_probe = audio_device_picker::DevicePickerSmoke::default();
                         let mut library_import_probe = library::LibraryImportSmoke::default();
                         let mut recovery_probe = editor::RecoverySmoke::default();
-                        let mut editor_keyboard_probe = editor::EditorKeyboardSmoke::default();
+                        let mut editor_keyboard_probe = if smoke_editor_native_fullscreen {
+                            editor::EditorKeyboardSmoke::native_fullscreen()
+                        } else { editor::EditorKeyboardSmoke::default() };
+                        let mut clip_show_probe = editor::ClipShowEvaluation::default();
                         let mut gpu_playback_probe = editor::GpuPlaybackSmoke::default();
                         gpu_playback_probe.until_eof = smoke_gpu_eof;
                         let mut autosave_probe = editor::AutosaveSmoke::default();
@@ -1517,7 +1729,9 @@ fn main() {
                         pressure_probe.cold = smoke_pressure_cold;
                         let mut history_probe = toolkit::HistorySmoke::default();
                         scrub_probe.random = smoke_random;
-                        for attempt in 0..if smoke_random {
+                        for attempt in 0..if eval_clip_show {
+                            4000
+                        } else if smoke_random {
                             6000
                         } else if smoke_pressure {
                             25000
@@ -1526,6 +1740,11 @@ fn main() {
                         } else {
                             750
                         } {
+                            if eval_clip_show && start.elapsed() >= Duration::from_secs(60) {
+                                eprintln!("Clip show evaluation exceeded its 60-second budget");
+                                smoke_result.store(true, Ordering::Relaxed);
+                                break;
+                            }
                             if smoke_pressure && start.elapsed() >= Duration::from_secs(22) {
                                 eprintln!("Sustained scrub pressure exceeded its 22-second wall-clock budget");
                                 smoke_result.store(true, Ordering::Relaxed);
@@ -1549,6 +1768,32 @@ fn main() {
                                 .update(cx, |root, window, cx| {
                                     let foreground_entered = Instant::now();
                                     let studio = root.downcast::<Studio>().expect("Studio root");
+                                    if eval_clip_show {
+                                        studio.update(cx, |this, _| this.tab = if clip_show_probe.hidden() { 0 } else { 2 });
+                                        window.draw(cx).clear();
+                                        if let Err(error) = window.present_for_diagnostics() {
+                                            eprintln!("Clip show evaluation presentation failed: {error:#}");
+                                            smoke_result.store(true, Ordering::Relaxed);
+                                            return false;
+                                        }
+                                        let editor = studio.read(cx).editor.clone();
+                                        let evaluated = editor::EditorView::evaluate_clip_show(
+                                            editor, &mut clip_show_probe,
+                                            smoke_recording.as_deref().expect("evaluation source"), window, cx,
+                                        );
+                                        studio.update(cx, |this, cx| {
+                                            this.tab = if clip_show_probe.hidden() { 0 } else { 2 };
+                                            cx.notify();
+                                        });
+                                        return match evaluated {
+                                            Ok(ready) => ready,
+                                            Err(error) => {
+                                                eprintln!("Clip show evaluation failed: {error:#}");
+                                                smoke_result.store(true, Ordering::Relaxed);
+                                                false
+                                            }
+                                        };
+                                    }
                                     if smoke_editor_resources {
                                         if !resource_source_opened {
                                             studio.update(cx, |this, _| this.tab = 0);

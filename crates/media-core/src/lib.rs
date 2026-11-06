@@ -55,6 +55,31 @@ impl VideoConfig {
     }
 }
 
+/// Capacity estimate for the requested history plus its preceding keyframe.
+/// Includes VBR headroom, all float PCM sources and packet bookkeeping. Explicit
+/// caller-provided smaller ceilings remain possible in the platform options.
+pub fn replay_memory_budget(
+    video: &VideoConfig,
+    seconds: u64,
+    audio_tracks: usize,
+) -> Result<usize> {
+    video.validate()?;
+    ensure!(
+        (1..=3600).contains(&seconds) && audio_tracks <= 2,
+        "invalid replay duration or audio source count"
+    );
+    let gop_seconds = u64::from(video.keyframe_interval).div_ceil(u64::from(video.fps));
+    let per_second = u128::from(video.bitrate).div_ceil(8) * 5 / 4
+        + audio_tracks as u128 * u128::from(AUDIO_RATE) * AUDIO_FRAME_BYTES as u128
+        + 128 * 1024;
+    let bytes = (per_second * u128::from(seconds + gop_seconds)).max(512 * 1024 * 1024);
+    ensure!(
+        bytes <= 4 * 1024 * 1024 * 1024,
+        "requested replay exceeds the 4 GiB memory budget; shorten replay or lower bitrate"
+    );
+    Ok(usize::try_from(bytes)?)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Codec {
     Av1,
@@ -163,6 +188,14 @@ pub struct PipelineStats {
     pub compressed_bytes: u64,
     pub elapsed_seconds: f64,
     pub finalization_seconds: f64,
+    #[serde(default)]
+    pub encoder_finalization_seconds: f64,
+    #[serde(default)]
+    pub audio_finalization_seconds: f64,
+    #[serde(default)]
+    pub writer_finalization_seconds: f64,
+    #[serde(default)]
+    pub replay_finalization_seconds: f64,
     pub raw_cpu_readbacks: u64,
     pub encode_wait_ms_total: f64,
     pub replay_bytes: usize,

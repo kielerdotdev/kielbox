@@ -1,6 +1,6 @@
 //! Read-only NTFS MFT streaming. No writes, volume locks, or per-file opens.
 use super::ntfs_records::{self, Record, Run};
-use crate::core::workflow::CancelToken;
+use rcr_workflows::workflow::CancelToken;
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},

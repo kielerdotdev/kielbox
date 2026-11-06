@@ -221,12 +221,28 @@ pub enum Event {
     Progress(core::workflow::Event),
     Finished(Result<Option<RunReport>, String>),
 }
+#[derive(Clone, Debug)]
+pub struct ScreenshotOptions {
+    pub cursor: bool,
+    pub explicit: Option<services::ExplicitTarget>,
+    /// Already frozen by the desktop picker; do not capture the desktop again.
+    pub captured: Option<core::workflow::Captured>,
+}
+fn screenshot_delay_ms(configured: u32, options: Option<&ScreenshotOptions>) -> u32 {
+    // A frozen picker frame is already captured: waiting cannot change its
+    // pixels and only postpones the annotation surface or clipboard result.
+    if options.is_some_and(|options| options.captured.is_some()) {
+        return 0;
+    }
+    configured.max(if options.is_some() { 250 } else { 0 })
+}
 pub enum Action {
     Refresh,
     Screenshot {
         target: CaptureTarget,
         edit: bool,
         upload: bool,
+        options: Option<ScreenshotOptions>,
     },
     Workflow(String),
     Files(Vec<PathBuf>),
@@ -482,7 +498,11 @@ impl State {
         self.events.send(Event::Snapshot(Box::new(snapshot)))?;
         Ok(())
     }
-    fn run(&mut self, action: Action, cancel: &CancelToken) -> Result<Option<RunReport>> {
+    fn run(&mut self, mut action: Action, cancel: &CancelToken) -> Result<Option<RunReport>> {
+        let screenshot_options = match &mut action {
+            Action::Screenshot { options, .. } => options.take(),
+            _ => None,
+        };
         use core::workflow::QrRenderer;
         match action {
             Action::Refresh => {
@@ -565,6 +585,7 @@ impl State {
                 target,
                 edit,
                 upload,
+                ..
             } => {
                 let input = match target {
                     CaptureTarget::Region => InputKind::CaptureRegion,
@@ -644,39 +665,49 @@ impl State {
             _ => unreachable!("configuration and image actions return before workflow dispatch"),
         };
         if workflow.input.is_still_capture() {
-            return self.capture_workflow(workflow, cancel);
+            return self.capture_workflow(workflow, screenshot_options, cancel);
         }
         Ok(Some(self.execute(&workflow, input, cancel)))
     }
     fn capture_workflow(
         &self,
         workflow: Workflow,
+        mut options: Option<ScreenshotOptions>,
         cancel: &CancelToken,
     ) -> Result<Option<RunReport>> {
         use core::workflow::{CaptureRequest, Captured, Capturer};
-        let region = workflow.input == InputKind::CaptureRegion;
+        let region = workflow.input == InputKind::CaptureRegion
+            && options.as_ref().is_none_or(|o| o.explicit.is_none() && o.captured.is_none());
         let target = match workflow.input {
             InputKind::CaptureRegion | InputKind::CaptureFullscreen => CaptureTarget::Fullscreen,
             InputKind::CaptureMonitor => CaptureTarget::Monitor,
             InputKind::CaptureWindow => CaptureTarget::Window,
             _ => CaptureTarget::LastRegion,
         };
+        // The compact picker has just minimized. Let the compositor remove it
+        // even when the user's configured workflow delay is zero.
+        let delay_ms = screenshot_delay_ms(self.settings.capture.delay_ms, options.as_ref());
         let deadline = std::time::Instant::now()
-            + Duration::from_millis(self.settings.capture.delay_ms as u64);
+            + Duration::from_millis(delay_ms as u64);
         while std::time::Instant::now() < deadline {
             if cancel.is_cancelled() {
                 return Ok(None);
             }
             thread::sleep(Duration::from_millis(10));
         }
-        let captured = self.production().capturer.capture(
+        let cursor = options.as_ref().map_or(self.settings.capture.show_cursor, |o| o.cursor);
+        let captured = if let Some(captured) = options.as_mut().and_then(|o| o.captured.take()) {
+            captured
+        } else if let Some(explicit) = options.as_ref().and_then(|o| o.explicit.as_ref()) {
+            self.production().capturer.capture_explicit_with_cancel(explicit, cursor, &self.settings.capture.hdr, cancel)?
+        } else { self.production().capturer.capture(
             &CaptureRequest {
                 target,
-                include_cursor: self.settings.capture.show_cursor,
+                include_cursor: cursor,
                 hdr: self.settings.capture.hdr,
             },
             cancel,
-        )?;
+        )? };
         if region || workflow.after_capture.contains(&AfterCapture::OpenEditor) {
             let origin = captured.frame.origin;
             let (tx, rx) = mpsc::sync_channel(1);
@@ -794,6 +825,40 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn screenshot_delay_applies_only_before_new_capture() {
+        assert_eq!(screenshot_delay_ms(700, None), 700);
+        let mut options = ScreenshotOptions { cursor: false, explicit: None, captured: None };
+        assert_eq!(screenshot_delay_ms(0, Some(&options)), 250);
+        assert_eq!(screenshot_delay_ms(700, Some(&options)), 700);
+        options.captured = Some(core::workflow::Captured::new(
+            crate::effects::solid_frame(2, 2, [0, 0, 0, 255])));
+        assert_eq!(screenshot_delay_ms(700, Some(&options)), 0);
+    }
+    #[test]
+    fn frozen_picker_frame_opens_selected_without_recapture_or_settings_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::rooted_at(dir.path().join("config"));
+        let (tx, rx) = mpsc::channel();
+        let mut state = State::new(paths.clone(), dir.path().join("captures"), tx).unwrap();
+        let before = std::fs::read(paths.settings_file()).unwrap();
+        let mut frame = crate::effects::solid_frame(37, 29, [91, 47, 182, 255]);
+        frame.origin = types::Point::new(-1234, 567);
+        let expected = frame.clone();
+        let job = thread::spawn(move || state.run(Action::Screenshot {
+            target: CaptureTarget::Region, edit: true, upload: false,
+            options: Some(ScreenshotOptions { cursor: true, explicit: Some(services::ExplicitTarget::Rect(frame.rect())),
+                captured: Some(core::workflow::Captured::new(frame)) }),
+        }, &CancelToken::new()));
+        let Event::Ui(UiRequest::Capture { frame, choose_region, reply, .. }) = rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            else { panic!("Frozen capture must open the existing selection directly"); };
+        assert!(!choose_region, "Do not make the user select the area twice");
+        assert_eq!(frame, expected, "Use the frozen pixels and physical origin");
+        reply.send(None).unwrap();
+        assert!(job.join().unwrap().unwrap().is_none());
+        assert_eq!(std::fs::read(paths.settings_file()).unwrap(), before);
+        assert!(!dir.path().join("captures").exists(), "No output/clipboard workflow was requested");
+    }
     #[test]
     fn completion_wakes_after_value_or_disconnection_is_visible() {
         let (tx, rx) = mpsc::sync_channel(1);

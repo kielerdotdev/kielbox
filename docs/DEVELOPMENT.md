@@ -48,7 +48,7 @@ Default global Windows shortcuts while RCR is running; change or disable each bi
 
 Shortcut registration conflicts are reported in Settings; capture buttons remain available. Quitting RCR unregisters its shortcuts. The Windows tray shows capture state through its icon, tooltip and status row, with separate replay toggle/save actions, Start/Stop recording, screenshots, Tools, Library and Settings. Labels reflect configured shortcuts, and actions that cannot run while starting or finishing are disabled.
 
-The default history is 120 seconds with a 512 MiB packet budget. The byte limit can shorten the retained duration. History starts at a keyframe; a requested time range may include the preceding GOP. One background replay save can retain an additional snapshot of up to one buffer's payload. Files contain AV1 video and independently named 48 kHz stereo float PCM audio tracks. PCM avoids an additional encoder in this first implementation, at about 384 kB/s per audio source. No source mixing is performed by the recorder. The quick editor exports one audio mix with only the sounds you enabled; the original recording retains separate tracks.
+The default history is 120 seconds. Its bounded packet budget now sizes itself from replay duration, video bitrate, a preceding GOP, enabled PCM sources, packet overhead and 25% video bitrate headroom, with a 512 MiB minimum and 4 GiB maximum. Settings shows the estimated memory budget. The ring retains the keyframe preceding the requested time window, rather than dropping it as soon as the target duration is exceeded. An explicit smaller byte ceiling or bitrate bursts beyond the estimate can still shorten available history; actual retained duration remains visible. Each capture session allows one replay save at a time. Desktop retains up to two unfinished saves across stopped sessions; each can pin an additional snapshot of up to that session's buffer payload. Files contain AV1 video and independently named 48 kHz stereo float PCM audio tracks. PCM avoids an additional encoder in this first implementation, at about 384 kB/s per audio source. No source mixing is performed by the recorder. The quick editor exports one audio mix with only the sounds you enabled; the original recording retains separate tracks.
 
 Short headless proofs:
 
@@ -95,7 +95,7 @@ The script requires `ffplay` on PATH (or `-FFplay <path>`). It starts two quiet 
 
 ## Optional microphone noise suppression
 
-Enable **Clean up replay microphone** in **Settings → Audio** to suppress the microphone in future replay saves. It is off by default and can be changed while capture is running; each save uses the setting at the time of the request. Microphone capture, the replay ring and the continuous recording stay raw. Video and system audio remain unchanged. Processing runs on the single background replay-save worker at reduced Windows thread priority. Closing the app cancels pending suppression; stopping a recording normally lets an in-progress clip save finish.
+Enable **Clean up replay microphone** in **Settings → Audio** to suppress the microphone in future replay saves. It is off by default and can be changed while capture is running; each save uses the setting at the time of the request. Microphone capture, the replay ring and the continuous recording stay raw. Video and system audio remain unchanged. Processing runs on background replay-save workers at reduced Windows thread priority. Stopping capture transfers unfinished saves to Desktop ownership after GPU drain and recording publication, so capture can stop while replay cleanup continues. Completion and errors still appear in Library notices. Closing the app cancels pending suppression and joins owned jobs; a disk mux already underway must finish. CLI save-on-stop remains synchronous.
 
 For editor export, open the dropdown beside **Export** and enable **Clean microphone when exporting**. The setting belongs to the microphone track, autosaves with the recording's edits and supports Undo. It applies before speed, volume and mixing. Only source intervals used by the export are processed. Preview monitoring stays raw; original media is never modified.
 
@@ -111,7 +111,9 @@ Here `raw-session.mkv` contains the original microphone, and `clean-moment.mkv` 
 
 ## Quick clip editor
 
-Open **Library** and click a clip. The recording opens directly, or restores its previous edits. There are no projects, media bins or inspectors in the interface.
+Choose **Watch clips** in Library, a video card, or **Clip show** (Ctrl+Enter) in the editor to watch videos with a larger preview, a lightweight scrubber and Previous/Next controls. Space pauses, Left/Right changes clips, M mutes local playback and Escape opens editing. Playback volume is separate from saved track gains and export audio. Watching skips editor timeline, waveform and thumbnail work. It uses existing saved edits, stops at the queue boundary or a playback error, and supports sharing the window in a voice/chat app. The queue follows the Library search, filters, favorites and sort order across pages; the editor dropdown still renders at most 64 choices. Synchronized remote watch parties are not implemented.
+
+Open **Library** and choose **Edit** on a video, or **Open in Editor** while watching. The recording opens directly, or restores its previous edits. There are no projects, media bins or inspectors in the interface.
 
 - Drag the visible grips at either edge of a piece to trim it, including restoring trimmed material. The time scale stays fixed so the grabbed edge follows the pointer and stays where you release it. Other pieces keep their timeline positions. Use **Fit** to fit the current edit to the timeline. Click a piece to select it and seek; drag its body to place the selected piece and its linked audio/video group at another timeline position.
 - **Split** divides a piece; **Delete** removes the selected piece and leaves its timeline gap. Trimming and deleting do not automatically close gaps or reorder neighboring pieces. Move a piece's body manually to close a gap.
@@ -159,6 +161,53 @@ The supplied **rcr Quick Editor.html** is implemented as native GPUI screens: Ca
 Game detection/folders, automatic recording/replay cleanup and a user-configured capture storage cap are not implemented. Disposable thumbnail and seek caches have their own bounds; those are separate from retention of original captures. Desktop is the actual capture source. Visual layout and mouse interactions still need user verification; Computer Use was not used. See [UX research and implementation](UX.md) for official ShareX, Flameshot, NVIDIA, Medal and SteelSeries references and screenshot links.
 
 ## Capture architecture
+
+### Independent quick screencasts
+
+**Tools → Screenshots → New capture**, the tray's screenshot command and
+**Ctrl+PrintScreen** open one desktop picker; **Record video** and
+**Ctrl+Shift+PrintScreen** open the same picker in video mode. RCR minimizes before
+preparing the frozen desktop. Selection handles and screen/window hit testing live
+on that desktop, with a compact bottom toolbar for Selection/Screen/Window,
+Screenshot/Video, a round shutter and the pointer option. Sound and microphone
+controls appear for video; More holds 30/60 FPS and an optional three-second
+countdown. Escape cancels the picker or countdown. The main Tools page is a launcher
+and recording status surface, without a capture-settings card.
+
+A drag release only finishes adjusting the selection. The shutter or Enter confirms
+it. Video areas must fit within one display; window/screen recording passes the
+selected native source ID to the independent WGC worker. Area and screen screenshots crop the
+chosen frozen image and pass its pixels and physical origin to the screenshot
+workflow. Window screenshots pass the native window ID to the existing capture
+backend, so overlapping desktop windows are not baked into the result. The workflow
+opens the existing selection directly instead of asking for a second selection. Pointer-on/off snapshots are frozen
+before showing the overlay. RCR's own windows are excluded from window hit testing.
+
+Pause/resume, Stop and Discard stay in the main app's recording status row; the
+shortcut and tray stop a screencast. Normal shutdown finalizes the clip. The tray
+indicator turns red independently of game replay. The picker supports S/C/W, V, P,
+Enter/Space and arrow keys; Shift+arrows resizes an area. A screenshot can be taken
+while a screencast runs, with a second video session blocked. Open image, Share files
+and More tools remain on the Tools page; annotation/upload options and QR creation
+are under More tools. Saved screencasts provide Copy file and Show file actions.
+
+The quick recorder owns a separate Windows Graphics Capture source and recording-tools
+session, with no game recorder commands or replay-buffer access. It uses CPU pixel
+readback and external FFmpeg `libx264` with two encoding threads, followed by AAC muxing
+when audio is enabled. FFmpeg is an executable dependency (`RCR_FFMPEG` overrides PATH),
+not a linked development-library dependency. Temporary output stays in an owned hidden
+directory until publication without overwrite. Output fits within 1920×1080, and recorded
+duration is capped at ten minutes. Audio uses Windows default devices and reports source
+failures. The OS capture border stays enabled; the controller requests capture exclusion.
+
+Repeat the hidden menu proof with `rcr-desktop --smoke-capture-menu --proof-output <absolute-folder>`.
+It uses an isolated profile, generated video/audio and internal GPUI input events to
+exercise the actual Studio window and desktop picker at three viewport sizes, frozen
+pixel/metadata routing, resizing, countdown cancellation, simultaneous still capture,
+pause/resume, save, discard and Escape. It performs no Computer Use,
+desktop capture, physical input or audio-device access. The separate opt-in
+`--smoke-quick-recorder` WGC proof captures a generated, owned native window and requires
+an ordinary Windows desktop process; the restricted sandbox reports WGC unavailable.
 
 ```text
 DXGI Desktop Duplication (NVIDIA-attached monitor)
@@ -215,7 +264,7 @@ Paused video seeking uses a persistent Windows NVDEC decoder for ordinary source
 
 Windows prepares a reusable all-intra H.264 seek preview for an eligible single source up to four minutes long. It uses up to 1920×1080 without enlargement, fixed QP 24 and two slices per frame. Original decoding remains available during preparation or failure; settled refinement, playback and export use the original media. Effects and retiming use the composition fallback.
 
-Completed previews persist in `%LOCALAPPDATA%/rcr/cache/seek-v2` (`RCR_SEEK_CACHE_DIR` overrides it). The disk cache is capped at 3 GiB with reader-safe LRU eviction; each file must be below 2 GiB. Preparation requires 2,576 MiB free and may be blocked by active readers. Closing cancels unfinished preparation while completed copies remain reusable. Set `RCR_DISABLE_SEEK_PROXY=1` to disable preparation/reuse. Quality, memory and latency measurements are in [VALIDATION.md](VALIDATION.md).
+Completed previews persist in `%LOCALAPPDATA%/rcr/cache/seek-v3-managed`. `RCR_SEEK_CACHE_DIR` overrides the base directory; RCR creates its validated `seek-v3-managed` child there. The managed cache is capped at 3 GiB with reader-safe LRU eviction; each file must be below 2 GiB. Preparation requires 2,576 MiB free and may be blocked by active readers or ambiguous files that cannot safely be reclaimed. Legacy `seek-v2` and unrelated files are not migrated or cleaned automatically. Closing cancels unfinished preparation while completed copies remain reusable. Set `RCR_DISABLE_SEEK_PROXY=1` to disable preparation/reuse. See [cache ownership and limits](SEEK_PROXY_CACHE_AUDIT_2026-11-05.md); quality, memory and latency measurements are in [VALIDATION.md](VALIDATION.md).
 
 **Tools → Workflows** uses a grouped sidebar and a focused details pane. Sidebar choices have visible keyboard focus: `Tab`/`Shift+Tab` navigate and `Enter`/`Space` select a workflow without running it. Actions appear once, in execution order, with controls to move, remove and append steps. Save-folder and destination settings are linked from the workflow; custom names and imported steps are retained.
 

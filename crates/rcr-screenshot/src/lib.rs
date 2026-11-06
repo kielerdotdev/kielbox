@@ -10,7 +10,7 @@
 mod composite;
 mod error;
 
-pub use composite::{CompositeError, blit, composite};
+pub use composite::{CompositeError, MAX_CAPTURE_BYTES, MAX_CAPTURE_SIDE, blit, composite, validate_capture_layout};
 pub use error::{CaptureError, Result};
 
 use rcr_image_types::{Frame, Monitor, Rect, WindowInfo};
@@ -64,6 +64,12 @@ pub trait CaptureBackend: Send + Sync + std::fmt::Debug {
     /// Captures one monitor by [`Monitor::id`]. The returned frame's `origin`,
     /// `scale_factor` and (for HDR) `sdr_white_nits` must be filled in.
     fn capture_monitor(&self, monitor_id: &str, opts: &CaptureOptions) -> Result<Frame>;
+
+    /// Captures several monitors in request order. Backends may resolve display
+    /// topology once for the batch instead of repeating expensive OS queries.
+    fn capture_monitors(&self, monitor_ids: &[&str], opts: &CaptureOptions) -> Result<Vec<Frame>> {
+        monitor_ids.iter().map(|id| self.capture_monitor(id, opts)).collect()
+    }
 
     /// Captures the whole virtual desktop in one go. Only meaningful when
     /// [`Capabilities::native_desktop`] is set; the default reports `Unsupported`.

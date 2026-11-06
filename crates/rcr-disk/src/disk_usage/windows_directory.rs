@@ -1,5 +1,5 @@
 //! Directory entries from one Win32 enumeration, without per-entry metadata I/O.
-use crate::core::workflow::CancelToken;
+use rcr_workflows::workflow::CancelToken;
 use std::{
     ffi::OsString,
     io,
@@ -7,15 +7,15 @@ use std::{
     path::{Component, Path, Prefix},
 };
 use windows::{
-    core::{Error, HRESULT, PCWSTR},
     Win32::{
         Foundation::{ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, HANDLE},
         Storage::FileSystem::{
-            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-            FILE_ATTRIBUTE_DIRECTORY, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH,
+            FILE_ATTRIBUTE_DIRECTORY, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH, FindClose,
+            FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
             WIN32_FIND_DATAW,
         },
     },
+    core::{Error, HRESULT, PCWSTR},
 };
 
 pub(super) struct Entry {
@@ -77,7 +77,7 @@ fn pattern(path: &Path) -> io::Result<Vec<u16>> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Unsupported directory root",
-            ))
+            ));
         }
     };
     if encoded.last() != Some(&(b'\\' as u16)) {
@@ -144,7 +144,7 @@ pub(super) fn read(
         match unsafe { FindNextFileW(search.0, &mut data) } {
             Ok(()) => {}
             Err(error) if error.code() == HRESULT::from_win32(ERROR_NO_MORE_FILES.0) => {
-                return Ok(())
+                return Ok(());
             }
             Err(error) => return Err(os_error(error)),
         }

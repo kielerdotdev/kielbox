@@ -7,11 +7,11 @@ use gpui::{prelude::*, *};
 use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     io::{Read, Write},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Arc, mpsc, atomic::{AtomicBool, AtomicU64, Ordering}},
+    sync::{Arc, Condvar, Mutex, mpsc, atomic::{AtomicBool, AtomicU64, Ordering}},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -226,7 +226,7 @@ fn file_size(bytes: u64) -> String {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct FileInfo {
     available: bool,
     local: bool,
@@ -265,13 +265,14 @@ enum Task {
     Thumbnail(PathBuf),
     Catalog(Vec<PathBuf>),
 }
-struct WorkTask { revision: u64, task: Task }
-struct WorkResult { revision: u64, item: Option<ResultItem> }
+struct WorkTask { revision: u64, thumbnail_view: Option<u64>, task: Task }
+struct WorkResult { revision: u64, thumbnail_view: Option<u64>, item: Option<ResultItem> }
 
 #[derive(Clone, Default)]
 struct LibraryWork {
     stopped: Arc<AtomicBool>,
     revision: Arc<AtomicU64>,
+    thumbnail_view: Arc<AtomicU64>,
 }
 impl LibraryWork {
     fn current(&self) -> u64 { self.revision.load(Ordering::Acquire) }
@@ -279,6 +280,11 @@ impl LibraryWork {
         self.stopped.load(Ordering::Acquire) || self.current() != revision
     }
     fn advance(&self) { self.revision.fetch_add(1, Ordering::AcqRel); }
+    fn current_thumbnail_view(&self) -> u64 { self.thumbnail_view.load(Ordering::Acquire) }
+    fn thumbnail_cancelled(&self, revision: u64, view: Option<u64>) -> bool {
+        self.cancelled(revision) || view.is_some_and(|view| view != self.current_thumbnail_view())
+    }
+    fn advance_thumbnail_view(&self) { self.thumbnail_view.fetch_add(1, Ordering::AcqRel); }
     fn stop(&self) { self.stopped.store(true, Ordering::Release); }
 }
 
@@ -357,6 +363,28 @@ impl KeyboardSmokeRestore {
 }
 type SelectionProbe = Rc<RefCell<HashMap<usize, Bounds<Pixels>>>>;
 
+// Hidden synthetic proof only: allow the real query worker to finish between
+// input assertions. Production rendering/polling never waits for this worker.
+fn settle_library_query_proof(studio: &Entity<Studio>, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let ready = studio.update(cx, |this, cx| -> anyhow::Result<bool> {
+            this.library.poll();
+            let search = this.search.read(cx).value().trim().to_lowercase();
+            let ready = this.library.visible_snapshot(&this.files, &this.preferences, &search).is_some();
+            if let Some(error) = this.library.visible_cache.borrow().as_ref().and_then(|c| c.error.as_ref()) {
+                anyhow::bail!("Hidden Library query failed: {error}");
+            }
+            cx.notify();
+            Ok(ready)
+        })?;
+        window.draw(cx).clear();
+        if ready { return Ok(()); }
+        anyhow::ensure!(std::time::Instant::now() < deadline, "Hidden Library query timed out");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 fn keyboard_return_index(page: &[PathBuf], previous: Option<&Path>) -> Option<usize> {
     previous.and_then(|path| page.iter().position(|item| item == path))
         .or_else(|| (!page.is_empty()).then_some(0))
@@ -421,12 +449,17 @@ pub struct Library {
     results: Option<mpsc::Receiver<WorkResult>>,
     worker: Option<std::thread::JoinHandle<()>>,
     work: LibraryWork,
-    catalog: HashMap<PathBuf, FileInfo>,
+    catalog: Arc<HashMap<PathBuf, FileInfo>>,
     catalog_paths: Vec<PathBuf>,
     catalog_pending: bool,
     catalog_dirty: bool,
     file_membership: FileMembership,
     view_key: String,
+    thumbnail_page: Vec<PathBuf>,
+    thumbnail_retry: HashSet<PathBuf>,
+    catalog_revision: u64,
+    visible_cache: RefCell<Option<VisibleCache>>,
+    visible_worker: VisibleWorker,
     removed: removal::RemovalUndo,
     import_guard: import::ImportGuard,
     removal_pending: bool,
@@ -451,6 +484,10 @@ pub struct Library {
 impl Library {
     pub(super) fn observe_navigation(&mut self, tab: usize) {
         self.import_guard.observe_navigation(tab);
+        if tab != 1 && !self.thumbnail_page.is_empty() { self.observe_thumbnail_page(&[]); }
+        if !matches!(tab, 1 | 2) && self.visible_cache.get_mut().take().is_some() {
+            self.visible_worker.cancel();
+        }
     }
     pub(super) fn invalidate_import_navigation(&mut self) {
         self.import_guard.leave_media();
@@ -567,7 +604,7 @@ impl Library {
                 .update(cx, |search, cx| search.set_value("", cx));
             cx.notify();
         });
-        window.draw(cx).clear();
+        settle_library_query_proof(&studio, window, cx)?;
         let result = (|| -> anyhow::Result<FocusHandle> {
             let state = studio.read(cx);
             let mut paths = state.files.clone();
@@ -682,12 +719,13 @@ impl Library {
                 cx.notify();
             });
             window.draw(cx).clear();
+            settle_library_query_proof(&studio, window, cx)?;
             key(window, cx, "f6", false, false);
             ensure!(focus[0].is_focused(window), "F6 retained an old return target after the filter changed");
             key(window, cx, "f6", false, false);
             let query = paths[0].file_name().context("Owned capture has no filename")?.to_string_lossy().into_owned();
             search.update(cx, |input, cx| input.set_value(query.clone(), cx));
-            window.draw(cx).clear();
+            settle_library_query_proof(&studio, window, cx)?;
             let filtered_selection = studio.read(cx).library.selected.clone();
             key(window, cx, "f6", false, false);
             ensure!(focus[0].is_focused(window), "F6 did not fall back to the first search result");
@@ -705,7 +743,7 @@ impl Library {
                 this.search.update(cx, |input, cx| input.set_value("", cx));
                 cx.notify();
             });
-            window.draw(cx).clear();
+            settle_library_query_proof(&studio, window, cx)?;
             focus[0].focus(window);
             key(window, cx, "home", false, false);
             key(window, cx, "space", false, false);
@@ -732,6 +770,7 @@ impl Library {
             window.draw(cx).clear();
             key(window, cx, "a", true, false);
             key(window, cx, "backspace", false, false);
+            settle_library_query_proof(&studio, window, cx)?;
             ensure!(
                 search.read(cx).value().is_empty(),
                 "Ctrl+A did not select search text"
@@ -808,12 +847,12 @@ impl Library {
         let worker = std::thread::Builder::new()
             .name("rcr-library-thumbnails".into())
             .spawn(move || {
-                while let Ok(WorkTask { revision, task }) = rx.recv() {
+                while let Ok(WorkTask { revision, thumbnail_view, task }) = rx.recv() {
                     if worker_work.stopped.load(Ordering::Acquire) { break; }
-                    let cancelled = || worker_work.cancelled(revision);
+                    let cancelled = || worker_work.thumbnail_cancelled(revision, thumbnail_view);
                     // Even discarded tasks acknowledge progress: a newer catalog
                     // can retry a previously full task slot without a repaint loop.
-                    let complete = |item| done.send(WorkResult { revision, item: if cancelled() { None } else { item } });
+                    let complete = |item| done.send(WorkResult { revision, thumbnail_view, item: if cancelled() { None } else { item } });
                     if cancelled() {
                         if complete(None).is_err() { break; }
                         continue;
@@ -955,12 +994,17 @@ impl Library {
             .expect("thumbnail worker");
         Self {
             images: HashMap::new(),
-            catalog: HashMap::new(),
+            catalog: Arc::new(HashMap::new()),
             catalog_paths: vec![],
             catalog_pending: false,
             catalog_dirty: true,
             file_membership: FileMembership::default(),
             view_key: String::new(),
+            thumbnail_page: Vec::new(),
+            thumbnail_retry: HashSet::new(),
+            catalog_revision: 0,
+            visible_cache: RefCell::new(None),
+            visible_worker: VisibleWorker::new(),
             pending: HashSet::new(),
             order: VecDeque::new(),
             tasks: Some(tx),
@@ -994,7 +1038,7 @@ impl Library {
         let mut progressed = false;
         for result in self.results.iter().flat_map(|results| results.try_iter()) {
             progressed = true;
-            if result.revision != self.work.current() { continue; }
+            if self.work.thumbnail_cancelled(result.revision, result.thumbnail_view) { continue; }
             let Some(result) = result.item else { continue; };
             let t = match result {
                 ResultItem::Thumbnail(t) => t,
@@ -1019,13 +1063,17 @@ impl Library {
                     });
                     self.order.retain(|path| self.images.contains_key(path));
                     self.catalog_paths = paths;
-                    self.catalog = catalog;
+                    self.catalog = Arc::new(catalog);
+                    self.catalog_revision = self.catalog_revision.wrapping_add(1);
+                    self.visible_cache.get_mut().take();
+                    self.visible_worker.cancel();
                     self.catalog_pending = false;
                     changed = true;
                     continue;
                 }
             };
             self.pending.remove(&t.path);
+            self.thumbnail_retry.remove(&t.path);
             self.order.push_back(t.path.clone());
             self.images.insert(t.path.clone(), t);
             // At most 64 BGRA thumbnails (14 MiB); GPUI handles are released on eviction.
@@ -1040,23 +1088,44 @@ impl Library {
             && let Some(files) = self.file_membership.paths.clone() {
             self.request_catalog(&files);
         }
-        changed
+        if let Some((generation, snapshot)) = self.visible_worker.take_result()
+            && let Some(cache) = self.visible_cache.get_mut().as_mut()
+            && cache.generation == generation {
+            match snapshot {
+                Ok(snapshot) => { cache.snapshot = Some(snapshot); cache.error = None; }
+                Err(error) => { cache.snapshot = None; cache.error = Some(error); }
+            }
+            changed = true;
+        }
+        changed || (progressed && !self.thumbnail_retry.is_empty())
     }
     fn request(&mut self, path: &PathBuf) {
-        if !self.images.contains_key(path)
-            && !self.pending.contains(path)
-            && self
+        if self.images.contains_key(path) || self.pending.contains(path) {
+            self.thumbnail_retry.remove(path);
+            return;
+        }
+        if self
                 .tasks
                 .as_ref()
-                .is_some_and(|tx| tx.try_send(WorkTask { revision: self.work.current(), task: Task::Thumbnail(path.clone()) }).is_ok())
+                .is_some_and(|tx| tx.try_send(WorkTask { revision: self.work.current(), thumbnail_view: Some(self.work.current_thumbnail_view()), task: Task::Thumbnail(path.clone()) }).is_ok())
         {
             self.pending.insert(path.clone());
+            self.thumbnail_retry.remove(path);
+        } else {
+            self.thumbnail_retry.insert(path.clone());
         }
     }
     pub fn invalidate_metadata(&mut self) {
         self.invalidate_work();
         self.images.retain(|_, thumb| thumb.image.is_some());
         self.order.retain(|path| self.images.contains_key(path));
+    }
+    fn observe_thumbnail_page(&mut self, paths: &[PathBuf]) {
+        if self.thumbnail_page == paths { return; }
+        self.thumbnail_page = paths.to_vec();
+        self.work.advance_thumbnail_view();
+        self.pending.clear();
+        self.thumbnail_retry.clear();
     }
     pub fn cached_title(&self, path: &Path) -> String {
         self.catalog
@@ -1081,7 +1150,7 @@ impl Library {
         self.request_catalog(files);
     }
     pub fn snapshot_previews_ready(&self, files: &[PathBuf]) -> bool {
-        files
+        self.visible_cache.borrow().as_ref().is_some_and(|entry| entry.snapshot.is_some()) && files
             .iter()
             .take(4)
             .all(|path| self.images.contains_key(path))
@@ -1092,17 +1161,24 @@ impl Library {
             && self
                 .tasks
                 .as_ref()
-                .is_some_and(|tx| tx.try_send(WorkTask { revision: self.work.current(), task: Task::Catalog(files.to_vec()) }).is_ok())
+                .is_some_and(|tx| tx.try_send(WorkTask { revision: self.work.current(), thumbnail_view: None, task: Task::Catalog(files.to_vec()) }).is_ok())
         {
             self.catalog_pending = true;
             self.catalog_dirty = false;
         }
     }
     fn invalidate_work(&mut self) {
+        self.catalog_changed();
         self.work.advance();
         self.pending.clear();
+        self.thumbnail_retry.clear();
         self.catalog_pending = false;
         self.catalog_dirty = true;
+    }
+    fn catalog_changed(&mut self) {
+        self.catalog_revision = self.catalog_revision.wrapping_add(1);
+        self.visible_cache.get_mut().take();
+        self.visible_worker.cancel();
     }
     pub fn thumbnail(&mut self, path: &PathBuf) -> Div {
         let mut el = div()
@@ -1204,6 +1280,253 @@ fn kind(p: &std::path::Path) -> usize {
         2
     }
 }
+struct VisibleSnapshot {
+    files: Arc<[PathBuf]>,
+    watch_files: Arc<[PathBuf]>,
+    bytes: u64,
+    matching_bytes: u64,
+    kind_counts: [usize; 5],
+}
+
+// Only the latest query is retained. Compare content rather than allocation
+// identity: preference restore/import/rename can replace or mutate these values
+// without a dedicated UI revision. Hits do not clone paths or sort the catalog.
+struct VisibleCache {
+    input: Arc<VisibleInput>,
+    generation: u64,
+    snapshot: Option<Arc<VisibleSnapshot>>,
+    error: Option<String>,
+}
+
+struct VisibleInput {
+    sources: Arc<[PathBuf]>,
+    catalog: Arc<HashMap<PathBuf, FileInfo>>,
+    catalog_revision: u64,
+    favorites: BTreeSet<PathBuf>,
+    display_names: BTreeMap<PathBuf, String>,
+    filter: usize,
+    favorites_only: bool,
+    sort: usize,
+    search: String,
+}
+
+type VisibleResult = (u64, Result<Arc<VisibleSnapshot>, String>);
+#[derive(Default)]
+struct VisibleSlots {
+    pending: Option<(u64, Arc<VisibleInput>)>,
+    result: Option<VisibleResult>,
+}
+#[derive(Default)]
+struct VisibleShared {
+    slots: Mutex<VisibleSlots>,
+    wake: Condvar,
+    generation: AtomicU64,
+    stopped: AtomicBool,
+}
+struct VisibleWorker {
+    shared: Arc<VisibleShared>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    spawn_error: Option<String>,
+}
+impl VisibleWorker {
+    fn new() -> Self {
+        let shared = Arc::new(VisibleShared::default());
+        let work = shared.clone();
+        let thread = std::thread::Builder::new().name("library-query".into()).spawn(move || {
+            loop {
+                let task = {
+                    let mut slots = work.slots.lock().unwrap_or_else(|e| e.into_inner());
+                    while slots.pending.is_none() && !work.stopped.load(Ordering::Acquire) {
+                        slots = work.wake.wait(slots).unwrap_or_else(|e| e.into_inner());
+                    }
+                    if work.stopped.load(Ordering::Acquire) { return; }
+                    slots.pending.take().unwrap()
+                };
+                let (generation, input) = task;
+                let cancelled = || work.stopped.load(Ordering::Acquire)
+                    || work.generation.load(Ordering::Acquire) != generation;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_visible(&input, cancelled)));
+                let result = match result {
+                    Ok(Some(snapshot)) => Ok(Arc::new(snapshot)),
+                    Ok(None) => continue,
+                    Err(_) => Err("Library query failed. Retry to rebuild the view.".into()),
+                };
+                let mut slots = work.slots.lock().unwrap_or_else(|e| e.into_inner());
+                if !cancelled() { slots.result = Some((generation, result)); }
+            }
+        });
+        match thread {
+            Ok(thread) => Self { shared, thread: Some(thread), spawn_error: None },
+            Err(error) => Self { shared, thread: None, spawn_error: Some(format!("Library query worker could not start: {error}. Restart rcr to retry.")) },
+        }
+    }
+    fn cancel(&self) {
+        self.shared.generation.fetch_add(1, Ordering::AcqRel);
+        let mut slots = self.shared.slots.lock().unwrap_or_else(|e| e.into_inner());
+        slots.pending = None;
+        slots.result = None;
+    }
+    fn submit(&self, input: Arc<VisibleInput>) -> u64 {
+        let generation = self.shared.generation.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        let mut slots = self.shared.slots.lock().unwrap_or_else(|e| e.into_inner());
+        slots.result = self.spawn_error.as_ref().map(|e| (generation, Err(e.clone())));
+        slots.pending = self.spawn_error.is_none().then_some((generation, input));
+        self.shared.wake.notify_one();
+        generation
+    }
+    fn take_result(&self) -> Option<VisibleResult> {
+        self.shared.slots.lock().unwrap_or_else(|e| e.into_inner()).result.take()
+    }
+}
+impl Drop for VisibleWorker {
+    fn drop(&mut self) {
+        self.shared.stopped.store(true, Ordering::Release);
+        self.cancel();
+        self.shared.wake.notify_one();
+        if let Some(worker) = self.thread.take()
+            && let Err(error) = join_library_worker(worker) {
+            eprintln!("Library query background join unavailable: {error}");
+        }
+    }
+}
+
+// Stable, cancellable index merge sort. Equal keys retain source order exactly
+// like the previous stable standard-library sorts, including name/size ties.
+fn build_visible(input: &VisibleInput, cancelled: impl Fn() -> bool) -> Option<VisibleSnapshot> {
+    let mut indexes = Vec::new();
+    let mut names = HashMap::new();
+    let mut bytes = 0u64;
+    let mut kind_counts = [0; 5];
+    for (i, path) in input.sources.iter().enumerate() {
+        if i % 128 == 0 && cancelled() { return None; }
+        let info = input.catalog.get(path);
+        bytes += info.map_or(0, |i| i.bytes);
+        if input.favorites_only && !input.favorites.contains(path) { continue; }
+        let category = kind(path);
+        kind_counts[0] += 1;
+        kind_counts[category] += 1;
+        if input.filter != 0 && category != input.filter { continue; }
+        let custom = if input.sort == 2 || !input.search.is_empty() {
+            input.display_names.get(&crate::preferences::lookup_key(path))
+        } else { None };
+        if !input.search.is_empty()
+            && !custom.is_some_and(|n| n.to_lowercase().contains(&input.search))
+            && !info.is_some_and(|i| i.search.contains(&input.search))
+            && !path.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().contains(&input.search)) { continue; }
+        if input.sort == 2 {
+            names.insert(i, custom.cloned().unwrap_or_else(|| {
+                info.map(|i| i.title.clone()).unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().into_owned())
+            }).to_lowercase());
+        }
+        indexes.push(i);
+    }
+    let compare = |a: usize, b: usize| {
+        let a_path = &input.sources[a]; let b_path = &input.sources[b];
+        match input.sort {
+            0 | 1 => {
+                let order = input.catalog.get(b_path).and_then(|i| i.modified)
+                    .cmp(&input.catalog.get(a_path).and_then(|i| i.modified)).then_with(|| a_path.cmp(b_path));
+                if input.sort == 1 { order.reverse() } else { order }
+            }
+            2 => names[&a].cmp(&names[&b]),
+            3 => input.catalog.get(b_path).map_or(0, |i| i.bytes).cmp(&input.catalog.get(a_path).map_or(0, |i| i.bytes)),
+            _ => std::cmp::Ordering::Equal,
+        }
+    };
+    let mut scratch = vec![0; indexes.len()];
+    let mut width = 1;
+    while width < indexes.len() {
+        for start in (0..indexes.len()).step_by(width * 2) {
+            if cancelled() { return None; }
+            let middle = (start + width).min(indexes.len());
+            let end = (middle + width).min(indexes.len());
+            let (mut a, mut b) = (start, middle);
+            for (out, slot) in scratch.iter_mut().enumerate().take(end).skip(start) {
+                if out % 128 == 0 && cancelled() { return None; }
+                if a < middle && (b == end || compare(indexes[a], indexes[b]) != std::cmp::Ordering::Greater) {
+                    *slot = indexes[a]; a += 1;
+                } else { *slot = indexes[b]; b += 1; }
+            }
+        }
+        std::mem::swap(&mut indexes, &mut scratch);
+        width *= 2;
+    }
+    let mut files = Vec::with_capacity(indexes.len());
+    let mut watch_files = Vec::new();
+    let mut matching_bytes = 0;
+    for (n, index) in indexes.into_iter().enumerate() {
+        if n % 128 == 0 && cancelled() { return None; }
+        let path = &input.sources[index];
+        matching_bytes += input.catalog.get(path).map_or(0, |i| i.bytes);
+        if recordings::is_supported(path) && !recordings::is_image(path) { watch_files.push(path.clone()); }
+        files.push(path.clone());
+    }
+    if cancelled() { return None; }
+    Some(VisibleSnapshot { files: files.into(), watch_files: watch_files.into(), bytes, matching_bytes, kind_counts })
+}
+
+impl Library {
+    fn visible_snapshot(&self, sources: &[PathBuf], preferences: &crate::preferences::Preferences, search: &str) -> Option<Arc<VisibleSnapshot>> {
+        let mut cache = self.visible_cache.borrow_mut();
+        if let Some(entry) = cache.as_ref() {
+            let old = &entry.input;
+            if old.catalog_revision == self.catalog_revision
+            && old.filter == self.filter && old.favorites_only == self.favorites_only
+            && old.sort == self.sort && old.search == search
+            && old.sources.as_ref() == sources && old.favorites == preferences.favorites
+            && old.display_names == preferences.display_names {
+                return entry.snapshot.clone();
+            }
+        }
+        let input = Arc::new(VisibleInput { sources: sources.to_vec().into(), catalog: self.catalog.clone(), catalog_revision: self.catalog_revision,
+            favorites: preferences.favorites.clone(), display_names: preferences.display_names.clone(),
+            filter: self.filter, favorites_only: self.favorites_only, sort: self.sort, search: search.to_owned() });
+        let generation = self.visible_worker.submit(input.clone());
+        *cache = Some(VisibleCache { input, generation, snapshot: None, error: None });
+        None
+    }
+}
+
+#[cfg(test)]
+fn visible_files(sources: &[PathBuf], library: &Library, preferences: &crate::preferences::Preferences, search: &str) -> Vec<PathBuf> {
+    let mut files = sources
+        .iter()
+        .filter(|p| {
+            (library.filter == 0 || kind(p) == library.filter)
+                && (!library.favorites_only || preferences.favorites.contains(*p))
+                && (search.is_empty()
+                    || preferences
+                        .custom_display_name(p)
+                        .is_some_and(|name| name.to_lowercase().contains(search))
+                    || library
+                        .catalog
+                        .get(*p)
+                        .is_some_and(|info| info.search.contains(search))
+                    || p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().to_lowercase().contains(search)))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    match library.sort {
+        0 | 1 => files.sort_by(|a, b| {
+            let a_stamp = library.catalog.get(a).and_then(|i| i.modified);
+            let b_stamp = library.catalog.get(b).and_then(|i| i.modified);
+            let order = b_stamp.cmp(&a_stamp).then_with(|| a.cmp(b));
+            if library.sort == 1 {
+                order.reverse()
+            } else {
+                order
+            }
+        }),
+        2 => files.sort_by_cached_key(|p| preferences.custom_display_name(p).map(str::to_owned).unwrap_or_else(|| library.cached_title(p)).to_lowercase()),
+        3 => files.sort_by_key(|p| {
+            std::cmp::Reverse(library.catalog.get(p).map_or(0, |i| i.bytes))
+        }),
+        _ => {}
+    }
+    files
+}
+
 impl Studio {
     fn open_library_folder(&mut self, cx: &mut Context<Self>) {
         let Some(lease) = self.library.folder_open.acquire() else { return; };
@@ -1233,7 +1556,7 @@ impl Studio {
         self.files = ["Replay · Last round.mp4", "Desktop recording.mp4"]
             .map(|name| PathBuf::from("owned-library-preview").join(name)).to_vec();
         for (index, path) in self.files.iter().enumerate() {
-            self.library.catalog.insert(path.clone(), FileInfo {
+            Arc::make_mut(&mut self.library.catalog).insert(path.clone(), FileInfo {
                 available: !failed, local: true,
                 title: path.file_name().unwrap().to_string_lossy().into_owned(),
                 bytes: 42_000_000 + index as u64 * 8_000_000,
@@ -1246,6 +1569,27 @@ impl Studio {
             root: PathBuf::from("R:/Gameplay/Captures"), kind: std::io::ErrorKind::NotFound,
         });
         self.notice = None;
+        cx.notify();
+    }
+
+    pub(crate) fn visible_library_files(&self, cx: &App) -> Arc<[PathBuf]> {
+        let search = self.search.read(cx).value().trim().to_lowercase();
+        self.library.visible_snapshot(&self.files, &self.preferences, &search)
+            .map_or_else(|| Arc::from([]), |snapshot| snapshot.files.clone())
+    }
+    pub(crate) fn watch_recording(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.tab == 1 {
+            let current = self.visible_library_files(cx);
+            if !current.contains(&path) { cx.notify(); return; }
+        }
+        self.library.invalidate_import_navigation();
+        let title = self.capture_title(&path);
+        self.tab = 2;
+        self.sync_editor_choices(cx);
+        self.editor.update(cx, |editor, cx| {
+            editor.open_for_clip_show(path, cx);
+            editor.set_title(title);
+        });
         cx.notify();
     }
 
@@ -1266,56 +1610,16 @@ impl Studio {
             self.library.card_scroll.scroll_to_item(0);
             self.library.view_key = view_key;
         }
-        let mut files = self
-            .files
-            .iter()
-            .filter(|p| {
-                (self.library.filter == 0 || kind(p) == self.library.filter)
-                    && (!self.library.favorites_only || self.preferences.favorites.contains(*p))
-                    && (search.is_empty()
-                        || self
-                            .preferences
-                            .custom_display_name(p)
-                            .is_some_and(|name| name.to_lowercase().contains(&search))
-                        || self
-                            .library
-                            .catalog
-                            .get(*p)
-                            .is_some_and(|info| info.search.contains(&search))
-                        || p.file_name()
-                            .is_some_and(|n| n.to_string_lossy().to_lowercase().contains(&search)))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        match self.library.sort {
-            0 | 1 => files.sort_by(|a, b| {
-                let a_stamp = self.library.catalog.get(a).and_then(|i| i.modified);
-                let b_stamp = self.library.catalog.get(b).and_then(|i| i.modified);
-                let order = b_stamp.cmp(&a_stamp).then_with(|| a.cmp(b));
-                if self.library.sort == 1 {
-                    order.reverse()
-                } else {
-                    order
-                }
-            }),
-            2 => files.sort_by_cached_key(|p| self.capture_title(p).to_lowercase()),
-            3 => files.sort_by_key(|p| {
-                std::cmp::Reverse(self.library.catalog.get(p).map_or(0, |i| i.bytes))
-            }),
-            _ => {}
-        }
-        let bytes: u64 = self
-            .files
-            .iter()
-            .filter_map(|p| self.library.catalog.get(p))
-            .map(|info| info.bytes)
-            .sum();
+        let current = self.library.visible_snapshot(&self.files, &self.preferences, &search);
+        let query_pending = current.is_none();
+        let query_error = self.library.visible_cache.borrow().as_ref().and_then(|entry| entry.error.clone());
+        let snapshot = current.unwrap_or_else(|| Arc::new(VisibleSnapshot {
+            files: Arc::from([]), watch_files: Arc::from([]), bytes: 0, matching_bytes: 0, kind_counts: [0; 5],
+        }));
+        let files = &snapshot.files;
+        let bytes = snapshot.bytes;
         let count = files.len();
-        let matching_bytes: u64 = files
-            .iter()
-            .filter_map(|p| self.library.catalog.get(p))
-            .map(|i| i.bytes)
-            .sum();
+        let matching_bytes = snapshot.matching_bytes;
         let sidebar = div()
             .w(px(188.))
             .h_full()
@@ -1381,14 +1685,7 @@ impl Studio {
             .into_iter()
             .enumerate()
         {
-            let count = self
-                .files
-                .iter()
-                .filter(|p| {
-                    (!self.library.favorites_only || self.preferences.favorites.contains(*p))
-                        && (i == 0 || kind(p) == i)
-                })
-                .count();
+            let count = snapshot.kind_counts[i];
             filters = filters.child(
                 button(("library-filter", i), format!("{name}  {count}"))
                     .h(px(28.))
@@ -1459,7 +1756,11 @@ impl Studio {
                     .items_center()
                     .gap_3()
                     .child(icon("film"))
-                    .child(if scanning {
+                    .child(if query_error.is_some() {
+                        "Library view could not be built"
+                    } else if query_pending {
+                        "Updating your Library…"
+                    } else if scanning {
                         "Finding your captures…"
                     } else if root_error.is_some() && self.files.is_empty() {
                         "Your captures will appear when the folder reconnects"
@@ -1468,7 +1769,11 @@ impl Studio {
                     } else {
                         "No matching captures"
                     })
-                    .child(muted(if scanning {
+                    .child(muted(if query_error.is_some() {
+                        "Retry this view, or restart rcr if the worker could not start."
+                    } else if query_pending {
+                        "Applying your search and filters. Watching is available when this view is ready."
+                    } else if scanning {
                         "Your Library will appear here when the scan finishes."
                     } else if root_error.is_some() && self.files.is_empty() {
                         "Use the folder controls above to reconnect or create your capture folder."
@@ -1479,7 +1784,7 @@ impl Studio {
                     } else {
                         "Try another search or clear your filters to see every capture."
                     }))
-                    .when(!self.files.is_empty(), |el| {
+                    .when(!query_pending && !self.files.is_empty(), |el| {
                         el.child(button("library-reset-empty", "Clear filters").on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.library.filter = 0;
@@ -1489,10 +1794,15 @@ impl Studio {
                                 cx.notify();
                             }),
                         ))
-                    }),
+                    })
+                    .when_some(query_error.clone(), |el, error| el
+                        .child(muted(error))
+                        .child(button("retry-library-query", "Retry view").on_click(cx.listener(|this, _, _, cx| {
+                            this.library.catalog_changed(); cx.notify();
+                        })))),
             );
         }
-        self.library.page = self.library.page.min(count.saturating_sub(1) / 24);
+        if !query_pending { self.library.page = self.library.page.min(count.saturating_sub(1) / 24); }
         let page = self.library.page;
         let page_files = files
             .iter()
@@ -1500,6 +1810,7 @@ impl Studio {
             .take(24)
             .cloned()
             .collect::<Vec<_>>();
+        self.library.observe_thumbnail_page(&page_files);
         let all_page_selected =
             !page_files.is_empty() && page_files.iter().all(|p| self.library.selected.contains(p));
         if self.library.selection_range.page != page_files {
@@ -1513,6 +1824,8 @@ impl Studio {
                 .count(),
         );
         let selection_page = page_files.clone();
+        let watch_files = snapshot.watch_files.clone();
+        let watch_page = page_files.clone();
         let page_focus = page_files
             .iter()
             .map(|path| {
@@ -1523,12 +1836,14 @@ impl Studio {
                     .clone()
             })
             .collect::<Vec<_>>();
-        for (i, path) in files.into_iter().skip(page * 24).take(24).enumerate() {
+        for (i, path) in files.iter().skip(page * 24).take(24).cloned().enumerate() {
             let open = path.clone();
             let fav = path.clone();
             let select = path.clone();
             let rename_action = path.clone();
             let reveal = path.clone();
+            let edit = path.clone();
+            let video = recordings::is_supported(&path) && !recordings::is_image(&path);
             let favorite = self.preferences.favorites.contains(&path);
             let selected = self.library.selected.contains(&path);
             let thumb = self.library.thumbnail(&path);
@@ -1565,6 +1880,17 @@ impl Studio {
                         .when_some(self.library.selection_probe.clone(), |el, probe| el.child(selection_measure(probe, i * 2 + 1))),
                 )
                 .child(div().flex_1())
+                .when(video, |actions| actions.child(
+                    button(("edit-clip", i), "Edit")
+                        .tooltip(hint("Open this clip in the editor"))
+                        .px_2()
+                        .h(px(26.))
+                        .bg(rgba(0x17181bcc))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.open_recording(edit.clone(), cx);
+                        })),
+                ))
                 .child(
                     button(("rename", i), "")
                         .tooltip(hint("Rename capture · F2"))
@@ -1636,7 +1962,7 @@ impl Studio {
                 .border_color(rgb(if selected { ACCENT } else { LINE }))
                 .cursor_pointer()
                 .relative()
-                .tooltip(hint(format!("{file_name} · Enter to edit · Space / Ctrl+click to select · Shift+click for a range · F6 switches to search")))
+                .tooltip(hint(format!("{file_name} · Enter to {} · Space / Ctrl+click to select · Shift+click for a range · F6 switches to search", if video { "watch" } else { "open" })))
                 .hover(move |s| s.border_color(rgb(if selected { ACCENT } else { 0x45464d })))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     let stroke = &event.keystroke;
@@ -1684,7 +2010,8 @@ impl Studio {
                         this.library.selection_range.apply(&mut this.library.selected, &keyboard_select, event.modifiers().shift);
                         cx.notify();
                     } else {
-                        this.open_recording(open.clone(), cx);
+                        if video { this.watch_recording(open.clone(), cx); }
+                        else { this.open_recording(open.clone(), cx); }
                     }
                 }));
             card = card.when_some(self.library.selection_probe.clone(), |el, probe| el.child(selection_measure(probe, i * 2)));
@@ -1712,7 +2039,7 @@ impl Studio {
                             .child(muted(metadata).truncate())
                             .child(muted(detail).truncate()),
                     )
-                    .child(actions.w(px(116.)))
+                    .child(actions.w(px(if video { 148. } else { 116. })))
                     .child(
                         button(("reveal", i), "")
                             .tooltip(hint("Show original in folder"))
@@ -1842,6 +2169,18 @@ impl Studio {
                             .tooltip(hint("Search capture names and filenames · Ctrl+F · F6 returns to captures"))
                             .child(self.search.clone()),
                     )
+                    .child(button("watch-library-clips", "Watch clips")
+                        .child(icon("play"))
+                        .when(watch_files.is_empty(), |button| button.opacity(0.4).cursor(CursorStyle::Arrow))
+                        .tooltip(hint("Play videos from this Library view · Use previous/next while sharing your screen"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let focused = watch_files.iter().find(|path| this.library.card_focus.get(*path)
+                                .is_some_and(|focus| focus.is_focused(window)));
+                            let first_on_page = watch_page.iter().find(|path| watch_files.contains(path));
+                            if let Some(path) = focused.or(first_on_page).or(watch_files.first()).cloned() {
+                                this.watch_recording(path, cx);
+                            }
+                        })))
                     .child(div().flex_1())
                     .child(sort_controls),
             )
@@ -2145,6 +2484,228 @@ mod tests {
     use ::core::prelude::v1::test;
     use std::time::{Duration, Instant};
 
+    fn input_for_test(library: &Library, files: &[PathBuf], preferences: &crate::preferences::Preferences, search: &str) -> Arc<VisibleInput> {
+        Arc::new(VisibleInput { sources: files.to_vec().into(), catalog: library.catalog.clone(), catalog_revision: library.catalog_revision,
+            favorites: preferences.favorites.clone(), display_names: preferences.display_names.clone(),
+            filter: library.filter, favorites_only: library.favorites_only, sort: library.sort, search: search.into() })
+    }
+
+    #[test]
+    fn visible_worker_has_one_latest_pending_slot_and_cancel_clears_publication() {
+        let library = Library::new();
+        let input = input_for_test(&library, &[PathBuf::from("one.mp4")], &Default::default(), "");
+        // No thread: inspect replacement deterministically, rather than relying
+        // on scheduler timing to keep a worker occupied.
+        let worker = VisibleWorker { shared: Arc::new(VisibleShared::default()), thread: None, spawn_error: None };
+        let mut newest = 0;
+        for _ in 0..1000 { newest = worker.submit(input.clone()); }
+        let shared = worker.shared.clone();
+        {
+            let slots = shared.slots.lock().unwrap();
+            assert_eq!(slots.pending.as_ref().unwrap().0, newest);
+            assert!(slots.result.is_none());
+            assert_eq!(Arc::strong_count(&input), 2, "Superseded requests retained their inputs");
+        }
+        worker.cancel();
+        assert!(shared.slots.lock().unwrap().pending.is_none());
+        assert!(shared.generation.load(Ordering::Acquire) != newest);
+        drop(worker);
+        assert!(shared.stopped.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn visible_query_rejects_old_publication_hides_old_queue_and_retries_errors() {
+        let mut library = Library::new();
+        library.visible_worker = VisibleWorker { shared: Arc::new(VisibleShared::default()), thread: None, spawn_error: None };
+        library.catalog_dirty = false;
+        let preferences = crate::preferences::Preferences::default();
+        let files = [PathBuf::from("one.mp4"), PathBuf::from("two.mp4")];
+        assert!(library.visible_snapshot(&files, &preferences, "").is_none());
+        let (old_generation, input) = { let cache = library.visible_cache.borrow();
+            let c = cache.as_ref().unwrap(); (c.generation, c.input.clone()) };
+        let result = Arc::new(build_visible(&input, || false).unwrap());
+        library.visible_worker.shared.slots.lock().unwrap().result = Some((old_generation, Ok(result.clone())));
+        assert!(library.poll());
+        assert_eq!(library.visible_snapshot(&files, &preferences, "").unwrap().watch_files.len(), 2);
+        assert!(library.visible_snapshot(&files, &preferences, "two").is_none(), "Old queue remained usable under a new search");
+        library.visible_worker.shared.slots.lock().unwrap().result = Some((old_generation, Ok(result)));
+        assert!(!library.poll());
+        assert!(library.visible_snapshot(&files, &preferences, "two").is_none());
+        let generation = library.visible_cache.borrow().as_ref().unwrap().generation;
+        library.visible_worker.shared.slots.lock().unwrap().result = Some((generation, Err("Synthetic query failure; retry".into())));
+        assert!(library.poll());
+        assert!(library.visible_cache.borrow().as_ref().unwrap().error.is_some());
+        assert!(library.visible_snapshot(&files, &preferences, "two").is_none());
+        library.catalog_changed();
+        assert!(library.visible_snapshot(&files, &preferences, "two").is_none());
+        let (retry, input) = { let cache = library.visible_cache.borrow(); let c = cache.as_ref().unwrap(); (c.generation, c.input.clone()) };
+        assert_ne!(retry, generation);
+        library.visible_worker.shared.slots.lock().unwrap().result = Some((retry, Ok(Arc::new(build_visible(&input, || false).unwrap()))));
+        assert!(library.poll());
+        assert_eq!(library.visible_snapshot(&files, &preferences, "two").unwrap().watch_files.as_ref(), &files[1..]);
+    }
+
+    #[test]
+    fn visible_query_cancellable_stable_sort_matches_reference_including_ties() {
+        let mut library = Library::new();
+        let mut preferences = crate::preferences::Preferences::default();
+        let files = (0..96).map(|i| match i % 4 {
+            0 => PathBuf::from(format!("replay-round-{i}.mp4")),
+            1 => PathBuf::from(format!("round-{i}.mp4")),
+            2 => PathBuf::from(format!("exports/round-{i}.mp4")),
+            _ => PathBuf::from(format!("round-{i}.png")),
+        }).collect::<Vec<_>>();
+        for (i, path) in files.iter().enumerate() {
+            Arc::make_mut(&mut library.catalog).insert(path.clone(), FileInfo { title: format!("Round {}", i % 3),
+                search: format!("round {}", i % 3), bytes: (i % 3) as u64,
+                modified: (i % 7 != 0).then_some(UNIX_EPOCH + Duration::from_secs((i % 3) as u64)), ..Default::default() });
+            if i % 2 == 0 { preferences.favorites.insert(path.clone()); }
+            if i % 5 == 0 { preferences.set_display_name(path, "Equal round Å").unwrap(); }
+        }
+        for sort in 0..5 { for filter in 0..5 { for favorites in [false, true] { for search in ["", "round 1", "equal"] {
+            library.sort = sort; library.filter = filter; library.favorites_only = favorites;
+            let input = input_for_test(&library, &files, &preferences, search);
+            let result = build_visible(&input, || false).unwrap();
+            assert_eq!(result.files.as_ref(), visible_files(&files, &library, &preferences, search), "sort={sort} filter={filter} favorites={favorites} search={search}");
+        }}}}
+        library.sort = 2; library.filter = 0; library.favorites_only = false;
+        let input = input_for_test(&library, &files, &preferences, "");
+        let polls = std::cell::Cell::new(0);
+        assert!(build_visible(&input, || { polls.set(polls.get() + 1); polls.get() >= 3 }).is_none());
+        assert_eq!(polls.get(), 3, "Cancelled work continued through later phases");
+    }
+
+    fn await_snapshot(library: &mut Library, files: &[PathBuf], preferences: &crate::preferences::Preferences, search: &str) -> Arc<VisibleSnapshot> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(result) = library.visible_snapshot(files, preferences, search) { return result; }
+            library.poll();
+            assert!(library.visible_cache.borrow().as_ref().unwrap().error.is_none(), "Query worker failed");
+            assert!(Instant::now() < deadline, "Query worker timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    fn checked_snapshot(library: &mut Library, files: &[PathBuf], preferences: &crate::preferences::Preferences, search: &str, old: Option<&Arc<VisibleSnapshot>>) -> Arc<VisibleSnapshot> {
+        let result = await_snapshot(library, files, preferences, search);
+        assert_eq!(result.files.as_ref(), visible_files(files, library, preferences, search));
+        assert_eq!(result.bytes, files.iter().filter_map(|p| library.catalog.get(p)).map(|i| i.bytes).sum::<u64>());
+        assert_eq!(result.matching_bytes, result.files.iter().filter_map(|p| library.catalog.get(p)).map(|i| i.bytes).sum::<u64>());
+        assert!(result.watch_files.iter().all(|p| recordings::is_supported(p) && !recordings::is_image(p)));
+        if let Some(old) = old { assert!(!Arc::ptr_eq(old, &result), "Changed inputs reused a stale snapshot"); }
+        assert!(Arc::ptr_eq(&result, &library.visible_snapshot(files, preferences, search).unwrap()), "Unchanged query was rebuilt");
+        result
+    }
+
+    #[test]
+    fn visible_snapshot_invalidates_every_query_input_and_catalog_publication() {
+        let mut library = Library::new();
+        let mut files = vec![PathBuf::from("replay-a.mp4"), PathBuf::from("screen.png")];
+        let mut preferences = crate::preferences::Preferences::default();
+        let mut old = checked_snapshot(&mut library, &files, &preferences, "", None);
+        files.push(PathBuf::from("imported.mp4"));
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        files.reverse();
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        preferences.favorites.insert(files[0].clone());
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        preferences.set_display_name(&files[0], "Round winner").unwrap();
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        library.favorites_only = true;
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        library.filter = 2;
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        library.sort = 2;
+        old = checked_snapshot(&mut library, &files, &preferences, "", Some(&old));
+        old = checked_snapshot(&mut library, &files, &preferences, "round", Some(&old));
+        let (sender, results) = mpsc::sync_channel(1);
+        library.results = Some(results);
+        let catalog = HashMap::from([(files[0].clone(), FileInfo { available: false, bytes: 1234,
+            title: "Offline renamed round".into(), search: "offline renamed round".into(), ..Default::default() })]);
+        sender.send(WorkResult { revision: library.work.current(), thumbnail_view: None,
+            item: Some(ResultItem::Catalog(files.clone(), catalog)) }).unwrap();
+        assert!(library.poll());
+        old = checked_snapshot(&mut library, &files, &preferences, "round", Some(&old));
+        assert_eq!(old.bytes, 1234);
+        library.invalidate_metadata();
+        checked_snapshot(&mut library, &files, &preferences, "round", Some(&old));
+        // Only the latest key is retained: returning to an earlier query rebuilds.
+        let latest = await_snapshot(&mut library, &files, &preferences, "offline");
+        checked_snapshot(&mut library, &files, &preferences, "round", Some(&latest));
+    }
+
+    #[test]
+    #[ignore = "deterministic CPU-only 10k/50k catalog benchmark; run with --ignored --nocapture"]
+    fn benchmark_visible_snapshot_10k_50k() {
+        for count in [10_000, 50_000] {
+            let mut library = Library::new();
+            let mut preferences = crate::preferences::Preferences::default();
+            let files = (0..count).map(|i| PathBuf::from(format!("generated-library/round-{:06}.mp4", (i * 7919) % count))).collect::<Vec<_>>();
+            for (i, path) in files.iter().enumerate() {
+                Arc::make_mut(&mut library.catalog).insert(path.clone(), FileInfo { available: i % 11 != 0,
+                    modified: Some(UNIX_EPOCH + Duration::from_secs((i * 31 % 997) as u64)),
+                    bytes: 1000 + i as u64, title: format!("Round {i}"), search: format!("round {i}"), ..Default::default() });
+                if i % 100 == 0 { preferences.set_display_name(path, &format!("Custom round {i}")).unwrap(); }
+            }
+            for (sort, search) in [(0, ""), (2, "round")] {
+                library.sort = sort;
+                let cold = Instant::now();
+                assert!(library.visible_snapshot(&files, &preferences, search).is_none());
+                let request_us = cold.elapsed().as_micros();
+                let snapshot = await_snapshot(&mut library, &files, &preferences, search);
+                let cold_us = cold.elapsed().as_micros();
+                let mut baseline = Vec::new();
+                let mut cached = Vec::new();
+                for _ in 0..25 {
+                    let started = Instant::now();
+                    let uncached = visible_files(&files, &library, &preferences, search);
+                    baseline.push(started.elapsed().as_micros());
+                    assert_eq!(snapshot.files.as_ref(), uncached);
+                    std::hint::black_box(uncached);
+                    let started = Instant::now();
+                    let hit = library.visible_snapshot(&files, &preferences, search).unwrap();
+                    cached.push(started.elapsed().as_micros());
+                    assert!(Arc::ptr_eq(&snapshot, &hit));
+                    std::hint::black_box(hit);
+                }
+                baseline.sort_unstable(); cached.sort_unstable();
+                println!("Library view benchmark JSON: {}", serde_json::json!({"entries": count, "sort": sort,
+                    "search": search, "runs": 25, "request_admission_us": request_us, "background_completion_us": cold_us,
+                    "baseline_p50_us": baseline[12], "baseline_p95_us": baseline[23],
+                    "cached_p50_us": cached[12], "cached_p95_us": cached[23]}));
+            }
+        }
+    }
+
+    #[test]
+    fn clip_show_queue_uses_library_filters_search_and_sort() {
+        let files = ["replay-one.mp4", "replay-two.mp4", "recording.mp4", "screen.png"]
+            .map(PathBuf::from);
+        let mut library = Library::new();
+        for (index, path) in files.iter().enumerate() {
+            Arc::make_mut(&mut library.catalog).insert(path.clone(), FileInfo {
+                modified: Some(UNIX_EPOCH + Duration::from_secs(index as u64)),
+                bytes: (index as u64 + 1) * 100,
+                ..Default::default()
+            });
+        }
+        let mut preferences = crate::preferences::Preferences::default();
+        preferences.favorites.extend(files[..3].iter().cloned());
+        preferences.set_display_name(&files[0], "Winning round Z").unwrap();
+        preferences.set_display_name(&files[1], "Winning round A").unwrap();
+        library.filter = 1;
+        library.favorites_only = true;
+        assert_eq!(visible_files(&files, &library, &preferences, ""), [files[1].clone(), files[0].clone()]);
+        library.sort = 1;
+        assert_eq!(visible_files(&files, &library, &preferences, ""), files[..2]);
+        library.sort = 2;
+        assert_eq!(visible_files(&files, &library, &preferences, "winning"), [files[1].clone(), files[0].clone()]);
+        assert_eq!(visible_files(&files, &library, &preferences, "round z"), [files[0].clone()]);
+        preferences.favorites.remove(&files[0]);
+        assert!(visible_files(&files, &library, &preferences, "round z").is_empty());
+        library.filter = 4;
+        assert!(visible_files(&files, &library, &preferences, "").is_empty());
+    }
+
     #[test]
     fn keyboard_pane_return_uses_exact_current_page_identity_and_handles_empty_results() {
         let page = ["first.mp4", "second.mp4"].map(PathBuf::from);
@@ -2266,10 +2827,10 @@ mod tests {
         library.pending.insert(path.clone());
         let (sender, receiver) = mpsc::sync_channel(2);
         library.results = Some(receiver);
-        sender.send(WorkResult { revision: stale_revision, item: Some(ResultItem::Thumbnail(Thumbnail {
+        sender.send(WorkResult { revision: stale_revision, thumbnail_view: None, item: Some(ResultItem::Thumbnail(Thumbnail {
             path: path.clone(), image: None, duration: 0., detail: String::new(),
         })) }).unwrap();
-        sender.send(WorkResult { revision: stale_revision,
+        sender.send(WorkResult { revision: stale_revision, thumbnail_view: None,
             item: Some(ResultItem::Catalog(vec![path.clone()], HashMap::from([(path.clone(), FileInfo::default())]))) }).unwrap();
         assert!(!library.poll());
         assert!(library.pending.contains(&path));
@@ -2285,7 +2846,7 @@ mod tests {
         library.tasks = Some(tasks);
         library.results = Some(results);
         let stale_revision = library.work.current();
-        assert!(library.tasks.as_ref().unwrap().try_send(WorkTask { revision: stale_revision,
+        assert!(library.tasks.as_ref().unwrap().try_send(WorkTask { revision: stale_revision, thumbnail_view: None,
             task: Task::Thumbnail(PathBuf::from("obsolete.png")) }).is_ok());
         let paths = vec![PathBuf::from("latest.mp4")];
         library.catalog_files(&paths);
@@ -2297,7 +2858,7 @@ mod tests {
         assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)));
         // Cancelling obsolete work still acknowledges worker progress. This is
         // the sole retry trigger after the initial full-slot rejection.
-        progress.send(WorkResult { revision: stale_revision, item: None }).unwrap();
+        progress.send(WorkResult { revision: stale_revision, thumbnail_view: None, item: None }).unwrap();
         assert!(!library.poll());
         assert!(library.catalog_pending && !library.catalog_dirty);
         let admitted = receiver.try_recv().unwrap();
@@ -2308,6 +2869,63 @@ mod tests {
         }
         for _ in 0..20 { assert!(!library.poll()); }
         assert!(matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+    #[test]
+    fn page_navigation_cancels_thumbnail_decode_without_invalidating_catalog() {
+        let work = LibraryWork::default();
+        let revision = work.current();
+        let page = work.current_thumbnail_view();
+        assert!(!work.thumbnail_cancelled(revision, Some(page)));
+        work.advance_thumbnail_view();
+        assert!(work.thumbnail_cancelled(revision, Some(page)));
+        assert!(!work.thumbnail_cancelled(revision, None), "Page navigation cancelled metadata work");
+        assert!(!work.thumbnail_cancelled(revision, Some(work.current_thumbnail_view())));
+    }
+    #[test]
+    fn obsolete_page_results_cannot_finish_new_requests_and_progress_retries_visible_page() {
+        let mut library = Library::new();
+        let path = PathBuf::from("visible-now.mp4");
+        library.observe_thumbnail_page(std::slice::from_ref(&path));
+        let stale_view = library.work.current_thumbnail_view();
+        library.observe_thumbnail_page(&[PathBuf::from("other-page.mp4")]);
+        library.observe_thumbnail_page(std::slice::from_ref(&path));
+        library.catalog_dirty = false;
+        library.catalog_pending = true;
+        library.pending.insert(path.clone());
+        let (sender, results) = mpsc::sync_channel(2);
+        library.results = Some(results);
+        sender.send(WorkResult { revision: library.work.current(), thumbnail_view: Some(stale_view),
+            item: Some(ResultItem::Thumbnail(Thumbnail { path: path.clone(), image: None, duration: 0., detail: String::new() })) }).unwrap();
+        assert!(!library.poll());
+        assert!(library.pending.contains(&path) && library.images.is_empty() && library.catalog_pending);
+        library.pending.clear();
+        library.thumbnail_retry.insert(path.clone());
+        sender.send(WorkResult { revision: library.work.current(), thumbnail_view: Some(stale_view), item: None }).unwrap();
+        assert!(library.poll(), "Freed worker slot did not request a visible-page retry");
+        assert!(!library.poll(), "Retry repainted continuously without worker progress");
+    }
+    #[test]
+    fn leaving_library_retries_a_capture_preview_after_cancelled_queue_progress() {
+        let mut library = Library::new();
+        let (tasks, receiver) = mpsc::sync_channel(1);
+        let (progress, results) = mpsc::sync_channel(2);
+        library.tasks = Some(tasks);
+        library.results = Some(results);
+        library.catalog_dirty = false;
+        let obsolete = PathBuf::from("old-library-page.mp4");
+        library.observe_thumbnail_page(std::slice::from_ref(&obsolete));
+        library.request(&obsolete);
+        library.observe_navigation(0);
+        let preview = PathBuf::from("saved-replay-on-capture.mp4");
+        library.request(&preview);
+        assert!(library.thumbnail_page.is_empty() && library.thumbnail_retry.contains(&preview));
+        let old = receiver.try_recv().unwrap();
+        progress.send(WorkResult { revision: old.revision, thumbnail_view: old.thumbnail_view, item: None }).unwrap();
+        assert!(library.poll());
+        library.request(&preview);
+        assert!(library.pending.contains(&preview) && library.thumbnail_retry.is_empty());
+        assert!(matches!(receiver.try_recv().unwrap().task, Task::Thumbnail(path) if path == preview));
+        assert!(!library.poll());
     }
 
     #[test]

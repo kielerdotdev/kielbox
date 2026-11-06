@@ -1,5 +1,561 @@
 # Windows proof results
 
+## Whole-app improvement and actual hardware checks (2026-11-05)
+
+**Current packaged release build, staging and actual Desktop hardware passed.**
+The executable is `dist/windows-reviewed-2026-11-05/rcr.exe`, SHA-256
+`1EEA531A1D2AB8D8151BE1E84C8781A6A04F0E025D413450DC2B01A97698E63D`.
+All four packaged 6/60-second no-audio/system-loopback files passed full decode,
+active content, timing/counts, GPU preview, real PCM and worker-retirement gates.
+The aggregate `.downloads/plan-continuation/release-hardware/desktop-evaluation.json`
+reports `success=true`.
+
+| Packaged release | Stop→UI idle painted | Stop→file observed | Stop→Library ready |
+| --- | ---: | ---: | ---: |
+| 6 s, no audio | 93.6879 ms | 30.9144 ms | 125.1730 ms |
+| 6 s, system | 251.8607 ms | 220.7198 ms | 312.9326 ms |
+| 60 s, no audio | 93.2552 ms | 32.5841 ms | 124.8396 ms |
+| 60 s, system | 93.2172 ms | 60.9981 ms | 156.1196 ms |
+
+The slower six-second system case recorded **203.0252 ms** durable writer
+finalization and 208.1103 ms total finalization. Other writer stages were
+6.98–19.44 ms; the cause of this variation is unknown. These observed timings,
+including the 252 ms maximum UI idle, remain visible rather than being replaced
+by the earlier development numbers. No 30-second delay was reproduced.
+Release clean-working-folder CLI/rendered/native and the final packaged viewer
+sweep all passed. The [hash-bound final acceptance JSON](../.downloads/plan-continuation/release-acceptance.json)
+records `all_local_review_gates_passed=true`. Post-runtime integrity verification
+passed all 22 payloads; source diff checks passed. This local review wave is
+complete, with the clean-machine, loaded-game and remaining-roadmap limits below.
+
+Final release viewer evidence is
+`.downloads/plan-continuation/viewer-release/20261105-191613-94ff28a1/summary.json`:
+**six runs, 80 unchanged budget checks, zero failures**, plus layout,
+capture-menu and editor-keyboard proofs. Cold-open-to-first-paint samples were
+**706.4409–814.4757 ms**; 100 rapid switches ending on the correct first paint
+took **61.8378–92.1208 ms**. These are generated-media/hidden-native-window
+measurements on the exact package, not a live-game benchmark or physical scanout.
+
+Affected primary suites passed **446 tests**, with **19 ignored** in their default
+runs; the screenshot example pixel test passed separately and packaging passed
+34 assertions. This is not a fresh full-workspace test claim. The native and
+hardware reports explain which additional opt-in proofs actually ran.
+
+The [product plan](PRODUCT_IMPROVEMENT_PLAN_2026-11-05.md) records research,
+priorities, acceptance criteria and execution status across the application.
+The [editor audit](EDITOR_AUDIT_2026-11-05.md) and
+[screenshot audit](SCREENSHOT_RELIABILITY_AUDIT_2026-11-05.md) explain the fixes.
+
+Implemented reliability work includes atomic screenshot replacement, late capture
+cancellation, bounded composite allocation, invalid-mask rejection, obsolete
+thumbnail cancellation/retry, late export receipts, keyboard seeking, diagnostic
+writer panic recovery and bounded logs. Repeated 50,000-entry date queries at the
+earlier cache checkpoint measured **746 ms to 2.45 ms**. Its 588–673 ms cold-query
+cost motivated the now-implemented E3 worker; those old numbers do not describe
+current UI admission or complete painted frame latency.
+
+Earlier central checkpoint: **763 passed**, comprising Desktop 228, recorder 44, screenshot
+4, toolkit 48, toolkit services 87 and workflows 352. Eleven tests were ignored.
+Desktop/recorder all-target primary-package Clippy passed with `--no-deps -D warnings`.
+All **18 viewer runs and 80 responsiveness targets passed**, with both layout
+snapshots, capture-menu workflow and editor keyboard proof. The preserved report
+is `.downloads/capture-ux-evaluations/20261105-083123-feaf5a2a/summary.json`.
+
+Earlier development hardware is **verified for its tested 6/60-second profile**:
+RTX 5070 / NVIDIA driver 610.88, 2560×1440 at 60 FPS AV1. After the user unlocked
+and explicitly resumed evaluation, 12 worker cases and four production Desktop
+cases produced **20 independently validated clips**. All required changing,
+nonblack content, actual desktop updates, full decoding, exact frame/metadata
+counts, monotonic timestamps and real loopback packets in system cases.
+
+Worker Stop→return was **48–139 ms** across no-audio/system continuous,
+replay-on-Stop and near-Stop replay cases. Production Desktop Stop→UI idle was
+**31–62 ms**, with refreshed Library ready in **93–94 ms** and real GPU preview
+submissions at 6 and 60 seconds. Both full recording and requested replay were
+preserved where applicable. Saves finished before pending background handoff was
+needed, so these runs do not establish slow optional microphone-cleanup handoff.
+The 30+ second symptom was not reproduced on these builds/profile.
+
+Accepted reports are in `.downloads/hardware-resume-20261105-181802/` under
+`worker-short`, `worker-long`, `desktop-preview-fixed` and `desktop-long`.
+The Desktop proof binary SHA256 was
+`E6755412BCCD14EF211B0AE4011F1D51C6255FA4E5D8BB384FEFD026C8C9AF86`.
+Earlier LockApp/black-source attempts remain preserved and excluded; preflight
+still rejects locked/unavailable state. No microphone, synthetic OS input,
+agent unlock/wake, external upload or message was used in the resumed tests.
+These are ordinary desktop plus owned-marker recordings, **not loaded CS,
+hour-long, microphone, slow-disk or device-change coverage**. Hidden Desktop
+submission also excludes physical mouse dispatch and monitor scanout. See the
+[full hardware evidence and limits](HARDWARE_STOP_EVALUATION_2026-11-05.md).
+
+The staged development build is `dist/windows-dev/rcr-improved-2026-11-05.exe`,
+SHA256 `4D235E6E74916B916378A9BEF0FCE30851590A05E97749F77CDE70D35D35F87A`,
+matching that earlier viewer evaluation. It needs this checkout and installed
+FFmpeg; optional compatible FFmpeg shared DLLs enable native decoding. It is not
+the artifact for the later integrated changes below.
+
+The source checkpoint passed **Desktop 253 tests / eight ignored,
+editor-core 120 / nine ignored, Windows capture 53 / two ignored, platform 16,
+and screenshot 4**. Strict Desktop all-target Clippy passed after the fullscreen
+restoration fix; the preceding four-package strict check also passed. Actual doctor
+JSON/human/missing-override checks passed. All **eight share layouts passed bounds
+checks and visual inspection**. Measured Installation sections passed at 900 and
+1440 pixels; the 900-pixel view was visually inspected. Preference recovery passed
+eight focused cases and integrated coverage, including the 8 MiB save cap.
+
+Corrected native Library keyboard, import and editor/controller proofs passed in
+**521 / 2331 / 7777 ms**, respectively. Earlier fixture failures remain preserved:
+the key context required a fresh paint and import had not awaited its query.
+The hidden fullscreen proof verifies controller state, key dispatch and
+preservation only, with platform transition suppressed. GPUI deliberately defers
+hidden fullscreen until show; those initial timeout attempts remain preserved
+and are not counted as native passes.
+
+A separate `--smoke-editor-native-fullscreen` evaluation now **passed actual
+owned nonactivating background native geometry/restoration**, with total fixture
+time **8547 ms**. Its shown host uses nonactivating placement and an activation
+observer latch; PID/unique-HWND ownership guards restrict all operations to that
+host. Actual F11 entry took 27 ms, Escape exit/restoration 28 ms, second entry
+29 ms, F11 exit 28 ms, entry before hide 23 ms, and sidebar-hide restoration
+31 ms. Immediate hide during pending entry passed in 309 ms, including a deliberate
+300 ms stability wait. Native RECT, logical bounds, styles, monitor coverage,
+history and volume checks passed; `activation_observed:false`,
+`os_input_sent:false`, `platform_toggle_suppressed:false`.
+
+Evidence: `.downloads/plan-continuation/editor-native-fullscreen-position-fixed.log`.
+The earlier shown-host mismatch was a stale cached logical origin from manual
+show; physical RECT/styles already restored exactly. Explicit nonactivating
+startup movement fixes the baseline without relaxing comparisons. Production
+hide restoration now waits for entry acknowledgment, requests one exit, then
+waits for exit acknowledgment with a bounded deadline, rather than assuming
+10 ms is sufficient. These single-run timings are not a distribution, manual
+foreground fullscreen experience, physical input/scanout coverage, or release
+acceptance. The host may remain occluded behind other applications.
+
+Fresh-dependency optimized release compilation, normal SDK-discovering staging
+and the four packaged Desktop hardware cases now passed with their own evidence.
+Release clean-working-folder CLI/rendered/native acceptance and the final viewer
+sweep also passed with their own receipts. The validated hash-bound acceptance
+JSON above closes this local review wave. Source/debug results do not replace
+these release proofs.
+
+The exact package ran from `.downloads/plan-continuation/release clean work`
+(spaces included). Direct `--diagnose` reported the release profile and exact
+working/executable paths, creating zero files during diagnosis. Packaged
+`Diagnose-rcr.ps1` returned JSON/exit zero and `Start-rcr.ps1 -ValidateOnly`
+preserved exact paths. The 900-pixel packaged share view passed bounds/native
+render and visual inspection. Actual packaged owned nonactivating native
+fullscreen passed strict RECT/styles/logical/monitor/history/volume checks:
+**11,263 ms for the entire keyboard fixture**, entry/escape/second-entry/F11-exit
+29/25/27/32 ms, sidebar-hide restoration 56 ms and pending-entry hide 306 ms
+(including 300 ms stability wait), with no activation or OS input.
+Evidence: `.downloads/plan-continuation/release-clean-doctor.json`,
+`release-clean-doctor-launcher.json`, `release-clean-share-900.png` and
+`release-clean-native-fullscreen.log`.
+
+This is the same PC with installed dependencies including FFmpeg, not a pristine
+machine, exhaustive DPI/monitor testing, manual foreground experience, loaded CS
+or microphone proof. Final packaged viewer checks passed at the exact summary
+linked above, using the same artifact hash.
+
+Actual current screenshot capture also passed on two Windows displays at
+5120×1440: **124.7371 ms median**, **286.6926 ms initial capture**, detection
+46.8650 ms and explicit enumeration 1.5641 ms. Separate full-image analysis cost
+137.73–143.26 ms is excluded from capture timing. All five frames had nonzero
+variance and nonblack content; no PNG or other image was persisted. This measures
+the current capture path, not overlay/editor/clipboard latency or a before/after
+speedup. See [the exact screenshot report](ACTUAL_SCREENSHOT_EVALUATION_2026-11-05.md).
+
+## Later implementation milestones and current gates (2026-11-05)
+
+These are scoped source/debug receipts supplemented by release hardware and
+clean-working-folder checks above. Final packaged viewer/receipt acceptance passed. Hidden fullscreen coverage remains controller-only; a separate owned
+shown-but-nonactivating proof establishes background native geometry/restoration.
+
+| Milestone | Completed behavior and focused evidence | Remaining boundary |
+| --- | --- | --- |
+| E3 cold Library work | Dedicated cancellable query worker, one replaceable pending input/result and generation-checked views. At 50k entries, date/name-search request admission 4.128/9.746 ms, background completion 607.194/402.166 ms, repeated cached-query medians 1.991/1.486 ms. Corrected native Library/import proofs passed. | Query/admission timings exclude complete painted-frame latency. No stale cards/watch queue while pending. Log: `.downloads/plan-continuation/library-background-benchmark.log`. |
+| D1 preferences | Exact synced unique recovery copy precedes defaults saving. Unreadable/oversized settings or backup failure block all saves; missing new-install files remain distinct. Eight recovery tests, integrated checks and 8 MiB save cap passed; measured Installation sections passed at both sizes. | No general disk-full/offline-drive recovery guarantee or implicit data migration. |
+| D2 cache provenance | Managed `seek-v3-managed` namespace, ownership sentinel, claimed partial/completed outputs and conservative eviction preserve unrelated, legacy and modified files while retaining existing budgets/leases. Core 120-test checkpoint and five native reference checks passed. | Symlink fixture unavailable with Windows privilege 1314; no link-branch coverage claim or legacy-cache migration. [Audit](SEEK_PROXY_CACHE_AUDIT_2026-11-05.md). |
+| Q1 export trust | Final cancellation/source-identity guards plus no-clobber publication preserve originals and competing destinations. Focused unity-speed audio reference passed full, trim/gain, mute and solo exactly; fade maximum sample error 2.98e-8. Actual generated one-second H.264 NVENC/AAC output fully decoded 60 frames with SSIM 0.987799 versus the lossless graph; source/project and prior output unchanged. | Focused logs: `.downloads/plan-continuation/export-fidelity-after.log` and `h264-export-proof.log`. Not exhaustive effect, speed, format or messaging-service compatibility. |
+| A1 default audio | Native default-system-only bounded reopen, original QPC timeline/overlap trimming and explicit notices. Injected failure/ownership tests; fresh current-build six-second actual baseline passed in 50.34 ms with all 361 frames decoded, 600 loopback packets and changing content, no errors. | Actual physical default switch/unplug deliberately not performed; explicit/mic/process routes never substitute sources. Retry scheduling is bounded; synchronous Windows driver calls are not promised a hard timeout. [Report](AUDIO_DEVICE_RECOVERY_2026-11-05.md). |
+| P1 diagnosis/staging | Source doctor checks, optimized build/SDK discovery, fresh 22-payload package and 34 fixture assertions passed. Actual packaged hardware, separate-folder diagnosis/launcher/render/native checks, final six viewer runs/80 budgets and post-runtime package verification passed; acceptance JSON is hash-bound. | Same PC with installed FFmpeg; not clean-machine/exhaustive-DPI/loaded-game/microphone proof. Full transitive-license audit/exact corresponding source required before external distribution; no FFmpeg runtime bundled. [Report](WINDOWS_PACKAGING_2026-11-05.md). |
+| U2 local sharing | Clip show filename/size, bounded Full-HD H.264/AAC preparation and source-labeled Copy/Show receipt preserve edits/history and avoid automatic clipboard/network output. Source suite, all eight layouts, actual H.264 fidelity, and separate owned nonactivating native fullscreen entry/exit/hide restoration passed. | No actual clipboard transfer or manual foreground fullscreen experience in these proofs. Hidden controller coverage remains distinct; release acceptance is pending. [Audit](WATCH_SHARE_AUDIT_2026-11-05.md). |
+
+The A1 baseline is separate from the earlier hardware matrix at
+`.downloads/audio-recovery-baseline-20261105-185525/worker/hardware-evaluation.json`
+(`success=true`). It validates normal watcher/current-endpoint capture, not an
+actual device change. The 34 packaging checks use tiny fake executables and never
+launch them; they do not establish portability of a compiled release.
+
+## Repeatable performance evaluation (2026-11-04)
+
+`scripts/evaluate-capture-ux.ps1` runs generated-media checks in hidden, isolated
+profiles and writes JSON metrics, logs and native render snapshots. It forces
+software playback/seeking during evaluation. `-IncludeAudio` adds AAC and two-track
+PCM fixtures using a silent output sink, checking PCM readiness and an advancing
+audio clock separately from the first picture. No desktop/audio-device capture,
+audible playback, OS input, clipboard output or messages are required.
+
+```powershell
+pwsh -NoProfile -File scripts/evaluate-capture-ux.ps1 -Build -Runs 3 -IncludeAudio -EnforceViewerBudgets
+python scripts/summarize-capture-ux.py <before-summary.json> <after-summary.json>
+```
+
+The preserved pre-optimization executable and the optimized viewer were evaluated
+with the same generated 640×360, 30 FPS H.264 source, 60 FPS project timeline,
+software seeking, fresh profiles and three runs at each of 900×600 and 1440×900.
+These are medians across the six runs, ending at a successful hidden GPUI paint:
+
+| Operation | Before | After |
+| --- | ---: | ---: |
+| Cold clip open | 1,502 ms | 763 ms |
+| Switch to an already opened clip | 813 ms | 62 ms |
+| First exact seek | 747 ms | 31 ms |
+| 100 rapid switches, ending on the correct source | 821 ms | 62 ms |
+| Automatic next, including the quarter-second tail | 1,765 ms | 436 ms |
+
+The viewer uses a persistent native software decoder for supported simple clips,
+skips the editor's playback debounce and never starts full-file seek-proxy
+transcoding. Cached metadata is bounded to 64 entries/4 MiB and invalidated by
+source stamps and the selected probe tool. The original executable is retained
+under `.downloads/autonomous-eval/`; comparable reports are
+`.downloads/capture-ux-evaluations/20261104-192909-59917f0c/summary.json` and
+`.downloads/capture-ux-evaluations/20261104-194101-0e58cdc9/summary.json`.
+All 20 viewport/operation median targets passed for the latter report. Compatible
+FFmpeg 7.0.2 DLLs are required for the native path; unsupported media/runtime
+combinations retain external FFmpeg and its startup cost.
+
+Synthetic screenshot measurements from the same pass:
+
+- Noisy 1280×720 lossless PNG encoding: **385 ms → 34 ms**, with identical decoded
+  pixels. File size grew from 3,166,106 to 3,687,468 bytes. A flat desktop fixture
+  changed from 44 ms/5,524 bytes to 12 ms/57,642 bytes.
+- Development-build 4K picker pixel preparation: **470 ms on the UI thread →
+  21 ms on a background worker**, plus an approximately 0.0003 ms handle handoff.
+  This excludes native capture, window creation, GPU upload and scanout. Release
+  builds already optimize the old scalar loop, so this is not a release speedup
+  claim.
+- Borrowed 4K PNG encoding avoids a **33,177,600-byte** pixel allocation/copy and
+  produced byte-identical PNGs. HDR table caching helped small fixtures, but the
+  4K measurement was effectively unchanged; no general HDR speedup is claimed.
+
+Generated screencast finalization remained about **25 ms without audio** and
+**0.7 seconds with audio** across 1/10/60-second clips. AAC now encodes during
+capture; the conservative old 60-second AAC/remux phase alone took about
+1.28 seconds. Every output fully decoded, every generated video frame counter
+matched, and all owned children were reaped. These measure encoder finalization,
+not the complete UI Stop action or live GPU capture. CPU-only native Matroska
+finalization measured roughly 4–27 ms for the tested packet/PCM fixtures.
+
+Audio evaluation also exposed a real terminal-clock bug: 12,800 samples at 48 kHz
+truncate to 266,666,666 ns, which floors to 15 rather than 16 frames at 60 FPS.
+Playback now reaches the exact end only after the sink confirms all samples have
+played. The regression and complete AAC/two-track PCM viewer evaluations passed,
+including automatic next and queue-end stopping. Audio readiness is recorded
+explicitly so a fast first picture cannot conceal decoder startup latency.
+
+Supported full-source AAC and stereo PCM now use the matching FFmpeg 7.0.2
+native audio decoder and the complete existing preview filter graph, including
+both limiters. Warm audio-clock startup measured approximately **62 ms**, versus
+**730–747 ms** with subprocess decoding. Full-source AAC, two PCM tracks and
+high-amplitude limiter fixtures matched the external reference sample for sample;
+delayed AAC differed by at most 1.2e-10. Nonzero trims/seeks, ambiguous container
+origins and unsupported formats keep the external decoder. These compatibility
+boundaries are deliberate; native startup figures do not apply to every edit.
+Midstream timestamp discontinuities beyond container rounding tolerance are
+rejected. If PCM has already been published, playback reports the failure rather
+than restarting externally and duplicating audio; pre-publication rejection can
+use the existing fallback.
+
+A repeated mixed-audio recording test exposed a separate ordering bug: when
+the first video timestamp became available, newly read audio could precede older
+buffered audio. False drift resynchronizations then dropped samples. Both polling
+and stop now flush pending audio first. A deterministic regression failed before
+the fix (96,804 versus 96,000 samples) and now verifies the complete waveform
+bit for bit, including stop racing publication of the first video timestamp.
+Failure artifacts retain the clip, decoded PCM, spectral measurements and
+late-sample/resynchronization counters; quality thresholds remain unchanged.
+
+Final regression checks after the FIFO fix: Desktop **220 passed, seven ignored**;
+editor core **112 passed, seven ignored**; recording tools with audio **107 passed,
+one ignored**. The mixed-audio dimensions/FPS/duration matrix also passed three
+additional runs. Primary-package Clippy passed with `--no-deps -D warnings` for
+Desktop/Windows recorder (all targets) and editor core/recording tools (libraries,
+no default features, audio enabled). Dependency-only Rust 1.99 style warnings are
+outside that Clippy scope.
+
+The final three-run, three-format evaluation at both window sizes is preserved at
+`.downloads/capture-ux-evaluations/20261104-204102-c6db03f9/summary.json`.
+All **18 viewer runs and 80 responsiveness targets passed**, plus both native
+layout renders, capture-menu workflow, keyboard proof and pixel/recording
+benchmarks. The added natural quarter-second start-at-zero clip advanced to the
+next clip through native audio on both sides, without a seek or external decoder.
+Its median completion times were 343–359 ms for audio fixtures. Warm AAC audio
+clock startup was 62–63 ms; two-track PCM was 62–78 ms across viewports. The final
+noisy PNG repeat measured 337 ms versus 30 ms with identical decoded pixels.
+
+The separately staged development executable is `dist/windows-dev/rcr-evaluated.exe`,
+SHA256 `104FE5185FA7E625912E841D73212C6D3987F6B61EC9AC5DE6458CEF3DC11004`,
+matching the report. It requires this checkout's assets and installed FFmpeg;
+compatible shared DLLs enable native decoding. No visible app was launched and
+no real game/audio capture or physical audio playback was used for this pass.
+
+## Recording stop, screenshot latency and Clip show (2026-11-04)
+
+Recording stop now transfers unfinished replay saves to Desktop ownership after
+capture drain and recording publication. Requested saves retain completion/error
+reporting across capture sessions; quit cancels and joins them. CLI saves retain
+synchronous ownership. NVENC final packet and EOS waits share one five-second
+budget, and a failed completion is not retried during destructor cleanup.
+Encoder, audio, writer and replay finalization have separate diagnostic timings.
+
+Frozen screenshot handoff skips the extra capture delay. Monitor capture batches
+Windows display discovery, reuses the picker's existing backend for enumeration,
+and avoids a full-frame composite copy on single-display desktops. HDR kernels
+are optimized in development builds.
+
+Clip show enlarges playback, skips editor timeline/waveform/thumbnail work and
+plays Library videos in the current filter/search/sort order across pages. Library
+opens videos directly for watching and has a separate Edit control; the player has side navigation and a lightweight seek
+bar. Previous/Next, Space and Escape support
+window sharing in a voice/chat app. It uses existing saved edits and stops at queue
+boundaries or playback failures. This is local viewing, without synchronized
+remote playback.
+
+- Desktop tests: **217 passed, five ignored**. Recorder library: **44 passed,
+  two ignored**, including replay handoff, late success/failure, cancellation and
+  shared NVENC timeout-budget regressions.
+- Media core: **12 passed**. Platform: **13 passed**. Screenshot core: **three
+  passed**. Windows screenshot library/integration: **81 passed, 11 ignored**.
+  Toolkit library/integration: **54 passed**, including frozen-frame delay and
+  exact-pixel handoff regressions.
+- Native hidden Clip show snapshots passed at **900×600 and 1440×900**, including
+  header bounds, preview size and scrubber placement; both renders were visually
+  inspected. The native keyboard/pointer proof passed clip navigation, accidental
+  edit blocking, paused/playing seek drags, play-state restoration and unchanged
+  edit history. It also verified the full 80-video queue while the actual editor
+  dropdown rendered only 64 choices plus Browse.
+- Strict all-target desktop/recorder Clippy and screenshot/platform library
+  Clippy passed. The development executable is staged as
+  `dist/windows-dev/rcr-performance-ux.exe`; debug GPUI shaders require this checkout.
+- Rendered PNGs, synthetic media and desktop/toolkit test logs are under
+  `.downloads/performance-ux-proof/`. No desktop/audio-device capture, OS input,
+  clipboard output, messaging or Computer Use was used for these proofs.
+- Tests use workspace-local `TEMP`/`TMP`: the restricted system-temp location
+  rejected file publication in unrelated preference/trash tests as well as the
+  recording tests. All desktop tests passed with the writable fixture directory.
+
+These synthetic and lifecycle checks do not establish real gameplay stop times,
+physical screenshot latency, or a general comparison with Medal. Disk operations
+already underway can still delay final publication or application shutdown.
+
+## Capture toolbar alignment (2026-11-01)
+
+The toolbar's generic text buttons were creating an empty text child before each
+icon. Their text padding and child gaps shifted icon/shutter centers and pushed
+target captions against the tile bottoms. Dedicated controls now contain only
+their intended children. Target captions have a common line height; the action
+row uses the same three equal columns as the targets. Audio controls have equal
+widths, icon-first labels and aligned outer edges. Photo/video footers reserve the
+same height so switching modes does not move the shutter.
+
+The hidden native proof now checks real rendered geometry in both modes at
+900×600, 1100×680 and 1440×900, plus expanded video options: target icon/caption
+centers and padding, caption baselines, matching target/action column centers,
+shutter disk centering, icon-button centers, equal spacing and audio alignment.
+It also checks the shutter stays in place when changing modes. The tolerance is
+1.1 logical pixels for native pixel rounding. These checks and the existing full
+capture/record/save/discard workflow proof passed without Computer Use or device
+capture. Desktop all-target Clippy with `--no-deps -- -D warnings` passed.
+
+Final rendered PNGs were visually inspected under `.downloads/capture-alignment-final/`.
+The development build is `dist/windows-dev/rcr-capture-aligned.exe`, SHA-256
+`085629AF3A6DE18F56A1C154AB0DC5617428497DA448CCD555CDAC18DCF49F65`.
+Its debug GPUI shaders still require this checkout.
+
+## Desktop capture overlay replacing the in-page card (2026-11-01)
+
+The screenshot page now launches capture rather than imitating a desktop picker
+inside the app. New capture, the tray region command and Ctrl+PrintScreen open a
+frozen desktop with adjustable selection handles and a bottom toolbar. Record video
+and Ctrl+Shift+PrintScreen open the same overlay in video mode. Screen/window
+selection happens on the displayed desktop; the photo/video switch stays in that
+toolbar. The former in-page card and its escaping instruction label are removed.
+
+Area/screen screenshots pass the actual frozen crop and physical origin to the
+workflow. Its editor opens with the area already selected. Window screenshots use
+the selected native window ID, so occluding desktop windows are not baked into
+the result. Screencasts still have their own WGC/FFmpeg worker and replay isolation.
+
+- Desktop suite: **214 passed, five ignored**. Toolkit: **47 passed**, including a
+  new test that hands off exact frozen pixels at a negative desktop origin, opens
+  the existing selection without live capture/output services and preserves saved
+  preferences. Strict all-target desktop/toolkit Clippy passed.
+- `--smoke-capture-menu` now instantiates the actual **Studio** root, not an isolated
+  toolkit widget. Studio and the shared desktop picker passed at **1440×900,
+  1100×680 and 900×600**, with both photo/video render snapshots. The fixture checks
+  exact frozen pixels, monitor/native-window routing, 2× negative-origin move/resize,
+  explicit shutter confirmation, cross-display video rejection, countdown cancel,
+  generated audio/FPS recording, pause/resume, simultaneous screenshots, save/discard,
+  keyboard handling and six open/close cycles without leaked windows.
+- Native hidden popups were found to report a transient 1×1 viewport. The fixture
+  hosts the same overlay view in an ordinary hidden resizable window; production
+  retains a popup explicitly positioned in physical desktop pixels. Fixture probes
+  read real child-layout bounds. This does not prove live popup placement, physical
+  shortcut delivery or actual desktop/device behavior.
+- The existing hidden toolkit regression passed all **25 stages**. Final PNGs and
+  generated media are under `.downloads/desktop-overlay-final/`; both the full
+  Studio screen and overlay were visually inspected. No Computer Use, desktop or
+  audio-device capture, clipboard output or messaging occurred during this pass.
+
+The build is staged as `dist/windows-dev/rcr-desktop-picker.exe`, SHA-256
+`5DD088D6F8DD39BA6A08D452FE17A907F29D5FD9C7913437DDD2222151C72D6E`.
+It remains a development build whose GPUI shaders require this checkout. A full
+drive interrupted linking; superseded generated test executables/symbols and the
+incomplete linker PDB were removed before a successful rebuild. Recordings and
+project data were preserved. Live gameplay and Discord/Slack paste remain unverified.
+
+## GNOME-inspired capture controls (2026-11-01)
+
+The capture home now uses one 520-pixel-wide Screenshot/Video panel, visual
+Selection/Screen/Window targets and a round white/red shutter. Pointer and sound
+controls stay together; FPS/countdown and target refresh are under More. Video
+selection now supports moving, eight resize handles, arrow-key adjustment and
+explicit confirmation. A drag release alone does not start recording. The tray
+shows an active screencast in red even when game replay is off.
+
+- Desktop: **214 passed, five existing/helper/opt-in tests ignored**. Toolkit:
+  **46 passed**. Strict desktop/toolkit all-target Clippy passed with
+  `--no-deps -- -D warnings`. The existing hidden toolkit fixture passed 25 stages.
+- Hidden `--smoke-capture-menu` passed Screenshot and Video at **900×600,
+  1100×680 and 1440×900**, with actual viewport checks and rendered PNGs.
+  It verifies still target/cursor routing, hidden advanced settings, source and
+  option selection, countdown cancellation, generated H.264/AAC recording,
+  pause/resume, mode retention, save/discard, 30 mode cycles and S/C/W/V/P/Escape.
+- A generated-image native picker fixture verifies that drag release sends no
+  result, then moves and resizes the selection, confirms through the painted red
+  shutter and checks the exact physical rectangle at 2× scale with a negative
+  desktop origin. A second run confirms Escape returns cancellation. No desktop
+  input, screen capture, audio devices, Computer Use or messaging is involved.
+- Rendered panels and the selection fixture were visually inspected under
+  `.downloads/capture-gnome-final-v2/`. Screenshots use the selected window/monitor
+  ID and per-job pointer option; normal workflow preferences are preserved.
+
+The current running `dist/windows-dev/rcr.exe` was locked, so the updated build is
+staged alongside it as `dist/windows-dev/rcr-capture-ui.exe`, SHA-256
+`96932713F7E04CA6E50160270EF250DC43DE945CA7EDA86745A3368B969C767C`.
+Debug GPUI shaders still require this checkout. A compiler allocation failure
+occurred with C: nearly full; removing superseded owned test executables/symbols
+freed about 1.9 GB, and the build passed on retry. User data was not removed.
+This pass does not establish live gameplay performance or actual Discord/Slack paste.
+
+Design reference: [GNOME screenshots and screencasts](https://help.gnome.org/gnome-help/screen-shot-record.html).
+
+## Shared screenshot/record menu and deeper failure QA (2026-11-01)
+
+Quick screencasting now lives in **Tools → Screenshots → Record**. The shortcut
+and tray navigate to that same menu. Switching capture modes preserves a running
+screencast, while the game recorder/replay worker remains independent.
+
+- Complete desktop suite: **213 passed, five ignored**. One ignored entry is an
+  owned child-process helper invoked by the passing blocked-stdin test; another
+  is the optional NVENC proof below, which was run explicitly and passed.
+- The new real-worker tests cover terminal-event retirement races, injected startup
+  panic, stop/cancel while startup is blocked, repeated pause/resume with mixed
+  generated audio, Unicode output paths, video-source loss, one failed audio
+  source, observer closure with a full progress queue, concurrent session ownership
+  and a blocked encoder stdin killed/reaped by the write watchdog.
+- Hidden `--smoke-capture-menu` passed at verified **900×600 and 1100×680** native
+  viewports. It dispatches internal GPUI events to painted controls, checks target
+  and audio/cursor/FPS options, countdown cancellation, generated recording,
+  pause/resume, mode-switch retention, stop/save, discard, 30 switch cycles and
+  Escape. Exactly one hidden host window remains. Rendered PNGs and a generated
+  clip are under `.downloads/capture-menu-integrated/`.
+- The existing hidden toolkit regression passed all **25 stages**, including
+  workflows, screenshot overlays, annotation properties, editing and resource
+  release. Desktop all-target Clippy with `--no-deps -- -D warnings` passed.
+- Replay/media-core regression tests: **12 passed**. Windows recorder library:
+  **39 passed, two existing opt-in tests ignored**.
+- The explicit NVENC test encoded a generated AV1 GOP, fed repeated GOPs through
+  the real replay ring for six virtual minutes, saved a **300-second / 9,000-frame**
+  native Matroska replay and fully decoded it with FFmpeg. An independent generated
+  H.264/AAC screencast ran concurrently and also decoded fully; stopping it left
+  the retained replay ring unchanged. Repeat with:
+  `cargo test -p rcr-desktop --offline five_minute_av1_replay_muxes_and_decodes_while_an_independent_screencast_runs -- --ignored --nocapture`.
+
+These tests exposed and fixed a race that could discard a terminal Saved event
+behind Finishing, and a missing warning when source loss saved a playable prefix.
+Startup panics now report a visible failure. This pass used no Computer Use,
+desktop capture, physical input, physical audio or messaging. The five-minute proof
+validates encoded media, retention, muxing and decode with generated inputs; it is
+not a five-minute live gameplay/performance test. Live region selection, global
+shortcut delivery, device recovery and actual Discord/Slack paste remain unverified.
+The development build was staged to `dist/windows-dev/rcr.exe`, SHA-256
+`0EFB44E4A02F9DC07B59FE636CF1771911D71959AC4FEA448FE91D60D9137162`.
+Debug GPUI shaders still require the source checkout.
+
+## Expanded replacement QA (2026-11-01)
+
+The unattended pass completed 1,269 distinct automated tests: 204 desktop tests,
+714 media/capture/workflow/image/upload library tests, 145 additional image/uploader
+integration tests, 103 editor-core tests and 103 recording-tools tests. Twelve
+existing opt-in hardware/performance tests remained ignored. Repeated library
+executions in the integration run are excluded from this total.
+
+The quick-recorder matrix independently probes and decodes H.264/AAC output at
+30/60 FPS, including odd input dimensions, silent video and one/two generated audio
+sources. It checks sample coverage and the presence of both mixed tones. Separate
+checks verify cancellation preserves unrelated files and encoder timeout kills and
+reaps its own child. Annotation goldens, uploader templates, ShareX `.sxcu` fixtures,
+OAuth, streaming and upload cancellation run against generated data/local servers.
+
+Two replay defects were reproduced and corrected: the fixed 512 MiB default could
+not cover five minutes at supported bitrates, and whole-GOP time pruning could
+discard the keyframe needed to cover the full requested interval. Automatic bounded
+capacity now includes bitrate headroom, PCM sources and a preceding GOP; explicit
+caller ceilings are preserved. A real-ring simulation feeds six virtual minutes
+at every 15/25/50 Mbps × zero/one/two-source combination, checking byte bounds and
+five-minute coverage after warmup. This is not a live five-minute recording proof.
+
+All-target Clippy with `--no-deps -- -D warnings` passed for desktop, media-core and
+Windows capture. A fresh desktop build succeeded. Detailed logs are local under
+`.downloads/replacement-qa/`. The initial broad build/upload fixture encountered a
+full C: drive; affected suites passed on rerun after QA compiler-output cleanup.
+
+Computer Use reached the isolated real app, then the user stopped it with the
+physical Escape key. No further desktop input or messaging was performed. Live
+region/screen selection, shortcut delivery, Discord/Slack draft paste, physical
+microphone/loopback, simultaneous live recording, actual gameplay overhead, sleep/
+wake and device recovery remain unverified by this pass. Slack was absent from the
+installed app inventory; no account login was attempted. Temporary UI instances
+were stopped, and existing user settings/data were kept outside the QA profile.
+
+## Independent quick recorder (2026-11-01)
+
+- Desktop suite: 201 passed, three existing ignored tests. Recording-tools library with
+  `--no-default-features --features audio`: 103 passed, one existing ignored test.
+- Desktop all-target Clippy with `--no-deps -- -D warnings` passed. The broader dependency
+  lint pass encounters existing `chunks_exact_to_as_chunks` warnings in image-types.
+- A synthetic one-second video/tone session produced H.264/AAC MP4 and independently
+  decoded all streams with FFmpeg. It captures no desktop or physical audio devices.
+- Native `--smoke-quick-recorder` opened/reopened the actual controller, recorded an owned
+  animated GPUI window, paused/resumed/stopped, published MP4, released its worker and
+  exited cleanly. Final run reported 72 encoded frames. FFprobe and full FFmpeg decode
+  independently inspect the saved output under `.downloads/quick-recorder-exit/`.
+- The controller's owned 600×570 render was inspected: target choices, audio/cursor/countdown,
+  frame rate and Start fit without clipping. Existing six-shortcut preferences migrate
+  without losing custom bindings; conflicts disable the added default binding.
+
+Native testing exposed and fixed reading WGC ContentSize after closing its frame. WGC
+availability now initializes WinRT before querying support. The controller defers initial
+window creation until its entity update returns, avoiding reentrant GPUI layout.
+
+These proofs do not establish physical microphone/loopback quality, simultaneous game
+performance, real Discord/Slack clipboard interoperability, display recovery or five-minute
+game replay retention. The independent game recorder's 512 MiB replay budget was
+unchanged at that initial checkpoint; the expanded QA above subsequently corrected it.
+
 Development machine: Windows, NVIDIA GeForce RTX 5070, NVIDIA driver 610.88. Tests use the 2560×1440/60 FPS/25 Mbit/s SDR AV1 profile. These are short local desktop tests, not a game performance benchmark.
 
 For the current capture/Library/editor/tray rationale and official product screenshot references, see [UX research and implementation](UX.md). Dated results below apply to the builds and fixtures named in each entry; they do not automatically validate later source changes.

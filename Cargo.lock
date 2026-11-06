@@ -6996,6 +6996,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcr-clean"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ctrlc",
+ "filetime",
+ "rcr-disk",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rcr-cli"
 version = "0.1.0"
 dependencies = [
@@ -7037,6 +7049,10 @@ dependencies = [
  "raw-window-handle",
  "rcr-editor-core",
  "rcr-media-core",
+ "rcr-media-io",
+ "rcr-recording-tools",
+ "rcr-screenshot",
+ "rcr-screenshot-windows",
  "rcr-toolkit",
  "rcr-windows",
  "serde",
@@ -7045,6 +7061,16 @@ dependencies = [
  "tempfile",
  "tray-icon",
  "unicode-segmentation",
+ "windows 0.61.3",
+]
+
+[[package]]
+name = "rcr-disk"
+version = "0.1.0"
+dependencies = [
+ "filetime",
+ "rcr-workflows",
+ "tempfile",
  "windows 0.61.3",
 ]
 
@@ -7422,6 +7448,7 @@ dependencies = [
  "image",
  "md-5",
  "rayon",
+ "rcr-disk",
  "rcr-hdr",
  "rcr-image-editor",
  "rcr-image-effects",

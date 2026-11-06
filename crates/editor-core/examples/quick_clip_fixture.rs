@@ -104,6 +104,7 @@ fn main() -> Result<()> {
                 end: None,
                 audio: AudioExport::Mix,
                 bitrate: 5_000_000,
+                video_codec: ExportVideoCodec::Av1,
             },
             &JobProgress::default(),
         )?;

@@ -11,6 +11,13 @@ pub struct EditorKeyboardSmoke {
     verifying: Option<mpsc::Receiver<Result<(), String>>>,
     fixture: Option<Fixture>,
     saved_project: Option<serde_json::Value>,
+    fullscreen: super::watch_fullscreen::Proof,
+    native_fullscreen: Option<super::watch_fullscreen::native::Proof>,
+}
+impl EditorKeyboardSmoke {
+    pub fn native_fullscreen() -> Self {
+        Self { native_fullscreen: Some(Default::default()), ..Default::default() }
+    }
 }
 
 fn key(window: &mut Window, cx: &mut App, name: &str, control: bool, shift: bool) {
@@ -57,7 +64,7 @@ fn tab_stops(window: &mut Window, cx: &mut App) -> anyhow::Result<Vec<FocusHandl
     anyhow::bail!("Editor tab traversal exceeded 128 controls")
 }
 
-fn history_signature(editor: &mut Editor) -> anyhow::Result<serde_json::Value> {
+pub(super) fn history_signature(editor: &mut Editor) -> anyhow::Result<serde_json::Value> {
     // Core history traversal has no autosave/preview side effects. Restore both
     // stacks before serializing, including the redo branch left by append Undo.
     let current = editor.project.clone();
@@ -298,6 +305,84 @@ fn diagnostic_keyboard(
     Ok(())
 }
 
+fn clip_show_keyboard(view: &Entity<EditorView>, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
+    let before = view.update(cx, |editor, _| history_signature(&mut editor.model))?;
+    let (choices, generation) = view.update(cx, |editor, _| {
+        let current = editor.recording.clone().expect("keyboard fixture recording");
+        let choices = std::mem::replace(&mut editor.library_choices, vec![(current, editor.title.clone())]);
+        editor.focus.focus(window);
+        (choices, editor.generation.load(Ordering::Relaxed))
+    });
+    key(window, cx, "enter", true, false);
+    ensure!(view.read(cx).clip_show, "Ctrl+Enter did not enter Clip show");
+    if view.read(cx).playing { key(window, cx, "space", false, false); }
+    ensure!(!view.read(cx).playing, "Clip show Space did not pause playback");
+    for (name, control) in [("s", false), ("delete", false), ("z", true), ("left", false), ("right", false)] {
+        key(window, cx, name, control, false);
+    }
+    let after = view.update(cx, |editor, _| history_signature(&mut editor.model))?;
+    ensure!(before == after, "Watching shortcuts changed project or Undo/Redo history");
+    ensure!(view.read(cx).generation.load(Ordering::Relaxed) == generation,
+        "Clip show wrapped past the end of its Library queue");
+    let seek_bounds = view.read(cx).clip_show_seek_bounds.get().context("Clip show seek bar was not painted")?;
+    let from = point(seek_bounds.left() + seek_bounds.size.width * 0.25, seek_bounds.center().y);
+    let to = point(seek_bounds.left() + seek_bounds.size.width * 0.75, seek_bounds.center().y);
+    for resume in [false, true] {
+        if resume { key(window, cx, "space", false, false); }
+        window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: from, pressed_button: None, modifiers: Default::default() }), cx);
+        window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { position: from, button: MouseButton::Left, click_count: 1, first_mouse: false, modifiers: Default::default() }), cx);
+        ensure!(view.read(cx).scrubbing && !view.read(cx).playing, "Clip show seek did not pause for dragging");
+        window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: to, pressed_button: Some(MouseButton::Left), modifiers: Default::default() }), cx);
+        ensure!(view.read(cx).playhead == clip_show_seek_target(0.75, view.read(cx).model.project.duration()),
+            "Clip show drag did not seek across the full recording");
+        window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { position: to, button: MouseButton::Left, click_count: 1, modifiers: Default::default() }), cx);
+        ensure!(!view.read(cx).scrubbing, "Clip show release left dragging active");
+        ensure!(view.read(cx).preview_due.is_some_and(|(_, play)| play) == resume,
+            "Clip show seek did not preserve the prior play/pause state");
+        if resume { view.update(cx, |editor, _| editor.pause()); }
+        window.draw(cx).clear();
+    }
+    view.read(cx).clip_show_seek_focus.focus(window);
+    key(window, cx, "home", false, false);
+    ensure!(view.read(cx).playhead == 0, "Focused viewer Home did not seek to start");
+    key(window, cx, "right", false, false);
+    ensure!(view.read(cx).playhead == u64::from(view.read(cx).model.project.fps), "Focused viewer Right did not seek one second");
+    key(window, cx, "left", false, false);
+    ensure!(view.read(cx).playhead == 0 && view.read(cx).generation.load(Ordering::Relaxed) == generation,
+        "Focused viewer Left navigated clips instead of seeking");
+    key(window, cx, "end", false, false);
+    ensure!(view.read(cx).playhead == view.read(cx).model.project.duration().saturating_sub(1), "Focused viewer End did not seek to the final frame");
+    key(window, cx, "space", false, false);
+    ensure!(view.read(cx).playing, "Space on the viewer scrubber did not play");
+    key(window, cx, "space", false, false);
+    ensure!(!view.read(cx).playing, "Space on the viewer scrubber did not pause");
+    let after_seek = view.update(cx, |editor, _| history_signature(&mut editor.model))?;
+    ensure!(before == after_seek, "Clip show seeking changed project or edit history");
+    key(window, cx, "escape", false, false);
+    ensure!(!view.read(cx).clip_show, "Escape did not return Clip show to editing");
+    view.update(cx, |editor, _| editor.library_choices = choices);
+    Ok(())
+}
+
+fn delayed_export_receipt(view: &Entity<EditorView>, cx: &mut App) -> anyhow::Result<()> {
+    view.update(cx, |editor, cx| {
+        ensure!(editor.export.is_none(), "Receipt proof must not interrupt an active export");
+        let saved = editor.saved.take();
+        let saved_title = editor.saved_source_title.take();
+        let export_title = std::mem::replace(&mut editor.export_source_title, "Earlier clip · source A".into());
+        let path = editor.recording.as_ref().context("Receipt proof source missing")?.with_file_name("synthetic-export-receipt.mp4");
+        editor.tx.send(Event::Exported(editor.generation.load(Ordering::Relaxed).wrapping_sub(1), Ok(path.clone())))?;
+        editor.poll(cx);
+        let matched = editor.saved.as_ref() == Some(&path)
+            && editor.saved_source_title.as_deref() == Some("Earlier clip · source A");
+        editor.saved = saved;
+        editor.saved_source_title = saved_title;
+        editor.export_source_title = export_title;
+        ensure!(matched, "Export completing after navigation lost its output receipt/source label");
+        Ok(())
+    })
+}
+
 impl EditorView {
     /// Invoke before the generic --open branch, with Studio showing editor tab 2.
     pub fn smoke_keyboard(
@@ -309,6 +394,8 @@ impl EditorView {
     ) -> anyhow::Result<bool> {
         if probe.stage == 0 {
             if probe.preparing.is_none() {
+                // Input verification must never open a physical audio endpoint.
+                view.update(cx, |editor, _| editor.preview_output = PlaybackOutput::Silent);
                 let source = source.to_owned();
                 let (tx, rx) = mpsc::channel();
                 thread::spawn(move || {
@@ -479,7 +566,8 @@ impl EditorView {
                 );
 
                 // Fresh smoke header: Library, Undo, Redo, Reset, Export, options.
-                stops[5].focus(window);
+                // Header: Library, Clip show, Undo, Redo, Reset, Export, Options.
+                stops[6].focus(window);
                 key(window, cx, "space", false, false);
                 ensure!(
                     view.read(cx).preset_menu && view.read(cx).menu_focus.is_focused(window),
@@ -494,7 +582,7 @@ impl EditorView {
                     !view.read(cx).preset_menu && view.read(cx).focus.is_focused(window),
                     "Escape did not close presets and restore editor focus"
                 );
-                stops[5].focus(window);
+                stops[6].focus(window);
                 key(window, cx, "enter", false, false);
                 key(window, cx, "tab", false, false);
                 key(window, cx, "enter", false, false);
@@ -519,15 +607,23 @@ impl EditorView {
                 }));
                 view.update(cx, |editor, _| editor.set_library_choices(large));
                 ensure!(
-                    view.read(cx).library_choices.len() == MAX_LIBRARY_CHOICES,
-                    "Recent video picker exceeded its 64-choice bound"
+                    view.read(cx).library_choices.len() == 80,
+                    "Clip show lost videos beyond the recent picker display limit"
                 );
                 ensure!(
-                    view.read(cx).library_choices[0].1 == "Cached name 0"
-                        && view.read(cx).library_choices[MAX_LIBRARY_CHOICES - 1].1
-                            == "Cached name 63",
-                    "Bounded picker lost cached names or included an image"
+                    view.read(cx).library_choices.iter().enumerate().all(|(index, (_, title))|
+                        *title == format!("Cached name {index}")),
+                    "Clip show queue lost cached names/order or included an image"
                 );
+                let baseline_stops = tab_stops(window, cx)?.len();
+                stops[add_index].focus(window);
+                key(window, cx, "enter", false, false);
+                ensure!(view.read(cx).picker, "Keyboard Add clip did not open the large recent picker");
+                let picker_stops = tab_stops(window, cx)?.len();
+                ensure!(picker_stops == baseline_stops + MAX_LIBRARY_CHOICES + 1,
+                    "Rendered recent picker did not contain exactly 64 choices and Browse: {baseline_stops} → {picker_stops}");
+                key(window, cx, "escape", false, false);
+                ensure!(!view.read(cx).picker, "Escape did not close the large recent picker");
                 view.update(cx, |editor, cx| {
                     editor.set_library_choices(vec![
                         (fixture.media.clone(), named.clone()),
@@ -616,8 +712,16 @@ impl EditorView {
                     "One keyboard Undo did not exactly restore project before append"
                 );
                 diagnostic_keyboard(&view, window, cx)?;
+                delayed_export_receipt(&view, cx)?;
+                clip_show_keyboard(&view, window, cx)?;
                 Self::smoke_playback_details(&view, window, cx, history_signature)?;
-                probe.stage = 7;
+                probe.stage = 8;
+            }
+            8 => {
+                let complete = if let Some(native) = &mut probe.native_fullscreen {
+                    native.step(&view, window, cx, key, history_signature)?
+                } else { probe.fullscreen.step(&view, window, cx, key, history_signature)? };
+                if complete { probe.stage = 7; }
             }
             7 => {
                 ensure!(

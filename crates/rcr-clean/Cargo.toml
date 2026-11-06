@@ -1,0 +1,16 @@
+[package]
+name = "rcr-clean"
+description = "Reclaim space from stale developer artifacts and Git worktrees"
+version.workspace = true
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+rcr-disk = { path = "../rcr-disk" }
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+filetime = "0.2"

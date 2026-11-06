@@ -5,6 +5,8 @@ use rcr_hdr::TonemapSettings;
 use rcr_image_types::{Frame, Monitor, Rect, WindowInfo};
 
 use crate::detect::{Attempt, BackendKind, detect_backend};
+#[path = "capture_budget.rs"]
+mod budget;
 
 /// Converts a native backend frame to 8-bit sRGB RGBA.
 ///
@@ -95,7 +97,21 @@ impl ScreenSource {
         if monitors.is_empty() {
             return Err(CaptureError::NoBackend("the backend reported no monitors".into()));
         }
-        Ok(composite(&self.capture_each(&monitors, *opts)?)?)
+        // The batch backend retains all native frames before SDR conversion.
+        // Check the reported layouts before any pixel allocation, then verify
+        // actual returned payloads before allocating conversion destinations.
+        let needs_canvas = monitors.len() > 1;
+        budget::monitors(&monitors, self.backend.capabilities().hdr_float, needs_canvas)?;
+        let ids: Vec<_> = monitors.iter().map(|monitor| monitor.id.as_str()).collect();
+        let native = self.backend.capture_monitors(&ids, opts)?;
+        budget::frames(&native, native.len() > 1)?;
+        let mut frames = native.into_iter().map(|frame| to_sdr(frame, &self.tonemap)).collect::<Result<Vec<_>>>()?;
+        // The common single-display case already has the right origin and
+        // format. Avoid allocating and copying an entire second desktop.
+        if frames.len() == 1 {
+            return Ok(frames.pop().expect("one captured monitor"));
+        }
+        Ok(composite(&frames)?)
     }
 
     /// One monitor by [`Monitor::id`].
@@ -145,7 +161,9 @@ impl ScreenSource {
     }
 
     fn capture_each(&self, monitors: &[Monitor], opts: CaptureOptions) -> Result<Vec<Frame>> {
-        monitors.iter().map(|m| self.capture_monitor(&m.id, &opts)).collect()
+        let ids: Vec<_> = monitors.iter().map(|monitor| monitor.id.as_str()).collect();
+        self.backend.capture_monitors(&ids, &opts)?.into_iter()
+            .map(|frame| to_sdr(frame, &self.tonemap)).collect()
     }
 }
 
@@ -340,6 +358,10 @@ mod tests {
         fn capture_monitor(&self, id: &str, o: &CaptureOptions) -> Result<Frame> {
             self.0.capture_monitor(id, o)
         }
+        fn capture_monitors(&self, ids: &[&str], o: &CaptureOptions) -> Result<Vec<Frame>> {
+            self.0.calls.lock().unwrap().push(format!("batch:{}", ids.join(",")));
+            self.0.capture_monitors(ids, o)
+        }
     }
 
     #[test]
@@ -353,7 +375,69 @@ mod tests {
         ));
         let src = ScreenSource::new(Box::new(Shared(fake.clone())), TonemapSettings::default());
         src.capture_region(Rect::new(0, 0, 2, 2), &CaptureOptions::default()).unwrap();
-        assert_eq!(*fake.calls.lock().unwrap(), ["monitor:L"], "R must not be captured at all");
+        assert_eq!(*fake.calls.lock().unwrap(), ["batch:L", "monitor:L"], "R must not be captured at all");
+    }
+
+    #[test]
+    fn desktop_capture_batches_monitors_in_display_order() {
+        let fake = std::sync::Arc::new(Fake::new(vec![
+            (monitor("L", -4, 4, 2, None), sdr_frame(-4, 4, 2, [1, 2, 3])),
+            (monitor("R", 0, 4, 2, None), sdr_frame(0, 4, 2, [4, 5, 6])),
+        ], per_monitor_caps()));
+        let source = ScreenSource::new(Box::new(Shared(fake.clone())), TonemapSettings::default());
+        let frame = source.capture_desktop(&CaptureOptions::default()).unwrap();
+        assert_eq!(frame.origin, Point::new(-4, 0));
+        assert_eq!(frame.size(), Size::new(8, 2));
+        assert_eq!(*fake.calls.lock().unwrap(), ["batch:L,R", "monitor:L", "monitor:R"]);
+    }
+
+    #[test]
+    fn single_monitor_desktop_preserves_capture_metadata() {
+        let mut frame = sdr_frame(-4, 4, 2, [1, 2, 3]);
+        frame.scale_factor = 1.5;
+        let expected = to_sdr(frame.clone(), &TonemapSettings::default()).unwrap();
+        let fake = Fake::new(vec![(monitor("L", -4, 4, 2, None), frame)], per_monitor_caps());
+        let source = ScreenSource::new(Box::new(fake), TonemapSettings::default());
+        assert_eq!(source.capture_desktop(&CaptureOptions::default()).unwrap(), expected);
+    }
+
+    #[test]
+    fn desktop_preflight_rejects_huge_sparse_and_hdr_batch_peak_before_native_capture() {
+        for monitors in [
+            vec![monitor("huge", 0, 32_768, 32_768, Some(HdrInfo::SDR))],
+            vec![monitor("left", i32::MIN, 1, 1, None), monitor("right", i32::MAX, 1, 1, None)],
+            // The SDR canvas is only 253 MiB, but the retained native HDR
+            // batch plus the first SDR conversion exceeds the 512 MiB limit.
+            vec![monitor("hdr-left", 0, 7680, 4320, Some(HDR_ON)), monitor("hdr-right", 7680, 7680, 4320, Some(HDR_ON))],
+        ] {
+            let fake = std::sync::Arc::new(Fake::new(monitors.into_iter().map(|monitor| {
+                (monitor, sdr_frame(0, 1, 1, [1, 2, 3]))
+            }).collect(), per_monitor_caps()));
+            let source = ScreenSource::new(Box::new(Shared(fake.clone())), TonemapSettings::default());
+            let error = source.capture_desktop(&CaptureOptions::default()).unwrap_err();
+            assert!(error.to_string().contains("capture one display"), "{error}");
+            assert!(fake.calls.lock().unwrap().is_empty(), "No native frame or batch call may start after failed preflight");
+        }
+    }
+
+    #[test]
+    fn desktop_budget_preserves_normal_hdr_sdr_and_packed_single_frame_boundaries() {
+        budget::monitors(&[
+            monitor("hdr", 0, 3840, 2160, Some(HDR_ON)),
+            monitor("sdr", 3840, 3840, 2160, Some(HdrInfo::SDR)),
+        ], true, true).unwrap();
+        // Two 8K SDR frames plus the canvas fit just below the existing byte
+        // limit. Their equivalent HDR conversion peak must be rejected above.
+        budget::monitors(&[
+            monitor("left", 0, 7680, 4320, Some(HdrInfo::SDR)),
+            monitor("right", 7680, 7680, 4320, Some(HdrInfo::SDR)),
+        ], true, true).unwrap();
+        let mut frame = sdr_frame(-10, 3, 2, [17, 91, 203]);
+        frame.scale_factor = 1.5;
+        let expected = to_sdr(frame.clone(), &TonemapSettings::default()).unwrap();
+        let fake = Fake::new(vec![(monitor("one", -10, 3, 2, None), frame)], per_monitor_caps());
+        let source = ScreenSource::new(Box::new(fake), TonemapSettings::default());
+        assert_eq!(source.capture_desktop(&CaptureOptions::default()).unwrap(), expected);
     }
 
     #[test]

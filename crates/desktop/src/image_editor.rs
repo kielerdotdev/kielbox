@@ -241,13 +241,9 @@ pub fn render_image(width: u32, height: u32, bgra: Vec<u8>) -> Option<Arc<Render
         .map(|b| Arc::new(RenderImage::new(vec![image::Frame::new(b)])))
 }
 pub fn frame_image(frame: Frame) -> Option<Arc<RenderImage>> {
-    let frame = frame.into_rgba8().ok()?;
+    let frame = frame.into_bgra8().ok()?;
     let (width, height) = (frame.width(), frame.height());
-    let mut pixels = frame.into_data();
-    for p in pixels.as_chunks_mut::<4>().0 {
-        p.swap(0, 2);
-    }
-    render_image(width, height, pixels)
+    render_image(width, height, frame.into_data())
 }
 fn modifiers(mods: gpui::Modifiers) -> a::Modifiers {
     a::Modifiers {

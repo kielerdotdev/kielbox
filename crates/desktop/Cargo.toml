@@ -21,5 +21,11 @@ gpui = { version = "=0.2.2", default-features = false, features = ["windows-mani
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
 tray-icon = { version = "0.24", default-features = false }
-windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem", "Win32_System_Power"] }
 rcr-windows = { path = "../windows-capture" }
+rcr-recording-tools = { path = "../rcr-recording-tools", default-features = false, features = ["audio"] }
+rcr-screenshot.workspace = true
+rcr-screenshot-windows.workspace = true
+
+[dev-dependencies]
+rcr-media-io = { path = "../media-io" }

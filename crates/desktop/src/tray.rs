@@ -13,6 +13,9 @@ pub struct Tray {
     record: MenuItem,
     region: MenuItem,
     fullscreen: MenuItem,
+    quick_record: MenuItem,
+    quick_label: String,
+    quick_recording: bool,
     presentation: Presentation,
     pub events: mpsc::Receiver<String>,
 }
@@ -70,7 +73,14 @@ fn shortcut(label: &str, hotkey: &str) -> String {
 }
 
 impl Presentation {
-    fn new(state: TrayState, hotkeys: &[String; 6]) -> Self {
+    fn with_screencast(mut self, recording: bool) -> Self {
+        if recording {
+            self.mode = Mode::Recording;
+            self.status = format!("Screencast recording · {}", self.status);
+        }
+        self
+    }
+    fn new(state: TrayState, hotkeys: &[String; 7]) -> Self {
         let mode = state.mode();
         let ready = state.active && !state.stopping && state.replay_ready;
         let replay_label = if ready && state.replay_seconds > 0 {
@@ -135,6 +145,7 @@ impl Tray {
         let record = MenuItem::with_id("record", &presentation.record, true, None);
         let region = MenuItem::with_id("region", &presentation.region, true, None);
         let fullscreen = MenuItem::with_id("fullscreen", &presentation.fullscreen, true, None);
+        let quick_record = MenuItem::with_id("quick-record", "Record video…", true, None);
         menu.append(&MenuItem::with_id("open", "Open rcr", true, None))?;
         menu.append(&MenuItem::with_id("library", "Library", true, None))?;
         menu.append(&MenuItem::with_id("settings", "Settings", true, None))?;
@@ -146,6 +157,7 @@ impl Tray {
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&region)?;
         menu.append(&fullscreen)?;
+        menu.append(&quick_record)?;
         menu.append(&PredefinedMenuItem::separator())?;
         let tools = Submenu::new("Tools", true);
         for (id, label) in [
@@ -187,14 +199,22 @@ impl Tray {
             record,
             region,
             fullscreen,
+            quick_record,
+            quick_label: String::new(),
+            quick_recording: false,
             presentation,
             events,
         })
     }
 
     /// Safe to call each UI poll: identical visible state performs no native work.
-    pub fn update(&mut self, state: TrayState, hotkeys: &[String; 6]) -> anyhow::Result<()> {
-        let next = Presentation::new(state, hotkeys);
+    pub fn update_quick_recorder(&mut self, recording: bool, busy: bool, hotkey: &str) {
+        self.quick_recording = recording;
+        let label = shortcut(if recording { "Stop video recording" } else if busy { "Show recording controls…" } else { "Record video…" }, hotkey);
+        if self.quick_label != label { self.quick_record.set_text(&label); self.quick_label = label; }
+    }
+    pub fn update(&mut self, state: TrayState, hotkeys: &[String; 7]) -> anyhow::Result<()> {
+        let next = Presentation::new(state, hotkeys).with_screencast(self.quick_recording);
         let previous = &self.presentation;
         if *previous == next {
             return Ok(());
@@ -273,6 +293,19 @@ mod tests {
 
     fn labels(state: TrayState) -> Presentation {
         Presentation::new(state, &std::array::from_fn(|_| String::new()))
+    }
+    #[test]
+    fn screencast_indicator_is_visible_without_changing_game_capture_actions() {
+        for state in [TrayState::default(), TrayState { active: true, replay_ready: true, replay_seconds: 300, ..Default::default() }] {
+            let ordinary = labels(state);
+            let recording = labels(state).with_screencast(true);
+            assert_eq!(recording.mode, Mode::Recording);
+            assert!(recording.status.starts_with("Screencast recording"));
+            assert_eq!(recording.replay_enabled, ordinary.replay_enabled);
+            assert_eq!(recording.record, ordinary.record);
+            assert_eq!(recording.toggle_enabled, ordinary.toggle_enabled);
+            assert_eq!(labels(state).with_screencast(false), ordinary);
+        }
     }
 
     #[test]
@@ -357,7 +390,7 @@ mod tests {
 
     #[test]
     fn shortcut_labels_follow_custom_and_unbound_preferences() {
-        let hotkeys = ["Ctrl+Alt+F8", "", "Shift+F2", "Ctrl+F3", "", ""].map(str::to_owned);
+        let hotkeys = ["Ctrl+Alt+F8", "", "Shift+F2", "Ctrl+F3", "", "", ""].map(str::to_owned);
         let shown = Presentation::new(TrayState::default(), &hotkeys);
         assert_eq!(shown.toggle_replay, "Enable instant replay\tCtrl+Alt+F8");
         assert_eq!(shown.replay, "Save replay");

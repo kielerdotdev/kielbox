@@ -16,6 +16,64 @@ const OPERATORS: [TonemapOperator; 4] = [
 const ROLLOFF_OPS: [TonemapOperator; 3] =
     [TonemapOperator::ReinhardExtended, TonemapOperator::Bt2390, TonemapOperator::AcesFit];
 
+#[test]
+fn cached_tables_match_every_half_float_pattern_across_display_settings() {
+    for white in [80.0, 203.0, 480.0] {
+        for operator in OPERATORS {
+            for knee in [0.65, 1.0] {
+                let settings = TonemapSettings { operator, knee, ..Default::default() };
+                let params = PixelParams::new(&settings, white);
+                let table = cached_table(&params);
+                assert_eq!(table.as_ref(), &build_table(&params));
+            }
+        }
+    }
+}
+
+#[test]
+fn table_cache_is_bounded_and_keeps_recently_used_displays() {
+    let mut cache = TableCache::default();
+    for key in 0..TABLE_CACHE_ENTRIES as u32 {
+        cache.insert([key, 0, 0], Arc::new(Vec::new()));
+    }
+    let retained = cache.get([0, 0, 0]).unwrap();
+    cache.insert([99, 0, 0], Arc::new(Vec::new()));
+    assert_eq!(cache.0.len(), TABLE_CACHE_ENTRIES);
+    assert!(cache.get([1, 0, 0]).is_none(), "Least recently used display is evicted");
+    assert!(Arc::ptr_eq(&retained, &cache.get([0, 0, 0]).unwrap()));
+}
+
+/// Synthetic pixels only: no desktop, GPU, window, input or audio APIs.
+#[test]
+#[ignore = "synthetic screenshot timing; run with --nocapture"]
+fn timing_cached_screenshot_pipeline() {
+    use std::time::Instant;
+    for (w, h) in [(320, 180), (1920, 1080), (3840, 2160)] {
+        let mut rng = Rng(11);
+        let bits: Vec<u16> = (0..w * h * 3).map(|_| f16::from_f32(rng.range(0.0, 2.5)).to_bits()).collect();
+        let frame = frame_from_bits(w, h, &bits, 0, Some(200.0));
+        let settings = TonemapSettings::default();
+        let params = PixelParams::new(&settings, 200.0);
+        let reference = tonemap_pixels(&frame, &params, &build_table(&params)).unwrap();
+        assert_eq!(to_sdr8(&frame, &settings).unwrap(), reference);
+        let mut uncached = Vec::new();
+        let mut cached = Vec::new();
+        for _ in 0..7 {
+            let start = Instant::now();
+            let output = tonemap_pixels(&frame, &params, &build_table(&params)).unwrap();
+            std::hint::black_box(output);
+            uncached.push(start.elapsed().as_secs_f64() * 1000.);
+            let start = Instant::now();
+            std::hint::black_box(to_sdr8(&frame, &settings).unwrap());
+            cached.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+        uncached.sort_by(f64::total_cmp);
+        cached.sort_by(f64::total_cmp);
+        println!("HDR synthetic {w}x{h}: median uncached={:.3}ms cached={:.3}ms identical_pixels=true cached_table_bytes={} cache_limit={}",
+            uncached[3], cached[3], F16_VALUES * std::mem::size_of::<[f32; 2]>(), TABLE_CACHE_ENTRIES);
+    }
+}
+
 /// Small deterministic PRNG (xorshift64*), so tests need no dependency.
 struct Rng(u64);
 

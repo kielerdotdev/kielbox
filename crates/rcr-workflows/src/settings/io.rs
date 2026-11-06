@@ -27,12 +27,22 @@ fn temp_sibling(path: &Path) -> PathBuf {
 ///
 /// The temp file is removed if any step fails. Parent directories are created.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write_with(path, |file| file.write_all(bytes))
+}
+
+/// Same replacement boundary with an injectable writer for storage-failure tests.
+pub(crate) fn atomic_write_with(
+    path: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
+) -> io::Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(dir)?;
     let tmp = temp_sibling(path);
+    // Only clean up a temporary file we actually created. If CREATE_NEW fails
+    // (for example a stale same-name sibling exists), that file is not ours.
+    let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     let result = (|| {
-        let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-        f.write_all(bytes)?;
+        write(&mut f)?;
         f.sync_all()?;
         drop(f);
         rename_over(&tmp, path)

@@ -13,13 +13,14 @@ use windows::Win32::{
     },
 };
 
-pub const ACTIONS: [&str; 6] = [
+pub const ACTIONS: [&str; 7] = [
     "Toggle instant replay",
     "Save replay",
     "Start / stop recording",
     "Capture region",
     "Capture entire screen",
     "Capture active window",
+    "Record video / stop screencast",
 ];
 #[derive(Clone, Debug)]
 pub struct Status {
@@ -96,7 +97,7 @@ fn parse(text: &str) -> Result<Option<Chord>, String> {
     }
     Ok(Some(Chord { modifiers, key }))
 }
-pub fn validate(bindings: &[String; 6]) -> Result<(), String> {
+pub fn validate(bindings: &[String; 7]) -> Result<(), String> {
     let mut seen = HashMap::new();
     for (i, text) in bindings.iter().enumerate() {
         if let Some(chord) = parse(text).map_err(|e| format!("{}: {e}", ACTIONS[i]))?
@@ -109,6 +110,10 @@ pub fn validate(bindings: &[String; 6]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+pub fn quick_binding_conflicts(bindings: &[String; 7]) -> bool {
+    let Ok(Some(quick)) = parse(&bindings[6]) else { return false; };
+    bindings[..6].iter().any(|binding| parse(binding).ok().flatten() == Some(quick))
 }
 pub fn from_keystroke(stroke: &gpui::Keystroke) -> Result<String, String> {
     let mut parts = Vec::new();
@@ -134,6 +139,7 @@ pub fn from_keystroke(stroke: &gpui::Keystroke) -> Result<String, String> {
     Ok(text)
 }
 pub enum Event {
+    ToggleQuickRecord,
     ToggleReplay,
     SaveReplay,
     ToggleRecord,
@@ -147,7 +153,7 @@ pub struct Hotkeys {
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Hotkeys {
-    pub fn start_with(bindings: &[String; 6]) -> anyhow::Result<Self> {
+    pub fn start_with(bindings: &[String; 7]) -> anyhow::Result<Self> {
         validate(bindings).map_err(anyhow::Error::msg)?;
         let parsed = bindings
             .iter()
@@ -201,6 +207,7 @@ impl Hotkeys {
                                 4 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Region),
                                 5 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Fullscreen),
                                 6 => Event::Screenshot(rcr_toolkit::core::workflow::CaptureTarget::Window),
+                                7 => Event::ToggleQuickRecord,
                                 _ => continue,
                             };
                             let _ = tx.try_send(event);

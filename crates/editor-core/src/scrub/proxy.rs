@@ -1,5 +1,7 @@
 //! Reusable intra-frame seek copies; original projects and exports remain untouched.
 use super::native::Decoder;
+#[path = "proxy_cache_storage.rs"]
+mod storage;
 use crate::{media_command, Content, PreviewFrame, Project, TrackKind};
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,7 @@ impl Identity {
 }
 #[derive(Serialize, Deserialize)]
 struct Complete {
+    owner_schema: u32,
     identity: Identity,
     bytes: u64,
 }
@@ -82,16 +85,16 @@ struct Cache {
 }
 impl Cache {
     fn new(identity: &Identity) -> Result<Self> {
-        let root = std::env::var_os("RCR_SEEK_CACHE_DIR").map_or_else(
+        let base = std::env::var_os("RCR_SEEK_CACHE_DIR").map_or_else(
             || {
                 std::env::var_os("LOCALAPPDATA")
                     .map(PathBuf::from)
                     .unwrap_or_else(std::env::temp_dir)
-                    .join("rcr/cache/seek-v2")
+                    .join("rcr/cache")
             },
             PathBuf::from,
         );
-        fs::create_dir_all(&root)?;
+        let root = storage::managed_root(&base)?;
         Ok(Self {
             root,
             key: identity.key()?,
@@ -104,12 +107,18 @@ impl Cache {
         self.root.join(format!("{}.json", self.key))
     }
     fn lock(&self, name: &str) -> Result<Option<File>> {
+        let path = self.root.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => ensure!(storage::regular(&path), "Seek cache lock is not a regular owned file"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.into()),
+        }
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(self.root.join(name))?;
+            .open(path)?;
         match file.try_lock() {
             Ok(()) => Ok(Some(file)),
             Err(fs::TryLockError::WouldBlock) => Ok(None),
@@ -118,6 +127,7 @@ impl Cache {
     }
     // Caller holds index lock while checking completion marker and acquiring a read lease.
     fn reuse(&self, identity: &Identity) -> Result<Option<File>> {
+        if !storage::regular(&self.marker()) || !storage::regular(&self.data()) { return Ok(None); }
         let Ok(marker) = File::open(self.marker()) else {
             return Ok(None);
         };
@@ -125,7 +135,7 @@ impl Cache {
             Ok(complete) => complete,
             Err(_) => return Ok(None),
         };
-        if complete.identity != *identity || complete.bytes == 0 || complete.bytes >= FILE_BUDGET {
+        if complete.owner_schema != storage::SCHEMA || complete.identity != *identity || complete.bytes == 0 || complete.bytes >= FILE_BUDGET {
             return Ok(None);
         }
         let Ok(file) = File::open(self.data()) else {
@@ -145,13 +155,19 @@ impl Cache {
     fn make_room(&self, reserve: u64) -> Result<()> {
         self.make_room_with_budget(reserve, CACHE_BUDGET)
     }
+    fn trim_if_idle(&self, reserve: u64, budget: u64) -> Result<bool> {
+        let Some(_index) = self.lock("index.lock")? else { return Ok(false); };
+        let Some(_encoder) = self.lock("encoder.lock")? else { return Ok(false); };
+        self.make_room_with_budget(reserve, budget)?;
+        Ok(true)
+    }
     fn make_room_with_budget(&self, reserve: u64, budget: u64) -> Result<()> {
         let mut entries = Vec::new();
         let mut total = 0u64;
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
             let path = entry.path();
-            if !entry.file_type()?.is_file() {
+            if !storage::regular(&path) {
                 continue;
             }
             if entry
@@ -159,8 +175,12 @@ impl Cache {
                 .to_string_lossy()
                 .starts_with("rcr-partial-")
             {
-                if fs::remove_file(&path).is_err() {
-                    total = total.saturating_add(entry.metadata()?.len());
+                if path.file_name().is_some_and(|name| name.to_string_lossy().ends_with(".owner.json")) {
+                    // Only an independently validated owner claim can be cleaned.
+                    let output = path.with_file_name(path.file_name().unwrap().to_string_lossy().trim_end_matches(".owner.json"));
+                    if !storage::present(&output)? && !storage::remove_orphan_claim(&path) { total = total.saturating_add(entry.metadata()?.len()); }
+                } else if !storage::remove_partial(&path) {
+                    total = total.saturating_add(entry.metadata()?.len()).saturating_add(storage::claim_bytes(&path));
                 }
                 continue;
             }
@@ -173,8 +193,10 @@ impl Cache {
                 .extension()
                 .is_some_and(|extension| extension == "json")
             {
-                if !path.with_extension("mkv").exists() && fs::remove_file(&path).is_err() {
-                    total = total.saturating_add(entry.metadata()?.len());
+                if !storage::present(&path.with_extension("mkv"))? {
+                    if owned_marker(&path).is_some() {
+                        if fs::remove_file(&path).is_err() { total = total.saturating_add(entry.metadata()?.len()); }
+                    } else { total = total.saturating_add(entry.metadata()?.len()); }
                 }
                 continue;
             }
@@ -183,7 +205,8 @@ impl Cache {
             }
             let metadata = entry.metadata()?;
             let marker = path.with_extension("json");
-            let marker_metadata = marker.metadata().ok();
+            let owned = owned_marker(&marker).is_some();
+            let marker_metadata = storage::regular(&marker).then(|| marker.metadata().ok()).flatten();
             let touched = marker_metadata
                 .as_ref()
                 .and_then(|m| m.modified().ok())
@@ -192,12 +215,12 @@ impl Cache {
                 .len()
                 .saturating_add(marker_metadata.map_or(0, |m| m.len()));
             total = total.saturating_add(bytes);
-            entries.push((touched, path, bytes, marker.is_file()));
+            if owned { entries.push((touched, path, bytes)); }
         }
         entries.sort_by_key(|entry| entry.0);
-        for (_, path, bytes, complete) in entries {
-            if complete && total.saturating_add(reserve) <= budget {
-                continue;
+        for (_, path, bytes) in entries {
+            if total.saturating_add(reserve) <= budget {
+                break;
             }
             if evict(&path) {
                 total = total.saturating_sub(bytes);
@@ -205,7 +228,7 @@ impl Cache {
         }
         ensure!(
             total.saturating_add(reserve) <= budget,
-            "Seek cache is occupied by active previews"
+            "Seek cache is occupied by active previews or unowned files; originals were left untouched"
         );
         Ok(())
     }
@@ -215,13 +238,23 @@ fn cache_entry(path: &Path) -> bool {
         .and_then(|stem| stem.to_str())
         .is_some_and(|stem| stem.len() == 32 && stem.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
+fn owned_marker(path: &Path) -> Option<Complete> {
+    if !storage::regular(path) { return None; }
+    let marker: Complete = serde_json::from_reader(File::open(path).ok()?.take(256 * 1024)).ok()?;
+    if marker.owner_schema != storage::SCHEMA || marker.bytes == 0 || marker.bytes >= FILE_BUDGET
+        || path.file_stem()?.to_str()? != marker.identity.key().ok()? { return None; }
+    Some(marker)
+}
 fn evict(path: &Path) -> bool {
+    if !storage::regular(path) { return false; }
+    let Some(marker) = owned_marker(&path.with_extension("json")) else { return false; };
     let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
         return false;
     };
     if file.try_lock().is_err() {
         return false;
     }
+    if !file.metadata().is_ok_and(|metadata| metadata.len() == marker.bytes) { return false; }
     // Delete-shared Windows handle; index lock prevents lookup racing eviction.
     if fs::remove_file(path).is_err() {
         return false;
@@ -234,7 +267,7 @@ struct Preparation {
     job: Option<ProcessJob>,
     _encoder: Option<File>,
     _traced_encoder: Option<Arc<File>>,
-    output: tempfile::TempPath,
+    output: storage::Partial,
     started: Instant,
     last_trace: Instant,
     last_bytes: u64,
@@ -478,28 +511,30 @@ impl Proxy {
             let bytes = preparation.output.metadata()?.len();
             preparation.last_bytes = bytes;
             ensure!(bytes > 0 && bytes < FILE_BUDGET, "Invalid seek copy size");
-            if self.cache.data().exists() {
+            if storage::present(&self.cache.data())? {
                 ensure!(evict(&self.cache.data()), "Seek entry is active");
             }
-            fs::rename(&preparation.output, self.cache.data())?;
+            fs::rename(preparation.output.path(), self.cache.data())?;
             OpenOptions::new()
                 .write(true)
                 .open(self.cache.data())?
                 .sync_all()?;
-            let mut marker = tempfile::Builder::new()
-                .prefix("rcr-partial-")
-                .tempfile_in(&self.cache.root)?;
+            let marker = storage::Partial::create(&self.cache.root, ".json")?;
+            let mut marker_file = OpenOptions::new().write(true).open(marker.path())?;
             serde_json::to_writer(
-                &mut marker,
+                &mut marker_file,
                 &Complete {
+                    owner_schema: storage::SCHEMA,
                     identity: self.identity.clone(),
                     bytes,
                 },
             )?;
-            marker.flush()?;
-            marker.as_file().sync_all()?;
+            marker_file.flush()?;
+            marker_file.sync_all()?;
+            drop(marker_file);
             // Atomic marker publication is last: incomplete or crashed output is never reusable.
-            marker.persist(self.cache.marker())?;
+            if storage::present(&self.cache.marker())? { ensure!(owned_marker(&self.cache.marker()).is_some(), "Seek marker is not owned by this cache"); }
+            fs::rename(marker.path(), self.cache.marker())?;
             self.lease = self.cache.reuse(&self.identity)?;
             ensure!(self.ready(), "Seek publication failed");
             if self.trace {
@@ -515,24 +550,27 @@ impl Proxy {
             if self.trace {
                 self.trace_event("cache_reused", None);
             }
-            if let Some(_encoder) = self.cache.lock("encoder.lock")? {
-                let _ = self.cache.make_room(0);
-            }
+            // The reader lease is already held. Idle maintenance reacquires
+            // both nonblocking locks and cannot interfere with another build.
+            drop(_index);
+            let _ = self.cache.trim_if_idle(0, CACHE_BUDGET);
             return Ok(());
         }
         let Some(encoder) = self.cache.lock("encoder.lock")? else {
             return Ok(());
         };
+        if storage::present(&self.cache.marker())? {
+            ensure!(owned_marker(&self.cache.marker()).is_some(), "Seek cache marker is not owned; existing files were left untouched");
+        }
+        if storage::present(&self.cache.data())? {
+            ensure!(owned_marker(&self.cache.marker()).is_some(), "Seek cache output is not owned; existing files were left untouched");
+        }
         self.cache.make_room(RESERVATION)?;
         ensure!(
             free_bytes(&self.cache.root)? >= MIN_FREE_BYTES,
             "Insufficient seek cache space"
         );
-        let output = tempfile::Builder::new()
-            .prefix("rcr-partial-")
-            .suffix(".mkv")
-            .tempfile_in(&self.cache.root)?
-            .into_temp_path();
+        let output = storage::Partial::create(&self.cache.root, ".mkv")?;
         ensure!(
             !cancel.load(Ordering::Acquire),
             "Seek preparation cancelled"
@@ -581,7 +619,7 @@ impl Proxy {
                 "-f",
                 "matroska",
             ])
-            .arg(&output)
+            .arg(output.path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(if self.trace { Stdio::piped() } else { Stdio::null() })
@@ -839,6 +877,7 @@ mod tests {
         fs::write(
             cache.marker(),
             serde_json::to_vec(&Complete {
+                owner_schema: storage::SCHEMA,
                 identity: identity.clone(),
                 bytes: 64,
             })
@@ -948,14 +987,17 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let id = identity(1);
         let cache = entry(root.path(), &id);
-        let partial = root.path().join("rcr-partial-crashed.mkv");
-        fs::write(&partial, b"unfinished").unwrap();
+        let partial = storage::Partial::create(root.path(), ".mkv").unwrap();
+        fs::write(partial.path(), b"unfinished").unwrap();
+        let partial_path = partial.path().to_path_buf();
+        // Model a process crash that did not run the TempPath/claim destructor.
+        std::mem::forget(partial);
         fs::write(cache.data(), b"unpublished").unwrap();
         let guard = cache.lock("encoder.lock").unwrap().unwrap();
         assert!(cache.lock("encoder.lock").unwrap().is_none());
         cache.make_room(0).unwrap();
-        assert!(!partial.exists());
-        assert!(!cache.data().exists());
+        assert!(!partial_path.exists());
+        assert!(cache.data().exists(), "Unclaimed output is ambiguous and must not be deleted");
         drop(guard);
         assert!(cache.lock("encoder.lock").unwrap().is_some());
     }
@@ -971,5 +1013,59 @@ mod tests {
         drop(lease);
         cache.make_room_with_budget(1, 1).unwrap();
         assert!(!cache.data().exists());
+    }
+
+    #[test]
+    fn unowned_hash_and_partial_names_are_preserved_even_when_the_budget_is_full() {
+        let base = tempfile::tempdir().unwrap();
+        let root = storage::managed_root(base.path()).unwrap();
+        let id = identity(1);
+        let cache = entry(&root, &id);
+        complete(&cache, &id);
+        let foreign = [root.join(format!("{}.mkv", "f".repeat(32))),
+            root.join(format!("{}.json", "f".repeat(32))),
+            root.join("rcr-partial-family-video.mkv"), root.join("original-project.ssxe")];
+        for path in &foreign { fs::write(path, b"preserve unrelated bytes").unwrap(); }
+        assert!(cache.trim_if_idle(1, 1).is_err(), "Ambiguous occupancy prevents another reservation");
+        assert!(!cache.data().exists(), "Validated disposable output can be evicted");
+        for path in foreign { assert_eq!(fs::read(path).unwrap(), b"preserve unrelated bytes"); }
+    }
+
+    #[test]
+    fn active_encoder_and_partial_reader_leases_prevent_cleanup() {
+        let base = tempfile::tempdir().unwrap();
+        let root = storage::managed_root(base.path()).unwrap();
+        let cache = entry(&root, &identity(1));
+        let encoder = cache.lock("encoder.lock").unwrap().unwrap();
+        let partial = storage::Partial::create(&root, ".mkv").unwrap();
+        fs::write(partial.path(), b"owned build bytes").unwrap();
+        let path = partial.path().to_path_buf();
+        assert!(!cache.trim_if_idle(1, 1).unwrap(), "Active build keeps the encoder lease");
+        assert!(path.exists());
+        let lease = File::open(&path).unwrap();
+        lease.try_lock_shared().unwrap();
+        std::mem::forget(partial);
+        drop(encoder);
+        assert!(cache.trim_if_idle(1, 1).is_err(), "Pinned partial cannot be force-deleted");
+        assert!(path.exists());
+        drop(lease);
+        assert!(cache.trim_if_idle(1, 1).unwrap());
+        assert!(!path.exists());
+        assert!(fs::read_dir(&root).unwrap().flatten().all(|entry| !entry.file_name().to_string_lossy().starts_with("rcr-partial-")));
+    }
+
+    #[test]
+    fn changed_output_is_preserved_when_completion_provenance_no_longer_matches() {
+        let base = tempfile::tempdir().unwrap();
+        let root = storage::managed_root(base.path()).unwrap();
+        let id = identity(1);
+        let cache = entry(&root, &id);
+        complete(&cache, &id);
+        let changed = [77u8; 65];
+        fs::write(cache.data(), changed).unwrap();
+        let marker = fs::read(cache.marker()).unwrap();
+        assert!(cache.trim_if_idle(1, 1).is_err());
+        assert_eq!(fs::read(cache.data()).unwrap(), changed);
+        assert_eq!(fs::read(cache.marker()).unwrap(), marker);
     }
 }

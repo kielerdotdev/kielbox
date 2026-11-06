@@ -13,6 +13,11 @@ pub struct Assets;
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
         let bytes: &'static [u8] = match path {
+            "icons/camera.svg" => include_bytes!("../../../assets/icons/camera.svg"),
+            "icons/video-camera.svg" => include_bytes!("../../../assets/icons/video-camera.svg"),
+            "icons/capture-area.svg" => include_bytes!("../../../assets/icons/capture-area.svg"),
+            "icons/capture-window.svg" => include_bytes!("../../../assets/icons/capture-window.svg"),
+            "icons/capture-settings.svg" => include_bytes!("../../../assets/icons/capture-settings.svg"),
             "icons/arrow-left.svg" => include_bytes!("../../../assets/icons/arrow-left.svg"),
             "icons/check.svg" => include_bytes!("../../../assets/icons/check.svg"),
             "icons/chevron.svg" => include_bytes!("../../../assets/icons/chevron.svg"),

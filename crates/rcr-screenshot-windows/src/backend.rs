@@ -123,6 +123,21 @@ impl CaptureBackend for WindowsCapture {
         Ok(capture_with_chain(&self.chain, &target, *opts)?)
     }
 
+    fn capture_monitors(&self, monitor_ids: &[&str], opts: &CaptureOptions) -> CaptureResult<Vec<Frame>> {
+        if monitor_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // DisplayConfig and DXGI HDR discovery are costly. Resolve all requested
+        // displays from one fresh snapshot rather than rediscovering every
+        // display before each individual monitor capture.
+        let targets = display::enumerate_targets()?;
+        monitor_ids.iter().map(|id| {
+            let target = targets.iter().find(|target| target.monitor.id.eq_ignore_ascii_case(id))
+                .ok_or_else(|| WinError::NotFound((*id).to_owned()))?;
+            Ok(capture_with_chain(&self.chain, target, *opts)?)
+        }).collect()
+    }
+
     fn capture_window(&self, window_id: &str, opts: &CaptureOptions) -> CaptureResult<Frame> {
         let opts = *opts;
         let target = top_level::resolve_target(window_id)?;

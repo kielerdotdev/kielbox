@@ -1,11 +1,12 @@
-# Isolated FFmpeg 7.0.2 proof bindings
+# FFmpeg 7.0.2 bindings and proof provenance
 
 `bindings.rs` is copied unchanged from the controlled binding-generation output
 identified in `provenance.json`. Generated constant size/alignment/field-offset
 assertions compiled successfully in that isolated preparation. The declarations
-are included only by `../decode.rs`, which itself is included only by the
-explicit `d3d11_decode_proof` example. Production playback and paused seeking
-remain unchanged.
+are included by `../decode.rs` for native decoding, including production playback
+and explicit proof examples. The conservative native audio path shares these
+declarations. Runtime validation still happens before structures are accessed;
+unsupported formats, edits or runtimes use the supported external path.
 
 The source is the Gyan FFmpeg 7.0.2 shared development archive, release source
 commit `e3a61e9103`. Its component DLL entries matched the installed runtime

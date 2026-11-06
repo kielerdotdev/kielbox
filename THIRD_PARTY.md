@@ -20,7 +20,7 @@ Published source: https://crates.io/crates/nvidia-video-codec-sdk/0.4.0
 
 ## FFmpeg and FFplay
 
-The Windows seek worker can also dynamically load user-installed FFmpeg 7 shared libraries (avformat/avcodec 61, avutil 59 and swscale 8). Its Rust FFI declarations use the public n7.1.1 ABI prefixes and reject other library majors before dereferencing those structures. NVIDIA acceleration uses the installed driver through FFmpeg CUVID/NVDEC. These shared libraries are not bundled. API references: https://github.com/FFmpeg/FFmpeg/tree/n7.1.1 and https://github.com/FFmpeg/FFmpeg/blob/n7.1.1/libavcodec/cuviddec.c.
+The Windows seek worker can dynamically load user-installed FFmpeg 7 shared libraries (avformat/avcodec 61, avutil 59 and swscale 8). Its public-prefix Rust FFI declarations originate from n7.1.1 and reject incompatible library majors. Separate generated full-structure bindings used by native playback, optional GPU decoding and native audio require the exact supported FFmpeg 7.0.2 runtime before structures are accessed; native audio also checks its resampling/filter components. Header notices, provider license and generation hashes are preserved under `crates/editor-core/src/playback_gpu/ffmpeg7/`. NVIDIA acceleration uses the installed driver through FFmpeg CUVID/NVDEC. These shared libraries are not bundled. Public-prefix API references: https://github.com/FFmpeg/FFmpeg/tree/n7.1.1 and https://github.com/FFmpeg/FFmpeg/blob/n7.1.1/libavcodec/cuviddec.c.
 
 The editor invokes user-installed FFmpeg, FFprobe and FFplay executables. Their licenses depend on the user's build configuration. These executables and codec binaries are not bundled here. Recorder/replay output uses RCR's Rust Matroska writer.
 
