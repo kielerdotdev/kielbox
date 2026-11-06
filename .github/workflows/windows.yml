@@ -11,14 +11,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     name: Windows x64 release
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -39,13 +39,24 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Locate Windows shader compiler
+      - name: Configure Windows build
         run: |
-          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/fxc.exe" |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $fxc) { throw 'Windows SDK shader compiler (fxc.exe) is missing' }
-          "GPUI_FXC_PATH=$($fxc.FullName)" | Add-Content $env:GITHUB_ENV
-          $fxc.DirectoryName | Add-Content $env:GITHUB_PATH
+          . ./scripts/packaging/Find-fxc.ps1
+          $sdkRoots = @(
+            "${env:ProgramFiles(x86)}/Windows Kits/10/bin",
+            "$env:ProgramFiles/Windows Kits/10/bin"
+          )
+          $fxc = Find-RcrFxcCompiler -ExplicitPath $env:GPUI_FXC_PATH -PathDirectories ($env:PATH -split ';') -SdkBinRoots $sdkRoots
+          "GPUI_FXC_PATH=$fxc" | Add-Content $env:GITHUB_ENV
+          # Cargo's encoded format preserves paths containing spaces. Remap both
+          # separator forms because rustc's prefix substitution is textual.
+          $flags = @(
+            "--remap-path-prefix=$env:USERPROFILE=/build-user",
+            "--remap-path-prefix=$($env:USERPROFILE.Replace('\', '/'))=/build-user",
+            "--remap-path-prefix=$env:GITHUB_WORKSPACE=/kielbox",
+            "--remap-path-prefix=$($env:GITHUB_WORKSPACE.Replace('\', '/'))=/kielbox"
+          )
+          "CARGO_ENCODED_RUSTFLAGS=$($flags -join [char]31)" | Add-Content $env:GITHUB_ENV
 
       - name: Restore Cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -56,11 +67,16 @@ jobs:
             ~/.cargo/registry/src
             ~/.cargo/git/db
             target/release
-          key: windows-x64-release-v1-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: windows-x64-release-v2-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            windows-x64-release-v2-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml', '.cargo/config.toml') }}-
+
+      - name: Test packaging
+        run: ./scripts/test-package-windows.ps1
 
       - name: Test shared disk tools and cleanup CLI
         run: |
-          cargo test --locked -p rcr-disk -p rcr-clean -j1
+          cargo test --locked --release -p rcr-disk -p rcr-clean -j1
           if ($LASTEXITCODE -ne 0) { throw 'Disk tool tests failed' }
 
       - name: Build release executable
@@ -70,17 +86,24 @@ jobs:
 
       - name: Package application
         run: |
-          ./scripts/package-windows.ps1 -SkipBuild
-          ./dist/windows/Verify-package.ps1
+          New-Item -ItemType Directory -Force .downloads | Out-Null
+          $shortCommit = $env:GITHUB_SHA.Substring(0, 12)
+          $sourceArchive = Join-Path $env:GITHUB_WORKSPACE ".downloads/kielbox-source-$shortCommit.zip"
+          git archive --format=zip --output=$sourceArchive HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
+          ./scripts/package-windows.ps1 -SkipBuild -Version "ci-$env:GITHUB_RUN_NUMBER-$shortCommit" -OutputDirectory dist/windows -SourceArchive $sourceArchive
+
+      - name: Check packaged commands
+        run: ./scripts/ci/check-windows-package.ps1 -PackageDirectory dist/windows -ReportDirectory .downloads/package-check
 
       - name: Upload Windows download
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rcr-windows-x64
+          name: kielbox-windows-x64
           path: dist/windows/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
           compression-level: 6
 
       - name: Link download in run summary
@@ -88,6 +111,8 @@ jobs:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
           "### Windows x64 build" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "[Download rcr-windows-x64]($env:ARTIFACT_URL)" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "Extract the archive and run rcr.exe. Video editing requires FFmpeg/FFprobe on PATH." |
+          "[Download kielbox-windows-x64]($env:ARTIFACT_URL)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Commit: $env:GITHUB_SHA. Unsigned development snapshot; no automatic update feed is published." |
+            Add-Content $env:GITHUB_STEP_SUMMARY
+          'Extract the whole archive and use Start-rcr.ps1 with your existing working/data folder. Video editing requires FFmpeg/FFprobe on PATH.' |
             Add-Content $env:GITHUB_STEP_SUMMARY
