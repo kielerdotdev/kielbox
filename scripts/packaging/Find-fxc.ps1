@@ -37,6 +37,12 @@ function Invoke-RcrWithFxc {
         [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $Compiler, 'Process')
         & $Build
     } finally {
-        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrFxcPrevious, 'Process')
+        if ($null -eq $rcrFxcPrevious) {
+            # PowerShell coerces $null to an empty string for this .NET API.
+            # Modern .NET preserves that empty value instead of removing it.
+            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', [NullString]::Value, 'Process')
+        } else {
+            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrFxcPrevious, 'Process')
+        }
     }
 }

@@ -89,14 +89,27 @@ Expect-PackageFailure { Find-RcrFxcCompiler -ExplicitPath (Join-Path $rcrTestRoo
 Expect-PackageFailure { Find-RcrFxcCompiler } 'Release build was not started'
 $rcrTestPreviousFxc = [Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')
 try {
-    foreach ($rcrTestPriorFxc in @($null, 'previous explicit compiler')) {
-        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPriorFxc, 'Process')
+    foreach ($rcrTestPriorFxc in @($null, '', 'previous explicit compiler')) {
+        if ($null -eq $rcrTestPriorFxc) {
+            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', [NullString]::Value, 'Process')
+        } else {
+            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPriorFxc, 'Process')
+        }
+        # .NET Framework treats an empty value as absent; modern .NET preserves
+        # empty values. In both cases restoration must preserve the actual state.
+        $rcrTestExpectedFxc = [Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')
         Invoke-RcrWithFxc -Compiler $rcrTestCompiler -Build {
             Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -eq $rcrTestCompiler) 'Build did not receive selected compiler.'
         }
-        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -eq $rcrTestPriorFxc) 'Successful build failed to restore process environment.'
+        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -ceq $rcrTestExpectedFxc) 'Successful build failed to restore process environment.'
         Expect-PackageFailure { Invoke-RcrWithFxc -Compiler $rcrTestCompiler -Build { throw 'injected build failure; no Cargo execution' } } 'injected build failure'
-        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -eq $rcrTestPriorFxc) 'Failed build failed to restore process environment.'
+        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -ceq $rcrTestExpectedFxc) 'Failed build failed to restore process environment.'
     }
-} finally { [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPreviousFxc, 'Process') }
+} finally {
+    if ($null -eq $rcrTestPreviousFxc) {
+        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', [NullString]::Value, 'Process')
+    } else {
+        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPreviousFxc, 'Process')
+    }
+}
 Write-Output "PASS: $rcrTestCount packaging assertions. Owned fixtures preserved at $rcrTestRoot"

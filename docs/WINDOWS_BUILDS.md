@@ -62,6 +62,12 @@ Its local reports may contain machine paths; they remain outside the artifact.
 The file-only suite creates fake executables in `.downloads/package-tests-*`.
 Remove those later with `scripts/clean-local-builds.ps1`.
 
+The packaging suite checks exact restoration of absent, empty, and explicitly
+configured shader-compiler environment values after successful and failed build
+callbacks. Its 38 assertions pass on Windows PowerShell 5.1 and PowerShell 7;
+the latter matches the hosted job. Package command checks also pass on both
+runtimes against the retained release package, including a report path with spaces.
+
 References: [GitHub artifact handling](https://docs.github.com/en/actions/tutorials/store-and-share-data),
 [Cargo cache action](https://github.com/actions/cache), and
 [Rust path-remapping limitations](https://doc.rust-lang.org/rustc/remap-source-paths.html).
