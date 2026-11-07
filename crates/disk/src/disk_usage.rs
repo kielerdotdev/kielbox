@@ -466,6 +466,10 @@ mod tests {
             }
             Err(error) => panic!("Could not create symlink fixture: {error}"),
         }
+        // Wine reports success without creating the link; there is nothing to skip.
+        if fs::symlink_metadata(temp.0.join("cycle")).is_err() {
+            return;
+        }
         let tree = scan(&temp.0, &CancelToken::new(), |_| {}).unwrap();
         assert_eq!(
             (

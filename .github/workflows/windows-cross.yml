@@ -1,0 +1,84 @@
+name: Windows cross build (Linux + Wine)
+
+# Cross-compiles the Windows release on Linux with cargo-xwin (clang-cl, lld-link,
+# MSVC CRT and Windows SDK via xwin) and runs the Windows unit tests under Wine.
+# Faster feedback than the native Windows job; it does not replace it for packaging,
+# installer, GPU or capture checks, which need a real Windows session.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross:
+    name: Windows x64 via cargo-xwin, tested under Wine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: '4'
+      XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin-cache
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore Cargo, xwin and target cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-xwin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            .xwin-cache
+            ~/.cache/kielbox-ffmpeg
+            ~/.cache/kielbox-mingit
+            target/x86_64-pc-windows-msvc
+          key: windows-cross-v1-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml', 'scripts/ci/build-windows-cross.sh') }}-${{ github.sha }}
+          restore-keys: |
+            windows-cross-v1-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml', 'scripts/ci/build-windows-cross.sh') }}-
+
+      - name: Install clang, LLVM, Wine, Rust target and cargo-xwin
+        run: scripts/ci/build-windows-cross.sh setup
+
+      - name: Test the Windows build under Wine
+        run: scripts/ci/build-windows-cross.sh test
+
+      - name: Build release executables
+        run: scripts/ci/build-windows-cross.sh build
+
+      - name: Smoke-test the executables under Wine
+        run: scripts/ci/build-windows-cross.sh smoke
+
+      - name: Render every page of the Windows build under Wine
+        run: scripts/ci/build-windows-cross.sh render
+
+      - name: Upload page renders
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kielbox-windows-wine-renders
+          path: target/wine-shots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload cross-built executables
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kielbox-windows-x64-cross
+          path: |
+            target/x86_64-pc-windows-msvc/release/desktop.exe
+            target/x86_64-pc-windows-msvc/release/clean.exe
+          if-no-files-found: error
+          retention-days: 14

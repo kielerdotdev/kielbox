@@ -74,6 +74,12 @@ cargo test --locked -p desktop -j1
 ./scripts/verify-rune.ps1 -SkipBuild -GpuAdapter NVIDIA
 ```
 
+On Linux, `scripts/ci/build-windows-cross.sh` (the `Windows cross build` workflow)
+cross-compiles the Windows release with cargo-xwin, runs the Windows tests of `disk`,
+`clean` and `desktop` under Wine (with pinned Windows FFmpeg and MinGit), smoke-tests the
+executables and renders every page of `desktop.exe` through Wine's Vulkan on Mesa
+lavapipe. It does not cover installer, capture or GPU-preview behaviour.
+
 The scene checks render PNGs and element trees with isolated default state:
 they do not load personal preferences, enumerate captures, register shortcuts,
 record audio, or capture the screen. The GPU scene uploads a generated checkerboard,

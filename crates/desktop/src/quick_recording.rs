@@ -724,6 +724,10 @@ mod tests {
             let mut cfg = RecordConfig::new(&path);
             cfg.fps = Fps::from_f64(f64::from(fps)).unwrap();
             cfg.pipeline.gap_policy = GapPolicy::Duplicate;
+            // The source runs on virtual time, but a source that ends by itself is padded to
+            // the wall clock. Under load (Wine, a busy runner) delivering one virtual second
+            // takes longer than one real second; the limit keeps the recording at one second.
+            cfg.limits.max_duration = Some(Duration::from_secs(1));
             let source = SyntheticSource::new(
                 SyntheticConfig::new(width, height, cfg.fps)
                     .time(TimeMode::Virtual)

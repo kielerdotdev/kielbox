@@ -397,7 +397,10 @@ fn repeated_pause_resume_compacts_video_and_audio_time_in_the_published_file() {
         Worker::start_with_sources(options(&output), factory(TimeMode::Realtime, None)).unwrap();
     let mut result = Results::default();
     result.wait(&worker, |r| r.stats.encoded >= 24);
+    // Capture runs in real time from the start, however slowly the encoder warms up, so
+    // measure from what was already recorded rather than from the first encoded frames.
     let started = Instant::now();
+    let recorded_before = result.stats.recorded.as_secs_f64();
     for _ in 0..3 {
         worker.pause(true);
         thread::sleep(Duration::from_millis(200));
@@ -427,7 +430,8 @@ fn repeated_pause_resume_compacts_video_and_audio_time_in_the_published_file() {
         .unwrap();
     assert!(seconds > 0.8);
     assert!(
-        seconds < started.elapsed().as_secs_f64() - 0.5,
+        // Three 0.5 s pauses: at least 0.5 s of them must be gone.
+        seconds < recorded_before + started.elapsed().as_secs_f64() - 0.5,
         "Pause was not removed: {seconds}"
     );
     assert!(
