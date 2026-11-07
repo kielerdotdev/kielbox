@@ -75,10 +75,6 @@ if ($kielboxPreviousImmutable.Count) {
 }
 & gh release upload preview (Join-Path $kielboxReleaseRoot 'Kielbox-Setup.exe') --repo $Repository --clobber
 if ($LASTEXITCODE -ne 0) { throw 'Uploading the direct-download installer failed.' }
-$kielboxReceiptUpload = Join-Path $env:RUNNER_TEMP ("installer-build-$($kielboxBuild.version).json")
-[IO.File]::Copy((Join-Path $kielboxReleaseRoot 'installer-build.json'), $kielboxReceiptUpload, $true)
-& gh release upload preview $kielboxReceiptUpload --repo $Repository --clobber
-if ($LASTEXITCODE -ne 0) { throw 'Uploading build evidence failed.' }
 $kielboxServer = (& gh api "repos/$Repository/releases/tags/preview" | Out-String) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Cannot verify uploaded release assets.' }
 foreach ($kielboxExpected in @($kielboxImmutable, $kielboxFriendly)) {
