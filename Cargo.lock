@@ -5194,6 +5194,7 @@ name = "media-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "serde",
  "serde_json",
 ]

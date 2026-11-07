@@ -86,6 +86,8 @@ mod trash_recovery_ui;
 #[cfg(windows)]
 mod tray;
 #[cfg(windows)]
+mod tray_window;
+#[cfg(windows)]
 mod ui_proof;
 #[cfg(windows)]
 mod utilities;
@@ -818,7 +820,7 @@ impl Studio {
                         .into_iter()
                         .find(|w| w.downcast::<Studio>().is_some())
                     {
-                        let _ = window.update(cx, |_, w, _| w.activate_window());
+                        let _ = window.update(cx, |_, w, _| tray_window::open(w));
                     }
                     cx.notify();
                 }
@@ -834,7 +836,7 @@ impl Studio {
                         .into_iter()
                         .find(|w| w.downcast::<Studio>().is_some())
                     {
-                        let _ = window.update(cx, |_, window, _| window.activate_window());
+                        let _ = window.update(cx, |_, window, _| tray_window::open(window));
                     }
                     cx.notify();
                 }
@@ -1768,7 +1770,10 @@ fn main() {
                                         cx.notify();
                                     });
                                 }
-                                window.minimize_window();
+                                if let Err(error) = tray_window::hide(window) {
+                                    eprintln!("Hide to tray failed: {error:#}");
+                                    window.minimize_window();
+                                }
                                 false
                             } else {
                                 if let Some(studio) = root.upgrade() {

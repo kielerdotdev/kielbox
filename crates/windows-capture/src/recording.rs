@@ -370,8 +370,8 @@ fn start_save(
     {
         anyhow::bail!("enable microphone capture before requesting microphone suppression");
     }
-    let mut packets = ring.snapshot(seconds);
-    if packets.is_empty() {
+    let snapshot = ring.snapshot_compressed(seconds);
+    if snapshot.is_empty() {
         anyhow::bail!("the replay buffer is not ready yet");
     }
     let video = options.video.clone();
@@ -386,7 +386,8 @@ fn start_save(
             ),
         );
     }
-    // Only one snapshot can be pinned: retained payload <= one additional ring budget.
+    // Only one compressed snapshot can be pinned. The worker also owns the
+    // expanded PCM while muxing; the capture/UI threads never expand history.
     *job = Some(ReplaySave {
         cancel,
         worker: Some(
@@ -400,6 +401,7 @@ fn start_save(
                             windows::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL,
                         );
                     }
+                    let mut packets = snapshot.decode()?;
                     if suppress_microphone {
                         media_io::suppress_microphone(&mut packets, &audio, || {
                             worker_cancel.load(Ordering::Relaxed)

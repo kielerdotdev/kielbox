@@ -2,6 +2,7 @@ use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, VecDeque},
+    io::{Read, Write},
     sync::Arc,
 };
 
@@ -129,10 +130,92 @@ pub trait AudioCapture {
     fn next_packet(&mut self, epoch_hns: u64) -> Result<Option<MediaPacket>>;
 }
 
+/// Lossless compression is private to replay history; muxers still receive float PCM.
+#[derive(Clone)]
+struct ReplayAudio {
+    packet: MediaPacket,
+    decoded_len: Option<usize>,
+}
+impl std::ops::Deref for ReplayAudio {
+    type Target = MediaPacket;
+    fn deref(&self) -> &MediaPacket {
+        &self.packet
+    }
+}
+impl ReplayAudio {
+    fn new(mut packet: MediaPacket) -> Self {
+        if packet.data.len() < 256 {
+            return Self {
+                packet,
+                decoded_len: None,
+            };
+        }
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        let compressed = encoder
+            .write_all(&packet.data)
+            .and_then(|_| encoder.finish());
+        let mut decoded_len = None;
+        if let Ok(bytes) = compressed {
+            // Small or incompressible packets retain their original shared allocation.
+            if bytes.len() + std::mem::size_of::<usize>() < packet.data.len() {
+                decoded_len = Some(packet.data.len());
+                packet.data = bytes.into();
+            }
+        }
+        Self {
+            packet,
+            decoded_len,
+        }
+    }
+    fn memory_bytes(&self) -> usize {
+        self.packet.data.len() + std::mem::size_of::<Self>()
+    }
+    fn decode(self) -> Result<MediaPacket> {
+        let mut packet = self.packet;
+        if let Some(len) = self.decoded_len {
+            let mut bytes = Vec::with_capacity(len);
+            flate2::read::ZlibDecoder::new(packet.data.as_ref())
+                .take(len as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() == len,
+                "Replay audio length changed during decompression"
+            );
+            packet.data = bytes.into();
+        }
+        Ok(packet)
+    }
+}
+
+/// Pins compressed payloads quickly; expansion happens on the replay save worker.
+pub struct AvReplaySnapshot {
+    video: Vec<MediaPacket>,
+    audio: Vec<ReplayAudio>,
+    start: u64,
+    end: u64,
+}
+impl AvReplaySnapshot {
+    pub fn is_empty(&self) -> bool {
+        self.video.is_empty()
+    }
+    pub fn decode(self) -> Result<Vec<MediaPacket>> {
+        let Self {
+            mut video,
+            audio,
+            start,
+            end,
+        } = self;
+        for packet in audio {
+            video.push(packet.decode()?);
+        }
+        trim_snapshot(video, start, end)
+    }
+}
+
 /// Byte/time bounded A/V history. Evicts whole video GOPs and corresponding audio.
 pub struct AvReplayBuffer {
     video: VecDeque<MediaPacket>,
-    audio: BTreeMap<u8, VecDeque<MediaPacket>>,
+    audio: BTreeMap<u8, VecDeque<ReplayAudio>>,
     bytes: usize,
     max_bytes: usize,
     max_ns: u64,
@@ -166,6 +249,7 @@ impl AvReplayBuffer {
             {
                 return;
             }
+            let packet = ReplayAudio::new(packet);
             self.bytes += packet.memory_bytes();
             self.audio
                 .entry(packet.track)
@@ -257,8 +341,19 @@ impl AvReplayBuffer {
             .map_or(0, |(a, b)| b.pts_ns + b.duration_ns - a.pts_ns)
     }
     pub fn snapshot(&self, seconds: u64) -> Vec<MediaPacket> {
+        self.snapshot_compressed(seconds)
+            .decode()
+            .expect("Internally encoded replay audio")
+    }
+    pub fn snapshot_compressed(&self, seconds: u64) -> AvReplaySnapshot {
+        let empty = || AvReplaySnapshot {
+            video: Vec::new(),
+            audio: Vec::new(),
+            start: 0,
+            end: 0,
+        };
         let Some(last) = self.video.back() else {
-            return Vec::new();
+            return empty();
         };
         let end = last.pts_ns + last.duration_ns;
         let cutoff = end.saturating_sub(seconds * NS_PER_SECOND);
@@ -268,45 +363,129 @@ impl AvReplayBuffer {
             .rfind(|v| v.keyframe && v.pts_ns <= cutoff)
             .or_else(|| self.video.front())
         else {
-            return Vec::new();
+            return empty();
         };
         let start = first.pts_ns;
-        let mut packets: Vec<_> = self
+        let video = self
             .video
             .iter()
-            .chain(self.audio.values().flatten())
             .filter(|p| p.pts_ns + p.duration_ns > start && p.pts_ns < end)
             .cloned()
             .collect();
-        for packet in &mut packets {
-            if packet.track != 1 {
-                // Trim boundary PCM to the same video interval, preserving sample alignment.
-                let skip = ((start.saturating_sub(packet.pts_ns) as u128 * u128::from(AUDIO_RATE))
-                    .div_ceil(u128::from(NS_PER_SECOND))) as usize;
-                let available = packet.data.len() / AUDIO_FRAME_BYTES;
-                let keep = (((end.saturating_sub(packet.pts_ns)) as u128 * u128::from(AUDIO_RATE))
-                    / u128::from(NS_PER_SECOND)) as usize;
-                let stop = keep.min(available);
-                if skip > 0 || stop < available {
-                    packet.data = packet.data
-                        [skip.min(stop) * AUDIO_FRAME_BYTES..stop * AUDIO_FRAME_BYTES]
-                        .into();
-                    packet.pts_ns += skip.min(stop) as u64 * NS_PER_SECOND / u64::from(AUDIO_RATE);
-                    packet.duration_ns = packet.data.len() as u64 / AUDIO_FRAME_BYTES as u64
-                        * NS_PER_SECOND
-                        / u64::from(AUDIO_RATE);
-                }
+        let audio = self
+            .audio
+            .values()
+            .flatten()
+            .filter(|p| p.pts_ns + p.duration_ns > start && p.pts_ns < end)
+            .cloned()
+            .collect();
+        AvReplaySnapshot {
+            video,
+            audio,
+            start,
+            end,
+        }
+    }
+}
+
+fn trim_snapshot(mut packets: Vec<MediaPacket>, start: u64, end: u64) -> Result<Vec<MediaPacket>> {
+    for packet in &mut packets {
+        if packet.track != 1 {
+            // Trim boundary PCM to the same video interval, preserving sample alignment.
+            let skip = ((start.saturating_sub(packet.pts_ns) as u128 * u128::from(AUDIO_RATE))
+                .div_ceil(u128::from(NS_PER_SECOND))) as usize;
+            let available = packet.data.len() / AUDIO_FRAME_BYTES;
+            let keep = (((end.saturating_sub(packet.pts_ns)) as u128 * u128::from(AUDIO_RATE))
+                / u128::from(NS_PER_SECOND)) as usize;
+            let stop = keep.min(available);
+            if skip > 0 || stop < available {
+                packet.data = packet.data
+                    [skip.min(stop) * AUDIO_FRAME_BYTES..stop * AUDIO_FRAME_BYTES]
+                    .into();
+                packet.pts_ns += skip.min(stop) as u64 * NS_PER_SECOND / u64::from(AUDIO_RATE);
+                packet.duration_ns = packet.data.len() as u64 / AUDIO_FRAME_BYTES as u64
+                    * NS_PER_SECOND
+                    / u64::from(AUDIO_RATE);
             }
         }
-        packets.retain(|p| !p.data.is_empty());
-        packets.sort_by_key(|p| (p.pts_ns, p.track));
-        packets
     }
+    packets.retain(|p| !p.data.is_empty());
+    packets.sort_by_key(|p| (p.pts_ns, p.track));
+    Ok(packets)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn two_minutes_of_silent_audio_use_less_than_two_megabytes() {
+        let mut ring = AvReplayBuffer::new(64 * 1024 * 1024, 120).unwrap();
+        let started = std::time::Instant::now();
+        for frame in 0..12_000 {
+            let pts = frame * 10_000_000;
+            ring.push(packet(1, pts, frame % 100 == 0, 1));
+            ring.push(packet(2, pts, true, 3840));
+        }
+        let elapsed = started.elapsed();
+        let retained = ring.bytes();
+        assert_eq!(ring.duration_ns(), 120 * NS_PER_SECOND);
+        assert!(retained < 2 * 1024 * 1024, "retained {retained} bytes");
+        let decoded = ring.snapshot_compressed(120).decode().unwrap();
+        let audio_bytes: usize = decoded
+            .iter()
+            .filter(|p| p.track == 2)
+            .map(|p| p.data.len())
+            .sum();
+        assert_eq!(audio_bytes, 46_080_000);
+        eprintln!("120s silent PCM: {audio_bytes} raw bytes, {retained} retained bytes including video/metadata; capture insertion took {elapsed:?}");
+    }
+    #[test]
+    fn replay_audio_compression_is_lossless_and_snapshot_outlives_eviction() {
+        // Include negative zero, NaN payloads and nonzero samples: preserve bits,
+        // rather than converting float PCM to a lower precision format.
+        let pattern = [0_u32, 0x80000000, 0x7fc01234, 0x3eaaaaab, 0xbe123456];
+        let data: Arc<[u8]> = pattern
+            .iter()
+            .cycle()
+            .take(960)
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<_>>()
+            .into();
+        let mut ring = AvReplayBuffer::new(1_000_000, 1).unwrap();
+        ring.push(packet(1, 0, true, 100));
+        let mut audio = packet(2, 0, true, data.len());
+        audio.data = data.clone();
+        ring.push(audio);
+        assert!(ring.bytes() < data.len() / 2);
+        let snapshot = ring.snapshot_compressed(1);
+        ring.push(packet(1, 2 * NS_PER_SECOND, true, 100));
+        ring.push(packet(1, 4 * NS_PER_SECOND, true, 100));
+        drop(ring);
+        let decoded = snapshot.decode().unwrap();
+        let audio = decoded.iter().find(|p| p.track == 2).unwrap();
+        assert_eq!(audio.data.as_ref(), data.as_ref());
+        assert_eq!(audio.pts_ns, 0);
+        assert_eq!(audio.duration_ns, 10_000_000);
+    }
+
+    #[test]
+    fn incompressible_audio_keeps_the_original_shared_allocation() {
+        let mut seed = 0x12345678_u32;
+        let data: Arc<[u8]> = (0..3840)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let mut original = packet(2, 0, true, data.len());
+        original.data = data.clone();
+        let stored = ReplayAudio::new(original);
+        assert!(stored.decoded_len.is_none());
+        assert!(Arc::ptr_eq(&data, &stored.decode().unwrap().data));
+    }
     #[test]
     fn endpoint_defaults_preserve_old_tracks_and_exact_opaque_ids() {
         let old = r#"{"id":3,"name":"Microphone","source":"Microphone"}"#;
