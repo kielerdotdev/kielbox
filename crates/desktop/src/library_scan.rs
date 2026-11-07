@@ -28,6 +28,8 @@ struct ScanResult {
 
 pub(crate) struct ScanOutcome {
     pub files: Vec<PathBuf>,
+    /// Last-modified times of the scanned files that have one, for date grouping.
+    pub modified: BTreeMap<PathBuf, SystemTime>,
     pub root_error: Option<recordings::RootScanError>,
 }
 impl ScanOutcome {
@@ -199,7 +201,15 @@ fn scan(request: ScanRequest, cancelled: impl Fn() -> bool) -> Option<ScanOutcom
     if cancelled() {
         return None;
     }
-    Some(ScanOutcome { files: captures.into_iter().map(|(path, _)| path).collect(), root_error })
+    let modified = captures
+        .iter()
+        .filter_map(|(path, time)| Some((path.clone(), (*time)?)))
+        .collect();
+    Some(ScanOutcome {
+        files: captures.into_iter().map(|(path, _)| path).collect(),
+        modified,
+        root_error,
+    })
 }
 
 #[cfg(test)]
@@ -340,7 +350,7 @@ mod tests {
     #[test]
     fn failed_root_appends_new_references_without_reordering_or_duplicates() {
         let mut files = ["z.mp4", "a.mp4"].map(PathBuf::from).to_vec();
-        let outcome = ScanOutcome { files: ["a.mp4", "b.mp4", "b.mp4"].map(PathBuf::from).to_vec(),
+        let outcome = ScanOutcome { files: ["a.mp4", "b.mp4", "b.mp4"].map(PathBuf::from).to_vec(), modified: Default::default(),
             root_error: Some(recordings::RootScanError { root: "missing".into(), kind: std::io::ErrorKind::NotFound }) };
         assert!(outcome.apply(&mut files).is_some());
         assert_eq!(files, ["z.mp4", "a.mp4", "b.mp4"].map(PathBuf::from));
@@ -354,7 +364,7 @@ mod tests {
         // Model the worker passing its cancellation check immediately before
         // cancel cleared the slot, then writing its result immediately after.
         *scanner.result.lock().unwrap() = Some(ScanResult { revision,
-            outcome: ScanOutcome { files: vec!["late.mp4".into()], root_error: None } });
+            outcome: ScanOutcome { files: vec!["late.mp4".into()], modified: Default::default(), root_error: None } });
         assert!(scanner.poll().is_none());
         scanner.request(ScanRequest { root: "unused".into(), toolkit_files: vec![], imported_files: BTreeSet::new() });
         assert_eq!(scanner.revision, revision);

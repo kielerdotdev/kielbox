@@ -1,12 +1,13 @@
 //! Non-destructive editor model presented through Rune; decoding/export never run in a view.
 use crate::{
     recordings,
-    rune_ui::{self as ui, State as AppState, button, color, heading, label, muted},
+    rune_theme::{self as theme, Btn, c, icons},
+    rune_ui::{self as ui, State as AppState, color},
 };
 use editor_core::{
     self as core, Edit, Editor, PlaybackOutput, PlaybackSession, Project, ScrubSession,
 };
-use rune::{El, Key, KeyEvent, NativeSurface, SurfaceFit, col, el, row};
+use rune::{El, Key, KeyEvent, NativeSurface, SurfaceFit, TextStyle, col, el, row};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, atomic::Ordering, mpsc},
@@ -39,6 +40,8 @@ pub struct State {
     save_revision: u64,
     saved_revision: u64,
     pub annotation: Option<crate::rune_annotation::Annotation>,
+    /// Drawn width of the timeline strip, for placing the playhead.
+    pub strip_width: f32,
 }
 struct SaveWorker {
     pending: Arc<Mutex<Option<(u64, Project)>>>,
@@ -411,172 +414,369 @@ impl Drop for State {
         }
     }
 }
+impl State {
+    /// Close the open clip. Refused while edits are unsaved or an export runs.
+    pub fn close(&mut self) -> bool {
+        if self.export.is_some() {
+            self.message = "Cancel the export before closing this clip.".into();
+            return false;
+        }
+        if self.editor.is_some() && self.save_revision != self.saved_revision {
+            self.message = "Wait for edits to finish saving before closing. If saving failed, use Retry save.".into();
+            return false;
+        }
+        self.stop();
+        self.loading = None;
+        self.editor = None;
+        self.scrub = None;
+        self.save = None;
+        self.path = None;
+        self.selected = None;
+        self.annotation = None;
+        self.message.clear();
+        true
+    }
+}
+
+fn clock(seconds: f64) -> String {
+    let s = seconds.max(0.0);
+    let whole = s as u64;
+    format!("{}:{:04.1}", whole / 60, s - (whole / 60 * 60) as f64)
+}
+
 pub fn view(s: &AppState) -> El {
     if s.editor.annotation.is_some() {
         return crate::rune_annotation::view(s);
     }
     let e = &s.editor;
-    let mut toolbar = row()
-        .gap(8.0)
-        .child(heading("Editor").grow(1.0))
-        .child(button("editor-open", "Open…", |s, tx| s.browse(tx)))
-        .child(button("editor-export", "Export…", |_, tx| {
-            tx.save_file(
-                rune::FileDialogOptions {
-                    file_name: Some("clip.mp4".into()),
-                    ..Default::default()
-                }
-                .filter("MP4", &["mp4"]),
-                |s: &mut AppState, result, _| match result {
-                    Ok(Some(path)) => s.editor.export(path, s.wake.clone()),
-                    Err(e) => s.notice = e.to_string(),
-                    _ => {}
-                },
+    let saved = e.save_revision == e.saved_revision;
+    let title = e
+        .path
+        .as_deref()
+        .map(|p| ui::clip_title(s, p))
+        .unwrap_or_else(|| "Editor".into());
+    let mut bar = row()
+        .w_full()
+        .px(24.0)
+        .py(12.0)
+        .gap(12.0)
+        .center_y()
+        .child(
+            Btn::new("editor-back", "Library")
+                .ghost()
+                .icon(&icons::BACK)
+                .on(|s, _| s.go(ui::Page::Library))
+                .build(),
+        )
+        .child(
+            rune::text(title)
+                .font(theme::H2)
+                .color(c(theme::T1))
+                .role("heading")
+                .level(1)
+                .single_line()
+                .truncate()
+                .min_w(0.0),
+        );
+    if e.editor.is_some() {
+        bar = bar.child(theme::small(if saved { "Saved" } else { "Saving…" }));
+    }
+    bar = bar.child(theme::spacer());
+    if e.editor.is_some() {
+        bar = bar
+            .child(
+                Btn::icon_only("undo-edit", "Undo", &icons::UNDO)
+                    .on(|s, _| s.editor.undo(false))
+                    .build(),
             )
-        }));
+            .child(
+                Btn::icon_only("redo-edit", "Redo", &icons::REDO)
+                    .on(|s, _| s.editor.undo(true))
+                    .build(),
+            );
+    }
     if e.export.is_some() {
-        toolbar = toolbar.child(button("cancel-export", "Cancel export", |s, _| {
-            if let Some((p, _)) = &s.editor.export {
-                p.cancel.store(true, Ordering::Release);
-            }
-        }));
-    }
-    let mut page = col().grow(1.0).min_h(0.0).gap(12.0).child(toolbar);
-    if let Some(path) = &e.path {
-        page = page.child(label(recordings::title(path)));
+        bar = bar
+            .child(theme::small("Exporting…"))
+            .child(
+                Btn::new("cancel-export", "Cancel export")
+                    .on(|s, _| {
+                        if let Some((p, _)) = &s.editor.export {
+                            p.cancel.store(true, Ordering::Release);
+                        }
+                    })
+                    .build(),
+            );
     } else {
-        page = page.child(muted("Open a recording or image from your Library."));
+        bar = bar.child(
+            Btn::new("editor-export", "Export")
+                .primary()
+                .disabled(e.editor.is_none())
+                .on(|_, tx| {
+                    tx.save_file(
+                        rune::FileDialogOptions {
+                            file_name: Some("clip.mp4".into()),
+                            ..Default::default()
+                        }
+                        .filter("MP4", &["mp4"]),
+                        |s: &mut AppState, result, _| match result {
+                            Ok(Some(path)) => s.editor.export(path, s.wake.clone()),
+                            Err(e) => s.notice = e.to_string(),
+                            _ => {}
+                        },
+                    )
+                })
+                .build(),
+        );
     }
-    page = page.child(
-        el().key("media-preview")
-            .grow(1.0)
-            .min_h(120.0)
-            .w_full()
-            .fill(color(0x000000))
-            .native_surface(&e.surface, SurfaceFit::Fit),
-    );
+    let mut main = col()
+        .grow(1.0)
+        .min_h(0.0)
+        .px(24.0)
+        .pb(18.0)
+        .gap(14.0);
+    let mut preview = el()
+        .key("media-preview")
+        .grow(1.0)
+        .min_h(120.0)
+        .w_full()
+        .radius(8.0)
+        .clip_rounded(8.0)
+        .fill(color(0x000000))
+        .native_surface(&e.surface, SurfaceFit::Fit);
+    if e.editor.is_none() {
+        preview = preview.center().child(
+            col()
+                .gap(10.0)
+                .items_center()
+                .child(theme::glyph(&icons::FILM, 28.0, c(theme::T3)))
+                .child(theme::small(if e.loading.is_some() {
+                    "Opening…"
+                } else {
+                    "Open a recording or image from your Library."
+                }))
+                .child(
+                    Btn::new("editor-open", "Open file…")
+                        .hint("Ctrl O")
+                        .on(|s, tx| s.browse(tx))
+                        .build(),
+                ),
+        );
+    }
+    main = main.child(preview);
     if let Some(editor) = &e.editor {
         let project = &editor.project;
         let duration = project.duration().max(1);
         let position = e.position;
-        page = page.child(
+        main = main.child(
             row()
-                .gap(8.0)
-                .child(button(
-                    "play",
-                    if e.playing() { "Pause" } else { "Play" },
-                    |s, _| s.editor.play(),
-                ))
-                .child(button("step-back", "−1 frame", |s, _| {
-                    s.editor.seek(s.editor.position.saturating_sub(1))
-                }))
-                .child(button("step-next", "+1 frame", |s, _| {
-                    s.editor.seek(s.editor.position + 1)
-                }))
-                .child(label(format!(
-                    "{:.2} / {:.2}s",
-                    project.seconds(position),
-                    project.seconds(duration)
-                )))
-                .child(muted(if e.save_revision == e.saved_revision {
-                    "Saved"
-                } else {
-                    "Saving…"
-                })),
-        );
-        page = page.child(
-            el().key("seek")
-                .role("slider")
-                .label("Seek")
                 .w_full()
-                .h(24.0)
-                .fill(color(ui::LINE))
-                .on_drag(|s: &mut AppState, d, tx| {
-                    tx.instant();
-                    if let Some(editor) = &s.editor.editor {
-                        let total = editor.project.duration();
-                        let fraction = (d.x / d.w.max(1.0)).clamp(0.0, 1.0);
-                        s.editor.seek((total as f32 * fraction) as u64);
-                    }
-                })
+                .gap(4.0)
+                .center_y()
                 .child(
-                    el().w(4.0)
-                        .h(24.0)
-                        .fill(color(ui::ACCENT))
-                        .absolute((position as f32 / duration as f32) * 600.0, 0.0),
+                    Btn::icon_only("step-back", "Previous frame", &icons::PREV)
+                        .on(|s, _| s.editor.seek(s.editor.position.saturating_sub(1)))
+                        .build(),
+                )
+                .child(
+                    Btn::icon_only(
+                        "play",
+                        if e.playing() { "Pause" } else { "Play" },
+                        if e.playing() {
+                            &icons::PAUSE
+                        } else {
+                            &icons::PLAY
+                        },
+                    )
+                    .on(|s, _| s.editor.play())
+                    .build(),
+                )
+                .child(
+                    Btn::icon_only("step-next", "Next frame", &icons::NEXT)
+                        .on(|s, _| s.editor.seek(s.editor.position + 1))
+                        .build(),
+                )
+                .child(
+                    rune::text(clock(project.seconds(position)))
+                        .font(theme::NUM)
+                        .color(c(theme::T1))
+                        .ml(6.0),
+                )
+                .child(theme::spacer())
+                .child(theme::small("Length "))
+                .child(
+                    rune::text(clock(project.seconds(duration)))
+                        .font(theme::NUM)
+                        .color(c(theme::T1)),
                 ),
         );
-        let mut pieces = row().gap(6.0);
+        // The strip: one segment per piece, sized by its length; drag anywhere to seek.
+        let selected = e.selected();
+        let mut strip = row()
+            .key("seek")
+            .role("slider")
+            .label("Seek")
+            .range_value(position as f64, 0.0, duration as f64)
+            .w_full()
+            .h(68.0)
+            .gap(2.0)
+            .radius(6.0)
+            .clip_rounded(6.0)
+            .on_layout(|s: &mut AppState, r| {
+                if (s.editor.strip_width - r[2]).abs() > 0.5 {
+                    s.editor.strip_width = r[2];
+                }
+            })
+            .on_drag(|s: &mut AppState, d, tx| {
+                tx.instant();
+                if let Some(editor) = &s.editor.editor {
+                    let total = editor.project.duration();
+                    let fraction = (d.x / d.w.max(1.0)).clamp(0.0, 1.0);
+                    s.editor.seek((total as f32 * fraction) as u64);
+                }
+            });
         for (i, piece) in core::pieces(project).iter().enumerate() {
             let id = piece.id;
             let at = piece.start;
-            pieces = pieces.child(
-                button(
-                    format!("piece-{id}"),
-                    format!("{} · {:.2}s", i + 1, project.seconds(piece.duration)),
-                    move |s, _| {
-                        s.editor.selected = Some(id);
-                        s.editor.seek(at);
-                    },
-                )
-                .border(
-                    1.0,
-                    color(if e.selected() == Some(id) {
-                        ui::ACCENT
-                    } else {
-                        ui::LINE
-                    }),
-                ),
+            let on = selected == Some(id);
+            let mut segment = col()
+                .key(format!("piece-{id}"))
+                .role("button")
+                .label(format!(
+                    "Piece {}, {:.1} s",
+                    i + 1,
+                    project.seconds(piece.duration)
+                ))
+                .grow(piece.duration.max(1) as f32)
+                .min_w(4.0)
+                .h_full()
+                .padding(8.0)
+                .justify_end()
+                .fill(c(if on { 0x34363c } else { theme::BG2 }))
+                .hover(c(0x303136))
+                .on_press(move |s: &mut AppState| {
+                    s.editor.selected = Some(id);
+                    s.editor.seek(at);
+                })
+                .child(
+                    rune::text(format!("{:.1} s", project.seconds(piece.duration)))
+                        .font(theme::NUM)
+                        .color(c(theme::T2))
+                        .single_line(),
+                );
+            if on {
+                segment = segment.border(2.0, c(theme::T1));
+            }
+            strip = strip.child(segment);
+        }
+        let x = (position as f32 / duration as f32) * e.strip_width;
+        strip = strip.child(
+            el().key("playhead")
+                .w(2.0)
+                .h(68.0)
+                .fill(c(theme::ACCENT))
+                .absolute((x - 1.0).max(0.0), 0.0),
+        );
+        main = main.child(strip);
+        let mut ticks = row().w_full().justify_between();
+        for step in 0..=4 {
+            ticks = ticks.child(
+                rune::text(ui::clock(project.seconds(duration) * step as f64 / 4.0))
+                    .font(TextStyle::new(11.5, 440.0).lh(14.0).features("'tnum' 1"))
+                    .color(c(theme::T2)),
             );
         }
-        page = page.child(pieces.scroll_x().h(45.0)).child(
-            row()
-                .gap(6.0)
-                .child(button("split", "Split", |s, _| s.editor.split()))
-                .child(button("delete-piece", "Delete", |s, _| s.editor.delete()))
-                .child(button("trim-start", "Trim start here", |s, _| {
-                    if let Some(id) = s.editor.selected() {
-                        s.editor.execute(Edit::TrimLeft {
-                            id,
-                            to: s.editor.position,
-                        });
-                    }
-                }))
-                .child(button("trim-end", "Trim end here", |s, _| {
-                    if let Some(id) = s.editor.selected() {
-                        s.editor.execute(Edit::TrimRight {
-                            id,
-                            to: s.editor.position,
-                        });
-                    }
-                }))
-                .child(button("undo-edit", "Undo", |s, _| s.editor.undo(false)))
-                .child(button("redo-edit", "Redo", |s, _| s.editor.undo(true))),
-        );
-        let mut audio = row().gap(6.0);
+        main = main.child(ticks.mt(-8.0).a11y_hidden());
+        let mut actions = row()
+            .w_full()
+            .gap(8.0)
+            .center_y()
+            .flex_wrap()
+            .child(
+                Btn::new("trim-start", "Start here")
+                    .disabled(selected.is_none())
+                    .on(|s, _| {
+                        if let Some(id) = s.editor.selected() {
+                            s.editor.execute(Edit::TrimLeft {
+                                id,
+                                to: s.editor.position,
+                            });
+                        }
+                    })
+                    .build(),
+            )
+            .child(
+                Btn::new("trim-end", "End here")
+                    .disabled(selected.is_none())
+                    .on(|s, _| {
+                        if let Some(id) = s.editor.selected() {
+                            s.editor.execute(Edit::TrimRight {
+                                id,
+                                to: s.editor.position,
+                            });
+                        }
+                    })
+                    .build(),
+            )
+            .child(el().w(12.0))
+            .child(
+                Btn::new("split", "Split")
+                    .icon(&icons::SPLIT)
+                    .hint("S")
+                    .on(|s, _| s.editor.split())
+                    .build(),
+            )
+            .child(
+                Btn::new("delete-piece", "Delete")
+                    .icon(&icons::TRASH)
+                    .disabled(selected.is_none())
+                    .on(|s, _| s.editor.delete())
+                    .build(),
+            )
+            .child(theme::spacer());
         for track in project
             .tracks
             .iter()
             .filter(|t| t.kind == core::TrackKind::Audio)
         {
             let id = track.id;
-            audio = audio.child(button(
-                format!("mute-{id}"),
-                format!("{} {}", if track.muted { "○" } else { "✓" }, track.name),
-                move |s, _| s.editor.execute(Edit::MuteTrack { id }),
-            ));
+            let mic = track.name.to_lowercase().contains("mic");
+            actions = actions.child(
+                row()
+                    .gap(8.0)
+                    .center_y()
+                    .child(theme::glyph(
+                        if mic { &icons::MIC } else { &icons::SPEAKER },
+                        15.0,
+                        c(theme::T2),
+                    ))
+                    .child(theme::switch(
+                        format!("mute-{id}"),
+                        format!("{} audio", track.name),
+                        !track.muted,
+                        move |s, _| s.editor.execute(Edit::MuteTrack { id }),
+                    ))
+                    .child(theme::small(track.name.clone())),
+            );
         }
-        page = page.child(audio);
+        main = main.child(actions);
     }
-    if !e.message.is_empty() {
-        page = page.child(label(&e.message));
+    if !e.message.is_empty() || !saved {
+        let mut line = row()
+            .w_full()
+            .gap(10.0)
+            .center_y()
+            .child(theme::small(e.message.clone()).grow(1.0).min_w(0.0));
+        if !saved {
+            line = line.child(
+                Btn::new("retry-save", "Retry save")
+                    .on(|s, _| s.editor.changed())
+                    .build(),
+            );
+        }
+        main = main.child(line);
     }
-    if e.save_revision != e.saved_revision {
-        page = page.child(button("retry-save", "Retry save", |s, _| {
-            s.editor.changed()
-        }));
-    }
-    page
+    col().grow(1.0).min_h(0.0).child(bar).child(main)
 }
 
 #[cfg(test)]

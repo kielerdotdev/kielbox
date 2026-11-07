@@ -21,6 +21,8 @@ mod rune_gpu;
 #[cfg(windows)]
 static PENDING_UPDATE: std::sync::Mutex<Option<(updates::PreparedUpdate, std::path::PathBuf)>> =
     std::sync::Mutex::new(None);
+mod rune_palette;
+mod rune_theme;
 mod rune_tools;
 mod rune_ui;
 #[cfg(windows)]
@@ -122,25 +124,25 @@ fn main() {
         on_key: Some(rune_ui::on_key),
         scenes: &[
             ("cpu-fixture", |s| {
-                s.page = rune_ui::Page::Capture;
+                s.go(rune_ui::Page::Capture);
                 #[cfg(windows)]
                 if s.headless {
                     s.capture.cpu_fixture();
                 }
             }),
             ("gpu-fixture", |s| {
-                s.page = rune_ui::Page::Capture;
+                s.go(rune_ui::Page::Capture);
                 #[cfg(windows)]
                 if s.headless {
                     s.capture.gpu_fixture();
                 }
             }),
-            ("library", |s| s.page = rune_ui::Page::Library),
-            ("capture", |s| s.page = rune_ui::Page::Capture),
+            ("library", |s| s.go(rune_ui::Page::Library)),
+            ("capture", |s| s.go(rune_ui::Page::Capture)),
             ("editor", |s| s.page = rune_ui::Page::Editor),
-            ("disk", |s| s.page = rune_ui::Page::Disk),
-            ("tools", |s| s.page = rune_ui::Page::Tools),
-            ("settings", |s| s.page = rune_ui::Page::Settings),
+            ("disk", |s| s.go_disk()),
+            ("tools", |s| s.go(rune_ui::Page::Tools)),
+            ("settings", |s| s.go(rune_ui::Page::Settings)),
         ],
         min_size: Some((760.0, 540.0)),
         ..rune::AppSpec::new(
@@ -150,7 +152,10 @@ fn main() {
             rune_ui::view,
         )
     };
-    let app = rune::App::new(spec).keep_running().on_close(|s, tx| {
+    let app = rune::App::new(spec)
+        .titlebar(rune::Titlebar::new(rune_ui::TITLEBAR))
+        .keep_running()
+        .on_close(|s, tx| {
         if !s.preferences.close_to_tray || !s.has_tray() {
             tx.quit();
         }

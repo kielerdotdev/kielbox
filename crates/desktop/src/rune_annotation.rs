@@ -1,5 +1,8 @@
 //! Existing annotation actor, with Rune pointer/key input and a bounded raster preview.
-use crate::rune_ui::{JobResult, State as AppState, button, color, field, heading, label};
+use crate::{
+    rune_theme::{self as theme, Btn, c, icons},
+    rune_ui::{JobResult, State as AppState, color},
+};
 use rune::{El, Key, KeyEvent, NativeSurface, TextEdit, col, el, row};
 use std::path::PathBuf;
 use toolkit::{
@@ -116,84 +119,197 @@ impl Annotation {
         Some((self.save_path.take()?, frame))
     }
 }
+fn tool_icon(tool: a::Tool) -> &'static rune::Icon {
+    use a::Tool::*;
+    match tool {
+        Select | Cursor => &icons::SELECT,
+        Rectangle => &icons::RECT,
+        Ellipse | CropEllipse => &icons::ELLIPSE,
+        Line => &icons::LINE,
+        Arrow => &icons::ARROW,
+        Freehand | FreehandArrow | CropFreeform => &icons::FREEHAND,
+        Text | Balloon => &icons::TEXT,
+        Step => &icons::STEP,
+        Magnify => &icons::SEARCH,
+        Spotlight => &icons::EFFECTS,
+        Blur | Pixelate => &icons::BLUR,
+        Highlight | HighlightPen => &icons::HIGHLIGHT,
+        Image => &icons::IMAGE,
+        Sticker => &icons::STAR,
+        Grid => &icons::THUMBNAILS,
+        Eraser => &icons::TRASH,
+        Crop => &icons::CROP,
+        CutOut => &icons::SPLIT,
+    }
+}
+fn tool_name(tool: a::Tool) -> String {
+    // `HighlightPen` → `Highlight pen`.
+    let raw = format!("{tool:?}");
+    let mut name = String::new();
+    for (i, ch) in raw.chars().enumerate() {
+        if i > 0 && ch.is_uppercase() {
+            name.push(' ');
+            name.extend(ch.to_lowercase());
+        } else {
+            name.push(ch);
+        }
+    }
+    name
+}
+fn send(command: fn() -> Command) -> impl Fn(&mut AppState, &mut rune::Tx) + 'static {
+    move |s, _| {
+        if let Some(a) = &mut s.editor.annotation {
+            a.send(command());
+        }
+    }
+}
 pub fn view(s: &AppState) -> El {
     let Some(a) = &s.editor.annotation else {
         return col();
     };
-    let mut tools = row().gap(4.0);
-    for tool in a::Tool::ALL {
-        tools = tools.child(
-            button(
-                format!("annotation-{tool:?}"),
-                format!("{tool:?}"),
-                move |s, _| {
-                    if let Some(a) = &mut s.editor.annotation {
-                        a.send(Command::Tool(tool));
-                    }
-                },
-            )
-            .checked(a.active == tool),
-        );
-    }
-    let actions = row()
-        .gap(6.0)
-        .child(button("annotation-undo", "Undo", |s, _| {
-            if let Some(a) = &mut s.editor.annotation {
-                a.send(Command::Undo);
-            }
-        }))
-        .child(button("annotation-redo", "Redo", |s, _| {
-            if let Some(a) = &mut s.editor.annotation {
-                a.send(Command::Redo);
-            }
-        }))
-        .child(button("annotation-crop", "Apply crop", |s, _| {
-            if let Some(a) = &mut s.editor.annotation {
-                a.send(Command::ApplyCrop);
-            }
-        }))
-        .child(button("annotation-rotate", "Rotate", |s, _| {
-            if let Some(a) = &mut s.editor.annotation {
-                a.send(Command::Rotate);
-            }
-        }))
-        .child(button("annotation-save", "Save image…", |_, tx| {
-            tx.save_file(
-                rune::FileDialogOptions::default().filter("PNG", &["png"]),
-                |s: &mut AppState, result, _| match result {
-                    Ok(Some(path)) => {
-                        if let Some(a) = &mut s.editor.annotation {
-                            a.save_path = Some(path);
-                            a.send(Command::Accept);
-                        }
-                    }
-                    Err(e) => s.notice = e.to_string(),
-                    _ => {}
-                },
-            )
-        }))
-        .child(button(
-            "annotation-project",
-            "Save editable project…",
-            |_, tx| {
-                tx.save_file(
-                    rune::FileDialogOptions::default().filter("Annotation project", &["ssxe"]),
-                    |s: &mut AppState, result, _| {
-                        if let Ok(Some(path)) = result {
-                            if let Some(a) = &mut s.editor.annotation {
+    let title = s
+        .editor
+        .path
+        .as_deref()
+        .map(|p| crate::rune_ui::clip_title(s, p))
+        .unwrap_or_else(|| "Image".into());
+    let bar = row()
+        .w_full()
+        .px(24.0)
+        .py(12.0)
+        .gap(8.0)
+        .center_y()
+        .child(
+            Btn::new("annotation-back", "Library")
+                .ghost()
+                .icon(&icons::BACK)
+                .on(|s, _| s.go(crate::rune_ui::Page::Library))
+                .build(),
+        )
+        .child(
+            rune::text(title)
+                .font(theme::H2)
+                .color(c(theme::T1))
+                .role("heading")
+                .level(1)
+                .single_line()
+                .truncate()
+                .min_w(0.0),
+        )
+        .child(theme::spacer())
+        .child(
+            Btn::icon_only("annotation-undo", "Undo", &icons::UNDO)
+                .on(send(|| Command::Undo))
+                .build(),
+        )
+        .child(
+            Btn::icon_only("annotation-redo", "Redo", &icons::REDO)
+                .on(send(|| Command::Redo))
+                .build(),
+        )
+        .child(
+            Btn::new("annotation-rotate", "Rotate")
+                .ghost()
+                .icon(&icons::ROTATE)
+                .on(send(|| Command::Rotate))
+                .build(),
+        )
+        .child(
+            Btn::new("annotation-crop", "Apply crop")
+                .ghost()
+                .icon(&icons::CROP)
+                .on(send(|| Command::ApplyCrop))
+                .build(),
+        )
+        .child(
+            Btn::new("annotation-project", "Save editable…")
+                .on(|_, tx| {
+                    tx.save_file(
+                        rune::FileDialogOptions::default().filter("Annotation project", &["ssxe"]),
+                        |s: &mut AppState, result, _| {
+                            if let Ok(Some(path)) = result
+                                && let Some(a) = &mut s.editor.annotation
+                            {
                                 a.send(Command::Project(path));
                             }
-                        }
-                    },
-                )
-            },
-        ));
+                        },
+                    )
+                })
+                .build(),
+        )
+        .child(
+            Btn::new("annotation-save", "Save image…")
+                .primary()
+                .on(|_, tx| {
+                    tx.save_file(
+                        rune::FileDialogOptions::default().filter("PNG", &["png"]),
+                        |s: &mut AppState, result, _| match result {
+                            Ok(Some(path)) => {
+                                if let Some(a) = &mut s.editor.annotation {
+                                    a.save_path = Some(path);
+                                    a.send(Command::Accept);
+                                }
+                            }
+                            Err(e) => s.notice = e.to_string(),
+                            _ => {}
+                        },
+                    )
+                })
+                .build(),
+        );
+    let mut tools = row()
+        .key("annotation-tools")
+        .role("toolbar")
+        .label("Annotation tools")
+        .gap(2.0)
+        .padding(5.0)
+        .center_y();
+    for tool in a::Tool::ALL {
+        let on = a.active == tool;
+        let mut b = Btn::icon_only(format!("annotation-{tool:?}"), tool_name(tool), tool_icon(tool))
+            .checked(on)
+            .on(move |s, _| {
+                if let Some(a) = &mut s.editor.annotation {
+                    a.send(Command::Tool(tool));
+                }
+            });
+        if on {
+            b = b.variant(theme::Variant::Neutral);
+        }
+        tools = tools.child(b.build());
+    }
+    let label = theme::field_shell(
+        Some(theme::glyph(&icons::TEXT, 14.0, c(theme::T3))),
+        theme::input("annotation-label", "Label text", &a.text, |s| {
+            &mut s.editor.annotation.as_mut().unwrap().text
+        })
+        .on_input_change(|s: &mut AppState, _| {
+            if let Some(a) = &mut s.editor.annotation {
+                a.send(Command::Label(a.text.text.clone()));
+            }
+        }),
+    )
+    .w(240.0);
+    let dock = row()
+        .w_full()
+        .px(24.0)
+        .gap(12.0)
+        .center_y()
+        .child(
+            theme::floating(tools.radius(9.0))
+                .scroll_x()
+                .min_w(0.0)
+                .grow(1.0),
+        )
+        .child(label);
     let canvas = el()
         .key("annotation-canvas")
         .grow(1.0)
         .min_h(100.0)
         .w_full()
-        .fill(color(0x181a1f))
+        .radius(8.0)
+        .clip_rounded(8.0)
+        .fill(color(0x121316))
         .native_surface(&a.surface, rune::SurfaceFit::Fit)
         .on_layout(|s: &mut AppState, r| {
             if let Some(a) = &mut s.editor.annotation {
@@ -221,25 +337,16 @@ pub fn view(s: &AppState) -> El {
                 a.send(command);
             }
         });
-    col()
+    let mut page = col()
         .grow(1.0)
         .min_h(0.0)
-        .gap(8.0)
-        .child(heading("Image editor"))
-        .child(tools.scroll_x().h(44.0))
-        .child(actions)
-        .child(
-            field("annotation-label", &a.text, |s| {
-                &mut s.editor.annotation.as_mut().unwrap().text
-            })
-            .on_input_change(|s: &mut AppState, _| {
-                if let Some(a) = &mut s.editor.annotation {
-                    a.send(Command::Label(a.text.text.clone()));
-                }
-            }),
-        )
-        .child(canvas)
-        .child(label(&a.message))
+        .child(bar)
+        .child(dock)
+        .child(col().grow(1.0).min_h(0.0).px(24.0).pt(14.0).pb(18.0).child(canvas));
+    if !a.message.is_empty() {
+        page = page.child(theme::small(a.message.clone()).px(24.0).pb(14.0));
+    }
+    page
 }
 pub fn flush_save(s: &mut AppState) {
     if let Some((path, frame)) = s.editor.annotation.as_mut().and_then(Annotation::take_save) {

@@ -209,6 +209,81 @@ pub fn title(path: &Path) -> String {
     "Screen recording".into()
 }
 
+/// A wall-clock moment in the user's time zone (UTC where the zone is unavailable).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalTime {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
+}
+impl LocalTime {
+    pub fn date(&self) -> (i32, u32, u32) {
+        (self.year, self.month, self.day)
+    }
+    pub fn month_name(&self) -> &'static str {
+        [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ][(self.month.saturating_sub(1) as usize).min(11)]
+    }
+}
+
+pub fn local_time(stamp: std::time::SystemTime) -> Option<LocalTime> {
+    let since = stamp.duration_since(UNIX_EPOCH).ok()?;
+    #[cfg(windows)]
+    {
+        use windows::Win32::{
+            Foundation::{FILETIME, SYSTEMTIME},
+            System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime},
+        };
+        let ticks = (since.as_nanos() / 100) as u64 + 116_444_736_000_000_000;
+        let ft = FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        };
+        let mut utc = SYSTEMTIME::default();
+        let mut local = SYSTEMTIME::default();
+        if unsafe {
+            FileTimeToSystemTime(&ft, &mut utc)
+                .and_then(|_| SystemTimeToTzSpecificLocalTime(None, &utc, &mut local))
+        }
+        .is_ok()
+        {
+            return Some(LocalTime {
+                year: i32::from(local.wYear),
+                month: u32::from(local.wMonth),
+                day: u32::from(local.wDay),
+                hour: u32::from(local.wHour),
+                minute: u32::from(local.wMinute),
+            });
+        }
+    }
+    Some(utc_time(since.as_secs()))
+}
+
+/// Civil date from Unix seconds (Howard Hinnant's `civil_from_days`).
+fn utc_time(seconds: u64) -> LocalTime {
+    let days = (seconds / 86_400) as i64;
+    let rest = seconds % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = (yoe + era * 400 + i64::from(month <= 2)) as i32;
+    LocalTime {
+        year,
+        month,
+        day,
+        hour: (rest / 3_600) as u32,
+        minute: (rest % 3_600 / 60) as u32,
+    }
+}
+
 pub fn edit_path(path: &Path) -> PathBuf {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_owned());
     hashed_edit_path(&path, Path::new("projects/clips"))
@@ -499,6 +574,15 @@ pub(crate) fn write_clipboard_owned(owner: isize, format: u32, bytes: &[u8]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utc_dates_follow_the_civil_calendar() {
+        let t = utc_time(1_794_067_639);
+        assert_eq!((t.year, t.month, t.day), (2026, 11, 7));
+        assert_eq!(utc_time(0).date(), (1970, 1, 1));
+        assert_eq!(utc_time(951_782_400).date(), (2000, 2, 29));
+        assert_eq!((utc_time(86_399).hour, utc_time(86_399).minute), (23, 59));
+    }
 
     #[test]
     fn dropfiles_payload_preserves_utf16_unc_and_exact_double_terminator() {
