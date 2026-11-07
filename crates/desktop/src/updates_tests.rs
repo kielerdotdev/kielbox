@@ -394,6 +394,79 @@ fn public_requests_are_fixed_and_have_no_installation_query() {
 }
 
 #[test]
+fn http_body_timeout_and_chunk_reads_run_inside_the_owned_reactor() {
+    // A loopback fixture exercises reqwest's actual network body timeout layer,
+    // which an in-memory response would bypass. Production still requires HTTPS.
+    fn response_fixture(stall: bool) -> (HttpReader, JoinHandle<()>) {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = [0u8; 4096];
+            let _ = socket.read(&mut request).unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            if stall {
+                std::thread::sleep(Duration::from_millis(300));
+            } else {
+                socket.write_all(b"hello ").unwrap();
+                std::thread::sleep(Duration::from_millis(10));
+                socket.write_all(b"world!").unwrap();
+            }
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let response = runtime.block_on(async {
+            reqwest::Client::builder()
+                .tls_backend_preconfigured(tls_config().unwrap())
+                .no_proxy()
+                .read_timeout(Duration::from_millis(if stall { 100 } else { 1000 }))
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap()
+                .get(format!("http://{address}/body"))
+                .send()
+                .await
+                .unwrap()
+        });
+        (
+            HttpReader {
+                response,
+                runtime,
+                chunk: Vec::new(),
+                offset: 0,
+            },
+            server,
+        )
+    }
+    let (mut reader, server) = response_fixture(false);
+    let mut output = Vec::new();
+    let mut bytes = [0u8; 3];
+    loop {
+        let count = reader.read(&mut bytes).unwrap();
+        if count == 0 {
+            break;
+        }
+        output.extend_from_slice(&bytes[..count]);
+    }
+    assert_eq!(output, b"hello world!");
+    server.join().unwrap();
+    let (mut stalled, server) = response_fixture(true);
+    assert!(
+        stalled.read(&mut bytes).is_err(),
+        "stalled body did not hit its per-read deadline"
+    );
+    server.join().unwrap();
+}
+
+#[test]
 fn bounded_catalog_and_marker_fail_closed() {
     assert!(read_bounded(&b"12345"[..], 4).is_err());
     let root = tempfile::tempdir().unwrap();

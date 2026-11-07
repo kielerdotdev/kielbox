@@ -204,7 +204,7 @@ fn trusted_redirect(url: &reqwest::Url) -> bool {
         )
 }
 
-fn http_client() -> Result<reqwest::blocking::Client, String> {
+fn tls_config() -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let tls = rustls_platform_verifier::BuilderVerifierExt::with_platform_verifier(
         rustls::ClientConfig::builder_with_provider(provider)
@@ -213,10 +213,12 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
     )
     .map_err(|error| error.to_string())?
     .with_no_client_auth();
-    // Build through the asynchronous builder to configure a per-read deadline;
-    // the blocking worker remains cancellable even when the server stalls.
-    let builder = reqwest::Client::builder()
-        .tls_backend_preconfigured(tls)
+    Ok(tls)
+}
+
+fn http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(tls_config()?)
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
@@ -228,11 +230,59 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
             } else {
                 attempt.follow()
             }
-        }));
-    reqwest::blocking::ClientBuilder::from(builder)
-        .timeout(Duration::from_secs(300))
+        }))
         .build()
         .map_err(|error| bounded_error(error.without_url().to_string()))
+}
+
+/// The request and every body poll share this worker-owned runtime. Converting
+/// reqwest's async builder into a blocking client leaves per-read timeout body
+/// timers outside Tokio's context in reqwest 0.13.5.
+struct HttpReader {
+    response: reqwest::Response,
+    runtime: tokio::runtime::Runtime,
+    chunk: Vec<u8>,
+    offset: usize,
+}
+
+impl HttpReader {
+    fn status(&self) -> reqwest::StatusCode {
+        self.response.status()
+    }
+
+    fn content_length(&self) -> Option<u64> {
+        self.response.content_length()
+    }
+
+    fn error_for_status(self) -> Result<Self, reqwest::Error> {
+        self.response.error_for_status_ref()?;
+        Ok(self)
+    }
+}
+
+impl Read for HttpReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.offset < self.chunk.len() {
+                let count = buffer.len().min(self.chunk.len() - self.offset);
+                buffer[..count].copy_from_slice(&self.chunk[self.offset..self.offset + count]);
+                self.offset += count;
+                return Ok(count);
+            }
+            let chunk = self
+                .runtime
+                .block_on(self.response.chunk())
+                .map_err(|error| std::io::Error::other(error.without_url()))?;
+            let Some(chunk) = chunk else {
+                return Ok(0);
+            };
+            self.chunk = chunk.to_vec();
+            self.offset = 0;
+        }
+    }
 }
 
 impl InstalledBackend {
@@ -240,13 +290,26 @@ impl InstalledBackend {
         self.packages.join(&asset.version)
     }
 
-    fn remote(&self, file: &str, timeout: Duration) -> Result<reqwest::blocking::Response, String> {
-        http_client()?
-            .get(request_url(self.channel, file))
-            .header(reqwest::header::ACCEPT_ENCODING, "identity")
-            .timeout(timeout)
-            .send()
-            .map_err(|error| bounded_error(error.without_url().to_string()))
+    fn remote(&self, file: &str, timeout: Duration) -> Result<HttpReader, String> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("Cannot start the update network runtime: {error}"))?;
+        let response = runtime.block_on(async {
+            http_client()?
+                .get(request_url(self.channel, file))
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .timeout(timeout)
+                .send()
+                .await
+                .map_err(|error| bounded_error(error.without_url().to_string()))
+        })?;
+        Ok(HttpReader {
+            response,
+            runtime,
+            chunk: Vec::new(),
+            offset: 0,
+        })
     }
 }
 
