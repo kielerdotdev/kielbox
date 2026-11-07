@@ -69,10 +69,18 @@ pub struct Utilities {
     screen_feedback: ScreenFeedback,
     job: Option<(CancelToken, mpsc::Receiver<anyhow::Result<WorkResult>>)>,
     screen: Option<mpsc::Receiver<anyhow::Result<crate::screen_tools::Picked>>>,
+    pending_dialogs: usize,
     borderless: Arc<std::sync::Mutex<Vec<::toolkit::window_tools::Borderless>>>,
 }
 impl EventEmitter<UtilityEvent> for Utilities {}
 impl Utilities {
+    /// Inspect active work without cancelling it or consuming a completion.
+    pub fn update_blocker(&self) -> Option<&'static str> {
+        if self.job.is_some() { Some("Wait for the utility operation to finish.") }
+        else if self.screen.is_some() { Some("Finish the screen utility selection first.") }
+        else if self.pending_dialogs != 0 { Some("Close the utility file dialog first.") }
+        else { None }
+    }
     pub fn new(cx: &mut Context<Self>) -> Self {
         let text = cx.new(|cx| TextInput::new(cx, "#33CC99"));
         let a = cx.new(|cx| TextInput::new(cx, "32"));
@@ -119,6 +127,7 @@ impl Utilities {
             screen_feedback: ScreenFeedback::Quiet,
             job: None,
             screen: None,
+            pending_dialogs: 0,
             borderless: Arc::new(std::sync::Mutex::new(vec![])),
         }
     }
@@ -429,6 +438,7 @@ impl Utilities {
             return;
         }
         let ticket = self.dialog_ticket(false);
+        self.pending_dialogs = self.pending_dialogs.saturating_add(1);
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: !folder,
             directories: folder,
@@ -443,11 +453,14 @@ impl Utilities {
             ),
         });
         cx.spawn_in(window, async move |view, cx| {
-            if let Ok(Ok(Some(paths))) = paths.await {
-                let _ = view.update(cx, |this, cx| {
+            let result = paths.await;
+            let _ = view.update(cx, |this, cx| {
+                this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                if let Ok(Ok(Some(paths))) = result {
                     this.complete_input(ticket, paths, cx);
-                });
-            }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -456,6 +469,7 @@ impl Utilities {
             return;
         }
         let ticket = self.dialog_ticket(false);
+        self.pending_dialogs = self.pending_dialogs.saturating_add(1);
         if self.tool == Tool::Split {
             let paths = cx.prompt_for_paths(PathPromptOptions {
                 files: false,
@@ -464,11 +478,14 @@ impl Utilities {
                 prompt: Some("Choose output directory".into()),
             });
             cx.spawn_in(window, async move |view, cx| {
-                if let Ok(Ok(Some(paths))) = paths.await {
-                    let _ = view.update(cx, |this, cx| {
+                let result = paths.await;
+                let _ = view.update(cx, |this, cx| {
+                    this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                    if let Ok(Ok(Some(paths))) = result {
                         this.complete_output(ticket, paths.into_iter().next(), cx);
-                    });
-                }
+                    }
+                    cx.notify();
+                });
             })
             .detach();
         } else {
@@ -480,11 +497,14 @@ impl Utilities {
             let path =
                 cx.prompt_for_new_path(&std::env::current_dir().unwrap_or_default(), Some(name));
             cx.spawn_in(window, async move |view, cx| {
-                if let Ok(Ok(Some(path))) = path.await {
-                    let _ = view.update(cx, |this, cx| {
+                let result = path.await;
+                let _ = view.update(cx, |this, cx| {
+                    this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                    if let Ok(Ok(Some(path))) = result {
                         this.complete_output(ticket, Some(path), cx);
-                    });
-                }
+                    }
+                    cx.notify();
+                });
             })
             .detach();
         }
@@ -502,6 +522,7 @@ impl Utilities {
         }
         let text = result.text.clone();
         let ticket = self.dialog_ticket(true);
+        self.pending_dialogs = self.pending_dialogs.saturating_add(1);
         let default = if image {
             "image.png"
         } else {
@@ -515,11 +536,14 @@ impl Utilities {
         let path =
             cx.prompt_for_new_path(&std::env::current_dir().unwrap_or_default(), Some(default));
         cx.spawn_in(window, async move |view, cx| {
-            if let Ok(Ok(Some(path))) = path.await {
-                let _ = view.update(cx, |this, cx| {
+            let result = path.await;
+            let _ = view.update(cx, |this, cx| {
+                this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                if let Ok(Ok(Some(path))) = result {
                     this.complete_save(ticket, path, frame, text, cx);
-                });
-            }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }

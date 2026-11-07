@@ -1139,6 +1139,7 @@ impl Studio {
                         if this.active {
                             return;
                         }
+                        this.pending_native_dialogs += 1;
                         let selected = cx.prompt_for_paths(PathPromptOptions {
                             files: false,
                             directories: true,
@@ -1146,10 +1147,13 @@ impl Studio {
                             prompt: Some("Save recordings here".into()),
                         });
                         cx.spawn_in(window, async move |view, cx| {
-                            if let Ok(Ok(Some(paths))) = selected.await
-                                && let Some(path) = paths.into_iter().next()
-                            {
-                                let _ = view.update(cx, |this, cx| {
+                            let result = selected.await;
+                            let _ = view.update(cx, |this, cx| {
+                                this.pending_native_dialogs = this.pending_native_dialogs.saturating_sub(1);
+                                cx.notify();
+                                if let Ok(Ok(Some(paths))) = result
+                                    && let Some(path) = paths.into_iter().next()
+                                {
                                     // Capture may have started through a hotkey while
                                     // the native folder picker was still open.
                                     if this.active {
@@ -1168,8 +1172,8 @@ impl Studio {
                                         this.preferences.folder = previous;
                                     }
                                     cx.notify();
-                                });
-                            }
+                                }
+                            });
                         })
                         .detach();
                     })),
@@ -1292,6 +1296,7 @@ impl Studio {
             .child(div().flex().flex_col().gap_2().child(muted("EDITOR PLAYBACK")).child(playback))
             .child(div().flex().flex_col().gap_2().child(muted("STORAGE")).child(saving))
             .child(installation)
+            .child(self.updates_ui(cx))
             .child(div().flex().flex_col().gap_2().child(muted("GLOBAL SHORTCUTS")).child(shortcuts))
             .child(row("Keep running in tray", "Closing the window keeps recording and global shortcuts available", toggle("close-to-tray",self.preferences.close_to_tray).on_click(cx.listener(|this,_,_,cx|{this.preferences.close_to_tray= !this.preferences.close_to_tray;this.save_preferences();cx.notify();}))))
             .child(button("screenshot-settings","Screenshot, workflow and sharing settings").on_click(cx.listener(|this,_,_,cx|{this.tab=4;this.toolkit.update(cx,|toolkit,cx|toolkit.preferences(cx));cx.notify();})))))
@@ -1403,6 +1408,14 @@ impl Render for Studio {
             3 => self.settings_ui(cx),
             _ => self.capture_ui(window, cx),
         };
+        let content = div().flex_1().min_h_0().flex().flex_col()
+            .when(self.welcome_visible, |content| content.child(self.welcome_ui(cx)))
+            .when(self.updates.ready(), |content| content.child(
+                div().px_6().py_2().flex().items_center().justify_between()
+                    .bg(rgb(0x20281c)).child(muted("A Kielbox update is ready."))
+                    .child(button("update-banner-restart", "Restart to update")
+                        .on_click(cx.listener(|this, _, _, cx| this.quit_with_update(true, cx))))))
+            .child(content);
         div()
             .size_full()
             .relative()

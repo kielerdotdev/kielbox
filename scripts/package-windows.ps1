@@ -50,12 +50,22 @@ if ($DevelopmentExecutable) {
         $rcrFxcCompiler = Find-RcrFxcCompiler -ExplicitPath ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')) -PathDirectories ([Environment]::GetEnvironmentVariable('PATH') -split ';') -SdkBinRoots $rcrFxcSdkRoots
         Write-Output "Release shader compiler: $rcrFxcCompiler"
         Push-Location $rcrPackageRoot
+        $rcrPreviousEncodedFlags = [Environment]::GetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', 'Process')
         try {
+            $rcrReleaseFlags = @()
+            if ($null -ne $rcrPreviousEncodedFlags) { $rcrReleaseFlags += $rcrPreviousEncodedFlags -split [char]31 }
+            elseif ($env:RUSTFLAGS) { throw 'Use CARGO_ENCODED_RUSTFLAGS rather than RUSTFLAGS for release packaging, so static CRT flags can be appended without changing quoting.' }
+            $rcrReleaseFlags += @('-C', 'target-feature=+crt-static')
+            [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', ($rcrReleaseFlags -join [char]31), 'Process')
             Invoke-RcrWithFxc -Compiler $rcrFxcCompiler -Build {
                 & cargo build --locked --release -p desktop -p clean -j1
                 if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE" }
             }
-        } finally { Pop-Location }
+        } finally {
+            if ($null -eq $rcrPreviousEncodedFlags) { [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', [NullString]::Value, 'Process') }
+            else { [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', $rcrPreviousEncodedFlags, 'Process') }
+            Pop-Location
+        }
     }
     $rcrPackageSource = Join-Path $rcrPackageRoot 'target/release/desktop.exe'
 }

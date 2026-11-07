@@ -146,7 +146,7 @@ impl Tray {
         let region = MenuItem::with_id("region", &presentation.region, true, None);
         let fullscreen = MenuItem::with_id("fullscreen", &presentation.fullscreen, true, None);
         let quick_record = MenuItem::with_id("quick-record", "Record video…", true, None);
-        menu.append(&MenuItem::with_id("open", "Open rcr", true, None))?;
+        menu.append(&MenuItem::with_id("open", "Open Kielbox", true, None))?;
         menu.append(&MenuItem::with_id("library", "Library", true, None))?;
         menu.append(&MenuItem::with_id("settings", "Settings", true, None))?;
         menu.append(&PredefinedMenuItem::separator())?;
@@ -181,10 +181,10 @@ impl Tray {
             ))?;
         }
         menu.append(&tools)?;
-        menu.append(&MenuItem::with_id("quit", "Quit rcr", true, None))?;
+        menu.append(&MenuItem::with_id("quit", "Quit Kielbox", true, None))?;
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip(format!("rcr — {}", presentation.status))
+            .with_tooltip(format!("Kielbox — {}", presentation.status))
             .with_icon(state_icon(presentation.mode)?)
             .build()?;
         let (tx, events) = mpsc::channel();
@@ -224,7 +224,7 @@ impl Tray {
         }
         if previous.status != next.status {
             self.icon
-                .set_tooltip(Some(format!("rcr — {}", next.status)))?;
+                .set_tooltip(Some(format!("Kielbox — {}", next.status)))?;
             self.status.set_text(&next.status);
         }
         if previous.replay != next.replay {

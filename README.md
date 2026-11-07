@@ -17,24 +17,23 @@ Screenshots and native recording work without them.
 
 ## Download
 
-Open [Windows builds](https://github.com/kielerdotdev/kielbox/actions/workflows/windows.yml),
-select a successful run, and download **kielbox-windows-x64** under **Artifacts**.
-GitHub requires you to sign in. Builds are unsigned.
+Download [Kielbox-Setup.exe](https://github.com/kielerdotdev/kielbox/releases/download/preview/Kielbox-Setup.exe)
+and run it. Kielbox installs for your Windows account and appears in the Start
+menu. The setup wizard lets you choose the installation folder, a desktop
+shortcut, and whether Kielbox starts when you sign in. Preview builds are unsigned.
 
-Extract the whole package. Choose a folder for your data and launch from the
-extracted package:
+Used RCR or an older Kielbox build? Choose **Use existing data** on the welcome
+screen and select the folder containing your projects and recordings. Your files
+stay where they are.
 
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\Videos\Kielbox" | Out-Null
-.\Start-rcr.ps1 -WorkingDirectory "$env:USERPROFILE\Videos\Kielbox"
-```
+Installed builds check for updates in the background. **Settings → Updates**
+lets you check, download, and restart to update. Updates wait for recording and
+saves to finish. Closing the window leaves the app in the tray; choose **Quit
+Kielbox** to exit. Uninstall through Windows **Installed apps** or **Apps & features**.
 
-If you already use Kielbox, keep your existing working folder. Recordings,
-projects, and settings depend on it. Closing the window leaves the app in the
-tray; use **Quit rcr** to exit.
-
-Kielbox was previously called RCR. Executables, Cargo packages, and existing
-data formats still use that name. Automatic updates are [being designed](docs/AUTO_UPDATE.md).
+Kielbox was previously called RCR. Existing data formats keep their older
+identifiers for compatibility. Source and portable builds use manual updates;
+see [Windows builds](docs/WINDOWS_BUILDS.md).
 
 ## Build
 
@@ -47,14 +46,9 @@ cd kielbox
 cargo run --locked -p desktop -j1
 ```
 
-To build a packaged release:
-
-```powershell
-powershell -NoProfile -File scripts/package-windows.ps1
-```
-
-The package is written to `dist/windows/`. [Windows CI](docs/WINDOWS_BUILDS.md)
-builds and checks it on pushes to `main`, version tags, pull requests, and manual runs.
+See [Windows builds](docs/WINDOWS_BUILDS.md) for installer packaging, CI, and
+advanced portable builds. The app is native Rust. Neither the app nor its
+installer requires .NET or a PowerShell launcher.
 
 ## Details
 

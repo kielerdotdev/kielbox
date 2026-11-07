@@ -89,6 +89,13 @@ pub struct DiskUsageView {
     explore_scroll: UniformListScrollHandle,
 }
 impl DiskUsageView {
+    /// The icon worker is persistent and harmless while idle; only an actual
+    /// scan or an outstanding user folder choice defers an update restart.
+    pub fn update_blocker(&self) -> Option<&'static str> {
+        if self.job.is_some() { Some("Wait for the disk scan to finish or stop it first.") }
+        else if self.picker_open { Some("Close the disk folder picker first.") }
+        else { None }
+    }
     pub fn scan_finished(&self, cx: &App) -> bool {
         self.job.is_none() && self.icons.read(cx).ready()
     }

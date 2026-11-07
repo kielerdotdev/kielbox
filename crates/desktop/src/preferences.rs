@@ -84,6 +84,8 @@ impl CapturePriority {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    #[cfg(windows)]
+    pub updates: crate::updates::Settings,
     pub height: u32,
     pub fps: u32,
     pub bitrate: u32,
@@ -135,6 +137,8 @@ fn deserialize_hotkeys<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Res
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            #[cfg(windows)]
+            updates: crate::updates::Settings::default(),
             height: 1440,
             fps: 60,
             bitrate: 25_000_000,
@@ -258,11 +262,12 @@ pub fn take_layout_ack(initial: &Preferences) -> Option<crate::preferences_io::L
     preference_writer(initial).ok()?.take_layout_ack()
 }
 
-pub fn finish_pending() {
+pub fn finish_pending() -> Result<(), String> {
     if let Some(Ok(writer)) = PREFERENCE_WRITER.get()
-        && let Err(error) = writer.finish_pending(std::time::Duration::from_secs(2)) {
-        eprintln!("Preferences shutdown: {error}");
+    {
+        return writer.finish_pending(std::time::Duration::from_secs(2));
     }
+    Ok(())
 }
 
 pub const MAX_DISPLAY_NAME_CHARS: usize = 128;

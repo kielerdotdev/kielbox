@@ -95,7 +95,7 @@ pub fn logo() -> Div {
             div()
                 .font_weight(FontWeight::MEDIUM)
                 .text_size(px(15.))
-                .child("rcr"),
+                .child("Kielbox"),
         )
 }
 pub fn muted(text: impl Into<SharedString>) -> Div {

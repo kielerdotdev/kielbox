@@ -58,6 +58,11 @@ libraries; the optional standalone tools are separate workspace packages.
 
 ## Utility libraries and references
 
+Windows installers are built with [Inno Setup 6.7.4](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_4).
+Its license permits distributing generated installers; the build tool is downloaded
+separately and is not part of the application payload. The updater downloads the
+same installer executable using the channel's size and SHA256 catalog.
+
 QR reading uses `rqrr` (MIT OR Apache-2.0), a Rust QR detector/decoder based on quirc; its dependency notices remain in the published crates. The existing SSX QR renderer supplies QR creation. `sha1`, `sha2`, `md-5` and `crc32fast` supply streaming file digests under their respective published licenses. Windows OCR uses the installed Windows.Media.Ocr engine; no model or external OCR executable is bundled. Video utilities invoke user-installed FFmpeg/FFprobe without a shell.
 
 ShareX's official tools list and utility documentation informed the feature checklist and interaction behavior. No ShareX source code or assets were copied for these utilities. References: https://getsharex.com/ and https://getsharex.com/docs/index-folder.

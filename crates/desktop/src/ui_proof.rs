@@ -23,6 +23,7 @@ fn audio_error_fixture_active(screen: &str) -> Option<bool> {
 pub struct FixtureOptions {
     pub watch_share_stage: Option<u8>,
     pub installation_preview: bool,
+    pub updates_preview: Option<u8>,
 }
 
 pub fn capture(
@@ -49,6 +50,7 @@ pub fn capture(
             let started = Instant::now();
             let mut selection_seeded = false;
             let mut share_seeded = false;
+            let mut updates_seeded = false;
             let mut setup_seeded = false;
             let mut fixture_error = None;
             println!(
@@ -61,6 +63,13 @@ pub fn capture(
                     .await;
                 let ready = window.update(cx, |root, window, cx| {
                     let studio = root.downcast::<Studio>().expect("Studio snapshot root");
+                    if !updates_seeded && let Some(stage) = options.updates_preview {
+                        studio.update(cx, |studio, cx| {
+                            studio.seed_updates_preview(stage);
+                            cx.notify();
+                        });
+                        updates_seeded = true;
+                    }
                     if options.installation_preview && !setup_seeded {
                         studio.update(cx, |studio, cx| {
                             use crate::setup_diagnostics::{Check, Report, Status};
@@ -153,6 +162,13 @@ pub fn capture(
                     // Bind any queued CPU frame before testing snapshot readiness.
                     // Hidden windows only advance this path when explicitly drawn.
                     window.draw(cx).clear();
+                    if options.updates_preview.is_some_and(|stage| stage != 7) {
+                        match studio.update(cx, |studio, cx| studio.snapshot_updates_visible(cx)) {
+                            Ok(true) => {},
+                            Ok(false) => return false,
+                            Err(error) => { fixture_error = Some(error); return true; }
+                        }
+                    }
                     if screen == "editor-clip-show" {
                         let editor = studio.read(cx).editor.clone();
                         if !editor.update(cx, |editor, cx| editor.seed_clip_show_snapshot(cx)) { return false; }

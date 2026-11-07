@@ -1,73 +1,127 @@
-# Windows builds
+# Windows installation and builds
 
-The [Windows workflow](../.github/workflows/windows.yml) produces the
-`kielbox-windows-x64` artifact on pushes to `main`, `v*` tags, pull requests, and
-manual runs. It uses `windows-2025` x64 and the Rust toolchain pinned in
-`rust-toolchain.toml`. No signing or publishing credentials are required.
+## Install Kielbox
 
-## What runs
+Download [Kielbox-Setup.exe](https://github.com/kielerdotdev/kielbox/releases/download/preview/Kielbox-Setup.exe)
+and run it. This is a direct executable download from GitHub Releases.
 
-1. Discover the newest available x64 Windows SDK shader compiler using the same
-   helper as the local packager. Explicit compiler overrides remain authoritative.
-2. Configure Rust source-path remapping for the checkout and runner profile.
-   Both Windows separator forms are covered. This is best-effort compiler path
-   remapping, not a guarantee about linker-generated data or external tools.
-3. Restore Cargo downloads and release output. Cache keys include the toolchain,
-   dependency/configuration hashes, and commit; a matching dependency prefix lets
-   the next commit reuse the previous successful build without freezing the cache
-   at its first version.
-4. Run the file-only packaging regressions and disk/cleanup tests. Tests use the
-   release profile so their dependencies can be reused by the application build.
-5. Build the desktop and cleanup CLI with the lockfile enforced and one Cargo job.
-6. Archive the exact checked-out Git tree, then stage the release package with
-   its source archive, notices, payload manifest, and SHA256 checksums. The build
-   label contains the run number and commit; the app version still comes from Cargo.
-7. Launch the packaged cleanup CLI's `--help` and desktop's read-only `--diagnose`
-   from a separate fresh working folder. Each command has a 30-second budget.
-   Validate the JSON schema and release profile, then recheck package hashes.
-8. Upload only `dist/windows/` as `kielbox-windows-x64`, retained for 30 days,
-   and put the download link in the job summary.
+The native Windows wizard installs for your account, adds a Start menu entry,
+and registers an uninstaller in **Installed apps**. It offers an installation
+folder, an optional desktop shortcut, and optional startup when you sign in.
+The default folder is `%LOCALAPPDATA%\Programs\Kielbox`. Neither the app nor its
+installer needs .NET or PowerShell. The release executables link the C runtime
+statically, so there is no separate Visual C++ runtime installer.
 
-The setup report may return exit 1 because a hosted runner lacks NVIDIA hardware
-or optional media tools. A valid release report is required in either case;
-crashes, unexpected exit codes, malformed JSON, and timeouts fail the job.
+Current previews are unsigned. On first launch, existing users can choose
+**Use existing data** and select their RCR/Kielbox working folder. Files are not
+moved or merged. User data is separate from the application installation and
+is preserved when uninstalling.
 
-This workflow checks buildability and packaged commands. Hosted runners do not
-qualify capture performance, GPU preview, real audio devices, or the screenshot
-picker. Those need the [hardware checks](HARDWARE_STOP_EVALUATION_2026-11-05.md).
+Installed builds provide **Settings → Updates**. Installation waits for the
+application to close after recording and saves finish. Setup never terminates
+an active capture. Closing to the tray is not Quit. The installer and uninstaller
+also refuse to modify an application folder while programs are running from it.
+See [update behavior](AUTO_UPDATE.md) for the implementation and limits.
 
-## Download and launch
+## What CI builds
 
-Select a successful run in [Actions](https://github.com/kielerdotdev/kielbox/actions/workflows/windows.yml)
-and download its artifact. Downloads require a GitHub login and access to this
-private repository. Extract the whole package and follow `README-WINDOWS.txt`.
-Use `Start-rcr.ps1` with the same existing working folder after each update.
+The [Windows workflow](../.github/workflows/windows.yml) runs on pushes to
+`main`, `v*` tags, pull requests, and manual runs. It uses `windows-2025` x64,
+the pinned Rust toolchain, one Cargo job, embedded shaders, and static CRT.
 
-Artifacts are unsigned development snapshots. They expire and are not an
-automatic-update feed. Tags currently run the same build; they do not publish
-a GitHub Release, sign binaries, or make anything public. See the
-[updater design](AUTO_UPDATE.md) for the separate release/promotion pipeline.
+CI runs packaging and disk-tool tests, builds the desktop and cleanup CLI,
+archives the corresponding source, and stages an inventoried payload with
+licenses and checksums. It checks packaged cleanup help and the read-only setup
+doctor from a separate data folder before compiling the installer.
 
-## Run the packaging checks locally
+[Inno Setup 6.7.4](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_4)
+compiles the installation wizard. The official distribution is pinned by SHA256
+and verified with Authenticode before extracting its build tool in portable mode
+under `.downloads/`. It does not install a global compiler. The app executable
+is named `Kielbox.exe` inside the installation; Cargo crate names stay unchanged.
+
+Installer versions are `<Cargo version>-ci.<run number>.<run attempt>`.
+The build-evidence artifact contains:
+
+- `Kielbox-Setup.exe`, the friendly manual download.
+- `Kielbox-<version>-Setup.exe`, identical bytes under an immutable update name.
+- `update.json`, the bounded update catalog with version, file, size and SHA256.
+- `installer-build.json` and `INSTALLER-SHA256SUMS.txt`.
+
+GitHub Actions wraps artifacts in ZIPs and retains them for 30 days. These are
+for inspecting builds. The public **download** link uses the direct installer
+asset in GitHub Releases, not an Actions artifact.
+
+## Preview publication
+
+A separate job publishes only successful pushes to `main` in
+`kielerdotdev/kielbox`. PR/build jobs have read-only permissions. Publication
+uses the repository token with `contents: write`; no token is in the app.
+
+The publisher verifies clean source provenance, current main, the receipt,
+catalog and asset hashes. It uploads the immutable versioned installer and
+friendly download first, verifies GitHub's recorded digests, then publishes
+`update.json` last. Old catalogs still refer to immutable installers. It refuses
+to replace a published version with different bytes or downgrade the channel.
+Only the automation-owned `preview` tag moves to the new commit. Stable release
+publication is not enabled.
+
+Previews use HTTPS and SHA256 integrity checks. They do not have a separate
+signed catalog or TUF verification. CI packaging checks do not qualify capture,
+audio devices, GPU playback, clean-machine installation, or real update behavior.
+
+## Build an installer locally
+
+Install Rust and Visual Studio Build Tools with **Desktop development with C++**
+and a Windows SDK. `scripts/package-windows.ps1` adds static CRT flags for its
+release build, preserving and restoring existing encoded Rust flags.
+
+```powershell
+New-Item -ItemType Directory -Force .downloads | Out-Null
+git archive --format=zip --output=.downloads/kielbox-source.zip HEAD
+powershell -NoProfile -File scripts/package-windows.ps1 `
+  -OutputDirectory dist/windows `
+  -SourceArchive .downloads/kielbox-source.zip
+powershell -NoProfile -File scripts/package-installer-windows.ps1 `
+  -PackageDirectory dist/windows -Version 0.1.0-ci.0.1 `
+  -OutputDirectory dist/windows-installer
+```
+
+Choose fresh output folders and the current Cargo version. Packaging refuses
+existing destinations, unexpected files, user-data folders and reparse paths.
+The installer retains attribution, source and helper executables, while omitting
+portable PowerShell launchers. It does not install, launch or publish the app.
+
+Commit changes before making a distributable `git archive HEAD`; uncommitted
+changes are not included. CI additionally requires clean source provenance.
+
+## Advanced: portable and source builds
+
+`scripts/package-windows.ps1` also produces a manual-update portable payload.
+Keep the entire folder together and use its launcher with your existing data:
+
+```powershell
+.\Start-rcr.ps1 -WorkingDirectory 'D:\Kielbox data'
+```
+
+Portable executable names and existing data identifiers still use `rcr`.
+Installed builds use `Kielbox.exe`; old projects and keyring entries are preserved.
+
+## Validation
 
 ```powershell
 powershell -NoProfile -File scripts/test-package-windows.ps1
+powershell -NoProfile -File scripts/installer/Test-InstallerPackaging.ps1
 powershell -NoProfile -File scripts/ci/check-windows-package.ps1 `
-  -PackageDirectory dist/windows `
-  -ReportDirectory .downloads/package-check
+  -PackageDirectory dist/windows -ReportDirectory .downloads/package-check
 ```
 
-The second command requires a real release package including `clean.exe`.
-Its local reports may contain machine paths; they remain outside the artifact.
-The file-only suite creates fake executables in `.downloads/package-tests-*`.
-Remove those later with `scripts/clean-local-builds.ps1`.
+The file-only admission suite checks refusal paths without running its synthetic
+executables. Native install/update/uninstall qualification uses the same installer
+template and application binary with `-ProofId <unique>` to isolate its Windows
+registration and shortcuts. `/DIR=<owned test folder>` and `/NOAUTORUN` support
+headless qualification without touching an existing Kielbox installation.
 
-The packaging suite checks exact restoration of absent, empty, and explicitly
-configured shader-compiler environment values after successful and failed build
-callbacks. Its 38 assertions pass on Windows PowerShell 5.1 and PowerShell 7;
-the latter matches the hosted job. Package command checks also pass on both
-runtimes against the retained release package, including a report path with spaces.
-
-References: [GitHub artifact handling](https://docs.github.com/en/actions/tutorials/store-and-share-data),
-[Cargo cache action](https://github.com/actions/cache), and
-[Rust path-remapping limitations](https://doc.rust-lang.org/rustc/remap-source-paths.html).
+References: [Inno Setup documentation](https://jrsoftware.org/ishelp/),
+[distribution verification](https://jrsoftware.org/isdl-verify.php), and
+[Rust path-remapping limits](https://doc.rust-lang.org/rustc/remap-source-paths.html).

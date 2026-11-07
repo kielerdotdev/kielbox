@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use gpui::{prelude::*, px, size, *};
 #[cfg(windows)]
 mod annotation_surface;
@@ -19,6 +21,18 @@ mod capture_retirement;
 mod diagnostics_io;
 #[cfg(windows)]
 mod setup_diagnostics;
+#[cfg(windows)]
+mod installation;
+#[cfg(windows)]
+mod installation_ui;
+#[cfg(windows)]
+mod installer_smoke;
+#[cfg(windows)]
+mod single_instance;
+#[cfg(windows)]
+mod updates;
+#[cfg(windows)]
+mod update_handoff;
 #[cfg(windows)]
 mod hardware_stop_proof;
 #[cfg(windows)]
@@ -97,6 +111,15 @@ use theme::{ACCENT, LINE, MUTED, PANEL};
 static PROOF_FAILED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
+static INSTALLATION: std::sync::OnceLock<installation::State> = std::sync::OnceLock::new();
+#[cfg(windows)]
+static INSTALLATION_NOTICE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+#[cfg(windows)]
+static UPDATE_ON_EXIT: std::sync::Mutex<Option<installation_ui::PendingInstall>> = std::sync::Mutex::new(None);
+#[cfg(windows)]
+static RESTART_AFTER_EXIT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(windows)]
 fn capture_proof_ready(stats: &PipelineStats, capture_failed: bool, preview_failed: bool, draws: u64) -> bool {
     !capture_failed && !preview_failed && stats.error.is_none()
         && stats.encoded > 0 && stats.preview_published > 0 && draws > 0
@@ -155,11 +178,17 @@ impl Drop for SetupInspection {
 
 #[cfg(windows)]
 struct Studio {
+    updates: updates::Updates,
+    welcome_visible: bool,
+    installation_restart_needed: bool,
+    installation_next_root: Option<PathBuf>,
+    pending_native_dialogs: usize,
     setup_inspection: Option<SetupInspection>,
     setup_report: Option<setup_diagnostics::Report>,
     setup_error: Option<String>,
     settings_scroll: ScrollHandle,
     installation_bounds: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    updates_bounds: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     quick_recorder: Entity<quick_recorder::QuickRecorder>,
     editor_suspended: bool,
     shell_operation: u64,
@@ -243,7 +272,10 @@ impl Studio {
         })
         .detach();
         let preferences = preferences::Preferences::load();
-        let startup_notice = preferences::take_startup_notice();
+        let startup_notice = match (preferences::take_startup_notice(), INSTALLATION_NOTICE.get()) {
+            (Some(notice), Some(installation)) => Some(format!("{notice}\n{installation}")),
+            (notice, installation) => notice.or_else(|| installation.cloned()),
+        };
         recordings::set_root(preferences.folder.clone());
         let search = cx.new(|cx| text_input::TextInput::new(cx, ""));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
@@ -288,11 +320,19 @@ impl Studio {
         })
         .detach();
         let mut this = Self {
+            updates: if fixture {
+                updates::Updates::presentation_fixture(updates::Status::NotInstalled, Instant::now())
+            } else { updates::Updates::new(Instant::now()) },
+            welcome_visible: !fixture && INSTALLATION.get().is_some_and(|state| state.first_run),
+            installation_restart_needed: false,
+            installation_next_root: None,
+            pending_native_dialogs: 0,
             setup_inspection: None,
             setup_report: None,
             setup_error: None,
             settings_scroll: ScrollHandle::new(),
             installation_bounds: Default::default(),
+            updates_bounds: Default::default(),
             quick_recorder,
             editor_suspended: false,
             shell_operation: 0,
@@ -359,6 +399,7 @@ impl Studio {
             trash_restoring: false,
             trash_admission: Default::default(),
         };
+        this.updates.settings = this.preferences.updates.clone();
         if !fixture {
             match hotkeys::Hotkeys::start_with(&this.preferences.hotkeys) {
                 Ok(hotkeys) => this.hotkeys = Some(hotkeys),
@@ -690,6 +731,8 @@ impl Studio {
         cx.notify();
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
+        let idle = self.update_blocker(cx).is_none();
+        if self.updates.poll(Instant::now(), idle) { cx.notify(); }
         if self.tab != 3 && let Some(check) = &self.setup_inspection { check.cancel.cancel(); }
         let setup_result = self.setup_inspection.as_ref().and_then(|check| match check.result.try_recv() {
             Ok(result) => Some(result),
@@ -821,7 +864,7 @@ impl Studio {
                 }
                 "record" => self.toggle_record(cx),
                 "toggle-replay" => self.toggle_replay(cx),
-                "quit" => cx.quit(),
+                "quit" => self.quit_with_update(false, cx),
                 _ => {}
             }
         }
@@ -1131,6 +1174,43 @@ impl Drop for Studio {
 }
 
 fn main() {
+    #[cfg(windows)]
+    let startup_args: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    let normal_launch = !startup_args.iter().any(|arg| {
+        arg.starts_with("--smoke-") || arg.starts_with("--eval-")
+            || arg.starts_with("--diagnose") || arg == "--ui-snapshot"
+            || arg == "--proof-seconds" || arg == "--exit-after-proof"
+    });
+    #[cfg(windows)]
+    let _instance = if normal_launch {
+        match single_instance::Guard::acquire() {
+            Ok(Some(guard)) => Some(guard),
+            Ok(None) => {
+                if !single_instance::activate_existing() {
+                    installation_ui::startup_error("Kielbox is already running. Open it from the system tray, or quit the other copy before starting this one.");
+                }
+                return;
+            }
+            Err(error) => { installation_ui::startup_error(&error); std::process::exit(1); }
+        }
+    } else { None };
+    #[cfg(windows)]
+    if normal_launch {
+        let installed_version = match updates::installed_version() {
+            Ok(version) => version,
+            Err(error) => { installation_ui::startup_error(&error); std::process::exit(1); }
+        };
+        match update_handoff::check_startup(installed_version.as_deref()) {
+            Ok(Some(notice)) => { let _ = INSTALLATION_NOTICE.set(notice); }
+            Ok(None) => {},
+            Err(error) => { installation_ui::startup_error(&error); std::process::exit(1); }
+        }
+        match installation::initialize(installed_version.is_some(), &startup_args) {
+            Ok(state) => { let _ = INSTALLATION.set(state); }
+            Err(error) => { installation_ui::startup_error(&error); std::process::exit(1); }
+        }
+    }
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         use std::io::Write;
@@ -1152,6 +1232,13 @@ fn main() {
     #[cfg(windows)]
     {
         let args: Vec<_> = std::env::args().collect();
+        if args.iter().any(|arg| matches!(arg.as_str(), "--smoke-installed-status" | "--smoke-installed-update" | "--smoke-installed-check")) {
+            if let Err(error) = installer_smoke::run(&args) {
+                eprintln!("Installed-app proof failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         if args.iter().any(|arg| arg == "--diagnose") {
             let directory = args.windows(2).find(|pair| pair[0] == "--data-folder")
                 .map(|pair| PathBuf::from(&pair[1])).unwrap_or_else(|| PathBuf::from("recordings"));
@@ -1302,7 +1389,16 @@ fn main() {
             eprintln!("--installation-preview requires --ui-snapshot settings");
             std::process::exit(1);
         }
-        let fixture_options = ui_proof::FixtureOptions { watch_share_stage, installation_preview };
+        let updates_preview = args.windows(2).find(|pair| pair[0] == "--updates-preview").map(|pair| match pair[1].as_str() {
+            "not-installed" => 0, "idle" => 1, "checking" => 2, "available" => 3,
+            "downloading" => 4, "ready" => 5, "error" => 6, "welcome" => 7,
+            _ => 255,
+        });
+        if updates_preview == Some(255) || (updates_preview.is_some() && snapshot.is_none()) {
+            eprintln!("--updates-preview requires --ui-snapshot and a valid presentation state");
+            std::process::exit(1);
+        }
+        let fixture_options = ui_proof::FixtureOptions { watch_share_stage, installation_preview, updates_preview };
         if let Some(route) = snapshot.as_deref() {
             if !matches!(
                 route,
@@ -1512,7 +1608,7 @@ fn main() {
                                 px(if snapshot.is_some() || eval_clip_show { 600. } else { 680. }),
                             )),
                             titlebar: Some(TitlebarOptions {
-                                title: Some("rcr".into()),
+                                title: Some("Kielbox".into()),
                                 ..Default::default()
                             }),
                             ..Default::default()
@@ -1675,6 +1771,9 @@ fn main() {
                                 window.minimize_window();
                                 false
                             } else {
+                                if let Some(studio) = root.upgrade() {
+                                    studio.update(cx, |studio, cx| studio.queue_install_on_exit(false, cx));
+                                }
                                 true
                             }
                         });
@@ -2090,7 +2189,25 @@ fn main() {
             });
         // The UI has exited. Give already admitted layout writes a finite grace
         // period without delaying input/close or retrying failed disk operations.
-        preferences::finish_pending();
+        let preferences_flushed = preferences::finish_pending();
+        if let Err(error) = &preferences_flushed { eprintln!("Preferences shutdown: {error}"); }
+        if let Some(pending) = UPDATE_ON_EXIT.lock().unwrap_or_else(|error| error.into_inner()).take() {
+            match &preferences_flushed {
+                Ok(()) => {
+                    if let Err(error) = pending.update.apply_after_shutdown(pending.restart, &pending.data_root) {
+                        installation_ui::startup_error(&format!("Kielbox could not install its downloaded update. Your current installation and data are still available.\n\n{error}"));
+                    }
+                }
+                Err(error) => installation_ui::startup_error(&format!("The update was postponed because settings have not finished saving. Reopen Kielbox to retry.\n\n{error}")),
+            }
+        }
+        if let Some(data_root) = RESTART_AFTER_EXIT.lock().unwrap_or_else(|error| error.into_inner()).take()
+            && preferences_flushed.is_ok() {
+            drop(_instance);
+            let restart = std::env::current_exe().and_then(|exe| std::process::Command::new(exe)
+                .arg("--working-directory").arg(data_root).spawn());
+            if let Err(error) = restart { installation_ui::startup_error(&format!("Could not restart Kielbox: {error}")); }
+        }
         if let Some(directory) = owned_fixture {
             if smoke_library_import {
                 println!("Owned Library fixture directory: {}", directory.display());

@@ -67,11 +67,28 @@ pub struct Toolkit {
     error: Option<String>,
     cancelling: bool,
     capture_in_flight: bool,
+    pending_dialogs: usize,
     result_path: Option<PathBuf>,
     result_url: Option<String>,
 }
 impl EventEmitter<ToolkitEvent> for Toolkit {}
 impl Toolkit {
+    /// One conservative, read-only restart gate across the toolkit surfaces.
+    pub fn update_blocker(&self, cx: &App) -> Option<&'static str> {
+        if self.worker.as_ref().is_some_and(Worker::busy) || self.capture_in_flight || self.cancelling {
+            Some("Wait for the screenshot, sharing, or settings operation to finish.")
+        } else if self.editing || self.reply.is_some() || self.standalone_reply.is_some() {
+            Some("Save or close the image editor first.")
+        } else if self.pending_dialogs != 0 {
+            Some("Close the toolkit file dialog first.")
+        } else if self.quick_recorder.read(cx).busy() {
+            Some("Finish the screenshot or screencast first.")
+        } else if self.shell_operation != 0 {
+            Some("Wait for the toolkit file operation to finish.")
+        } else {
+            self.utilities.read(cx).update_blocker().or_else(|| self.disk_usage.read(cx).update_blocker())
+        }
+    }
     /// Select an existing surface for the explicit native visual fixture. No task runs.
     pub fn snapshot_surface(&mut self, route: &str, cx: &mut Context<Self>) -> bool {
         if route == "tools-history-fixture" { return self.seed_history_fixture(cx); }
@@ -440,6 +457,7 @@ impl Toolkit {
             error,
             cancelling: false,
             capture_in_flight: false,
+            pending_dialogs: 0,
             result_path: None,
             result_url: None,
         }
@@ -799,6 +817,7 @@ impl Toolkit {
         } else {
             None
         };
+        self.pending_dialogs = self.pending_dialogs.saturating_add(1);
         let chosen = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: kind == 3,
@@ -806,8 +825,10 @@ impl Toolkit {
             prompt: Some(prompt.into()),
         });
         cx.spawn_in(window, async move |view, cx| {
-            if let Ok(Ok(Some(paths))) = chosen.await {
-                let _ = view.update(cx, |this, cx| {
+            let result = chosen.await;
+            let _ = view.update(cx, |this, cx| {
+                this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                if let Ok(Ok(Some(paths))) = result {
                     if kind == 3 {
                         if let Some(id) = workflow {
                             this.submit(Action::WorkflowFiles { id, paths }, cx);
@@ -824,8 +845,9 @@ impl Toolkit {
                             cx,
                         );
                     }
-                });
-            }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -965,9 +987,19 @@ impl Toolkit {
             root=root.child(panel().child("Screenshot format").child(div().flex().gap_2().children([("PNG",::toolkit::core::settings::ImageFormatKind::Png),("JPEG",::toolkit::core::settings::ImageFormatKind::Jpg),("WebP",::toolkit::core::settings::ImageFormatKind::Webp)].into_iter().enumerate().map(|(i,(name,format))|button(("screenshot-format",i),name).bg(rgb(if snapshot.settings.general.image_format==format{0x173025}else{SOFT})).on_click(cx.listener(move|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.image_format=format;this.save(settings,cx);}})))))
                 .child(div().flex().items_center().justify_between().child("Include cursor").child(toggle("screenshot-cursor",snapshot.settings.capture.show_cursor).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.show_cursor= !settings.capture.show_cursor;this.save(settings,cx);}})))))
                 .child(panel().child("Filename pattern").child(self.pattern.clone()).child(button("save-screenshot-pattern","Save naming pattern").on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.file_name_pattern=this.pattern.read(cx).value();this.save(settings,cx);}}))))
-                .child(panel().child("Save folder").child(mono(snapshot.settings.general.resolve_save_dir().display().to_string())).child(button("screenshot-folder","Change").on_click(cx.listener(|_,_,window,cx|{
+                .child(panel().child("Save folder").child(mono(snapshot.settings.general.resolve_save_dir().display().to_string())).child(button("screenshot-folder","Change").on_click(cx.listener(|this,_,window,cx|{
+                    this.pending_dialogs = this.pending_dialogs.saturating_add(1);
                     let selected=cx.prompt_for_paths(PathPromptOptions{files:false,directories:true,multiple:false,prompt:Some("Save screenshots here".into())});
-                    cx.spawn_in(window,async move|view,cx|{if let Ok(Ok(Some(paths)))=selected.await&&let Some(path)=paths.into_iter().next(){let _=view.update(cx,|this,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.general.save_dir=Some(path);this.save(settings,cx);}});}}).detach();
+                    cx.spawn_in(window,async move|view,cx|{
+                        let result = selected.await;
+                        let _ = view.update(cx,|this,cx|{
+                            this.pending_dialogs = this.pending_dialogs.saturating_sub(1);
+                            if let Ok(Ok(Some(paths))) = result && let Some(path) = paths.into_iter().next() && let Some(s) = &this.snapshot {
+                                let mut settings = s.settings.clone(); settings.general.save_dir = Some(path); this.save(settings,cx);
+                            }
+                            cx.notify();
+                        });
+                    }).detach();
                 }))))
                 .child(panel().child("HDR tone mapping").child(muted("RCR converts each HDR display before stitching it with SDR displays."))
                     .child(button("toggle-highlight-preservation",if snapshot.settings.capture.hdr.knee>=0.99{"Faithful SDR whites"}else{"Preserve highlight detail"}).on_click(cx.listener(|this,_,_,cx|{if let Some(s)=&this.snapshot{let mut settings=s.settings.clone();settings.capture.hdr=if settings.capture.hdr.knee>=0.99{::toolkit::core::settings::HdrConfig::preserve_highlights()}else{::toolkit::core::settings::HdrConfig::faithful()};this.save(settings,cx);}}))))

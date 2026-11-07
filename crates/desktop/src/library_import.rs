@@ -261,26 +261,29 @@ fn commit_references(
 
 impl Studio {
     pub(crate) fn choose_library_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pending_native_dialogs += 1;
         let selected = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: true,
             prompt: Some("Import videos, images or .ssxe projects".into()),
         });
-        cx.spawn_in(window, async move |view, cx| match selected.await {
-            Ok(Ok(Some(paths))) => {
-                let _ = view.update(cx, |this, cx| this.import_library_media(paths, cx));
-            }
-            Ok(Ok(None)) => {}
-            _ => {
-                let _ = view.update(cx, |this, cx| {
+        cx.spawn_in(window, async move |view, cx| {
+            let result = selected.await;
+            let _ = view.update(cx, |this, cx| {
+                this.pending_native_dialogs = this.pending_native_dialogs.saturating_sub(1);
+                match result {
+                    Ok(Ok(Some(paths))) => this.import_library_media(paths, cx),
+                    Ok(Ok(None)) => {},
+                    _ => {
                     this.notice = Some(
                         "Couldn’t open the file picker. You can also drop files into Library."
                             .into(),
                     );
-                    cx.notify();
-                });
-            }
+                    }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }

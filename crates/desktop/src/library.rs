@@ -482,6 +482,20 @@ pub struct Library {
     folder_open: FolderOpenAdmission,
 }
 impl Library {
+    /// Accepted user work must finish before an update restart. Background
+    /// thumbnails, catalog reads, and the persistent query worker may stay idle.
+    pub(super) fn update_blocker(&self) -> Option<&'static str> {
+        if !self.import_guard.is_idle() {
+            Some("Wait for Library imports to finish.")
+        } else if self.removal_pending {
+            Some("Wait for Library removal or recovery to finish.")
+        } else if self.folder_open.pending() {
+            Some("Wait for the Library folder operation to finish.")
+        } else {
+            None
+        }
+    }
+
     pub(super) fn observe_navigation(&mut self, tab: usize) {
         self.import_guard.observe_navigation(tab);
         if tab != 1 && !self.thumbnail_page.is_empty() { self.observe_thumbnail_page(&[]); }

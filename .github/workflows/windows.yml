@@ -51,6 +51,7 @@ jobs:
           # Cargo's encoded format preserves paths containing spaces. Remap both
           # separator forms because rustc's prefix substitution is textual.
           $flags = @(
+            '-C', 'target-feature=+crt-static',
             "--remap-path-prefix=$env:USERPROFILE=/build-user",
             "--remap-path-prefix=$($env:USERPROFILE.Replace('\', '/'))=/build-user",
             "--remap-path-prefix=$env:GITHUB_WORKSPACE=/kielbox",
@@ -74,6 +75,18 @@ jobs:
       - name: Test packaging
         run: ./scripts/test-package-windows.ps1
 
+      - name: Test installer admission
+        run: ./scripts/installer/Test-InstallerPackaging.ps1
+
+      - name: Choose Windows package version
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read desktop package version' }
+          $baseVersion = @($metadata.packages | Where-Object { $_.name -eq 'desktop' })[0].version.Split('+')[0]
+          $suffix = "ci.$env:GITHUB_RUN_NUMBER.$env:GITHUB_RUN_ATTEMPT"
+          $installerVersion = if ($baseVersion.Contains('-')) { "$baseVersion.$suffix" } else { "$baseVersion-$suffix" }
+          "KIELBOX_BUILD_VERSION=$installerVersion" | Add-Content $env:GITHUB_ENV
+
       - name: Test shared disk tools and cleanup CLI
         run: |
           cargo test --locked --release -p disk -p clean -j1
@@ -96,12 +109,19 @@ jobs:
       - name: Check packaged commands
         run: ./scripts/ci/check-windows-package.ps1 -PackageDirectory dist/windows -ReportDirectory .downloads/package-check
 
+      - name: Test native installation, update and uninstall
+        run: ./scripts/installer/Test-NativeInstall.ps1 -PackageDirectory dist/windows
+
+      - name: Build Kielbox installer
+        run: |
+          ./scripts/package-installer-windows.ps1 -PackageDirectory dist/windows -Version $env:KIELBOX_BUILD_VERSION -Channel preview -OutputDirectory dist/windows-installer
+
       - name: Upload Windows download
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kielbox-windows-x64
-          path: dist/windows/
+          path: dist/windows-installer/
           if-no-files-found: error
           retention-days: 30
           compression-level: 6
@@ -111,8 +131,40 @@ jobs:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
           "### Windows x64 build" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "[Download kielbox-windows-x64]($env:ARTIFACT_URL)" | Add-Content $env:GITHUB_STEP_SUMMARY
-          "Commit: $env:GITHUB_SHA. Unsigned development snapshot; no automatic update feed is published." |
+          '[Install Kielbox — direct EXE download](https://github.com/kielerdotdev/kielbox/releases/download/preview/Kielbox-Setup.exe)' | Add-Content $env:GITHUB_STEP_SUMMARY
+          "[Build evidence artifact (ZIP)]($env:ARTIFACT_URL)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Commit: $env:GITHUB_SHA. Contains the native installer and update catalog. Preview builds are unsigned. The direct download updates after the main-branch publication job succeeds." |
             Add-Content $env:GITHUB_STEP_SUMMARY
-          'Extract the whole archive and use Start-rcr.ps1 with your existing working/data folder. Video editing requires FFmpeg/FFprobe on PATH.' |
+          'Run Kielbox-Setup.exe. The wizard offers installation location, optional desktop shortcut and startup. Video editing requires FFmpeg/FFprobe on PATH.' |
             Add-Content $env:GITHUB_STEP_SUMMARY
+
+  publish-preview:
+    name: Publish preview installer and updates
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'kielerdotdev/kielbox'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: kielbox-preview-publication
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download this run's verified installer assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kielbox-windows-x64
+          path: installer-assets
+
+      - name: Publish the preview channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/installer/Publish-Preview.ps1 -ReleaseDirectory installer-assets -Repository $env:GITHUB_REPOSITORY -ExpectedCommit $env:GITHUB_SHA

@@ -16,8 +16,8 @@ use generic placeholders. See `docs/SCREENSHOT-PROVENANCE.md` for regeneration.
 
 The original GitHub publication started with a clean snapshot and a generic
 contributor identity. Later commits may use the maintainer's normal identity.
-The current repository is `kielerdotdev/kielbox`. Keep it private until the
-maintainer explicitly chooses to publish it. Push only the reviewed branch;
+The current repository is `kielerdotdev/kielbox`, made public at the maintainer's
+explicit request. Push only the reviewed branch;
 older local branches remain separate and must not be pushed with `--mirror`,
 `--all` or tags without a separate review. Removing obsolete remotes locally
 does not delete the repositories hosted at those addresses.

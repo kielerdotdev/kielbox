@@ -2073,14 +2073,19 @@ dependencies = [
  "anyhow",
  "async-channel 2.5.0",
  "editor-core",
+ "embed-resource",
  "gpui",
  "image",
  "media-core",
  "media-io",
  "raw-window-handle",
  "recording-tools",
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier 0.6.2",
  "screenshot",
  "screenshot-windows",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4214,7 +4219,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.5.3",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -7458,6 +7463,7 @@ checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

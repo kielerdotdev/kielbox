@@ -228,7 +228,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -331,6 +331,7 @@ impl From<anyhow::Error> for ExportFailure {
     }
 }
 enum Event {
+    MediaCompleted(Box<Event>, MediaAdmission),
     LoadPhase(u64, &'static str, Instant),
     Resolved(u64, PathBuf, PathBuf),
     Restored(u64, PathBuf, Box<Editor>, bool),
@@ -426,6 +427,61 @@ enum Task {
     Add(u64, PathBuf),
     Waveform(u64, PathBuf, u32),
     Thumbnails(u64, MediaAsset),
+}
+// Count admitted work, not the persistent media thread. The admission travels
+// with queued work and retires on a full/disconnected send or any worker exit.
+struct MediaAdmission(Arc<AtomicUsize>);
+impl Drop for MediaAdmission {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); }
+}
+struct MediaTask {
+    task: Task,
+    _admission: MediaAdmission,
+}
+impl MediaTask {
+    fn new(task: Task, pending: &Arc<AtomicUsize>) -> Self {
+        pending.fetch_add(1, Ordering::AcqRel);
+        Self { task, _admission: MediaAdmission(pending.clone()) }
+    }
+}
+#[cfg(test)]
+mod update_media_admission_tests {
+    use super::{Event, MediaTask, Task};
+    use std::{path::PathBuf, sync::{Arc, atomic::{AtomicUsize, Ordering}, mpsc}};
+
+    #[test]
+    fn admitted_media_stays_busy_after_worker_exit_until_ui_reply_is_retired() {
+        let pending = Arc::new(AtomicUsize::new(0));
+        let work = MediaTask::new(Task::Resolve(1, PathBuf::from("owned-fixture.mkv")), &pending);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let MediaTask { task: _, _admission } = work;
+            let reply = Event::MediaCompleted(Box::new(Event::Resolved(1, PathBuf::new(), PathBuf::new())), _admission);
+            assert!(tx.send(reply).is_ok());
+        }).join().unwrap();
+        assert_eq!(pending.load(Ordering::Acquire), 1, "Worker completion does not retire unapplied user intent");
+        let reply = rx.try_recv().unwrap();
+        assert_eq!(pending.load(Ordering::Acquire), 1);
+        drop(reply);
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn full_or_disconnected_media_channels_retire_only_their_owned_admissions() {
+        let pending = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = mpsc::sync_channel(1);
+        assert!(tx.try_send(MediaTask::new(Task::Resolve(1, PathBuf::new()), &pending)).is_ok());
+        let full = tx.try_send(MediaTask::new(Task::Resolve(2, PathBuf::new()), &pending));
+        assert!(matches!(full, Err(mpsc::TrySendError::Full(_))));
+        drop(full);
+        assert_eq!(pending.load(Ordering::Acquire), 1);
+        drop(rx);
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+        let disconnected = tx.try_send(MediaTask::new(Task::Resolve(3, PathBuf::new()), &pending));
+        assert!(matches!(disconnected, Err(mpsc::TrySendError::Disconnected(_))));
+        drop(disconnected);
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+    }
 }
 fn restore_event(
     g: u64,
@@ -849,8 +905,9 @@ pub struct EditorView {
     focus_requested: bool,
     tx: mpsc::Sender<Event>,
     rx: mpsc::Receiver<Event>,
-    tasks: Option<mpsc::SyncSender<Task>>,
+    tasks: Option<mpsc::SyncSender<MediaTask>>,
     media_worker: Option<thread::JoinHandle<()>>,
+    media_pending: Arc<AtomicUsize>,
     pending: VecDeque<Task>,
     generation: Arc<AtomicU64>,
     media_active: Arc<AtomicBool>,
@@ -897,6 +954,7 @@ pub struct EditorView {
     drag: Option<Drag>,
     audio_refresh: Option<Instant>,
     picker: bool,
+    pending_dialogs: usize,
     library_choices: Vec<(PathBuf, String)>,
     menu_focus: FocusHandle,
     preset_menu: bool,
@@ -927,6 +985,29 @@ pub struct EditorView {
     error: Option<String>,
 }
 impl EditorView {
+    /// Pure, nonblocking activity query for the updater's restart gate. A live
+    /// media/autosave thread alone does not imply an operation is active.
+    pub fn update_blocker(&self) -> Option<&'static str> {
+        if self.export.is_some() || self.export_worker.is_some() {
+            Some("Wait for the video export to finish.")
+        } else if !self.pending_saves.is_empty() || self.save_states.values().any(|state|
+            state.in_flight.is_some() || state.status != SaveStatus::Saved) {
+            Some("Wait for clip edits to save; retry any failed saves first.")
+        } else if self.drag.is_some() || self.scrubbing {
+            Some("Finish the current editor gesture first.")
+        } else if !self.pending.is_empty() || self.media_pending.load(Ordering::Acquire) != 0
+            || !self.restoring.is_empty() || (self.visible && self.loading) {
+            Some("Wait for clip loading and media preparation to finish.")
+        } else if self.scrub.as_ref().is_some_and(ScrubSession::seek_proxy_preparing) {
+            Some("Wait for seek preparation to finish.")
+        } else if self.pending_dialogs != 0 || self.picker {
+            Some("Close the editor file picker first.")
+        } else if self.playing {
+            Some("Pause playback before restarting.")
+        } else if self.copy_operation != 0 || self.shell_operation != 0 || self.export_details_copy_operation != 0 {
+            Some("Wait for the editor file or clipboard operation to finish.")
+        } else { None }
+    }
     pub(crate) fn load_diagnostics(&self) -> serde_json::Value {
         let Some(started) = self.load_timing.get("requested") else { return serde_json::Value::Null; };
         let phases = self.load_timing.iter().map(|(name, at)| ((*name).to_owned(),
@@ -1311,7 +1392,8 @@ impl EditorView {
         })
         .detach();
         let (tx, rx) = mpsc::channel();
-        let (task_tx, task_rx) = mpsc::sync_channel::<Task>(8);
+        let (task_tx, task_rx) = mpsc::sync_channel::<MediaTask>(8);
+        let media_pending = Arc::new(AtomicUsize::new(0));
         let generation = Arc::new(AtomicU64::new(0));
         let worker_generation = generation.clone();
         let media_active = Arc::new(AtomicBool::new(false));
@@ -1322,7 +1404,7 @@ impl EditorView {
         let media_worker = thread::Builder::new()
             .name("clip-media".into())
             .spawn(move || {
-                for task in task_rx {
+                for MediaTask { task, _admission } in task_rx {
                     let g = task.generation();
                     let epoch = worker_epoch.load(Ordering::Acquire);
                     let owns_history = matches!(&task, Task::Restore(..));
@@ -1435,7 +1517,7 @@ impl EditorView {
                         continue;
                     }
                     if events
-                        .send(result.unwrap_or_else(|e| Event::Failed(g, epoch, format!("{e:#}"))))
+                        .send(Event::MediaCompleted(Box::new(result.unwrap_or_else(|e| Event::Failed(g, epoch, format!("{e:#}")))), _admission))
                         .is_err()
                     {
                         break;
@@ -1501,6 +1583,7 @@ impl EditorView {
             rx,
             tasks: Some(task_tx),
             media_worker: Some(media_worker),
+            media_pending,
             pending: VecDeque::new(),
             generation,
             media_active,
@@ -1545,6 +1628,7 @@ impl EditorView {
             drag: None,
             audio_refresh: None,
             picker: false,
+            pending_dialogs: 0,
             library_choices: Vec::new(),
             menu_focus: cx.focus_handle().tab_stop(true),
             preset_menu: false,
@@ -2852,7 +2936,11 @@ impl EditorView {
         // Preserve restore/history, export and save acknowledgements; derived pixels can be rebuilt.
         let events: Vec<_> = self.rx.try_iter().collect();
         for event in events {
-            if !matches!(event, Event::Waveform(..) | Event::Thumbnails(..)) { let _ = self.tx.send(event); }
+            let derived = match &event {
+                Event::MediaCompleted(event, _) => matches!(**event, Event::Waveform(..) | Event::Thumbnails(..)),
+                event => matches!(event, Event::Waveform(..) | Event::Thumbnails(..)),
+            };
+            if !derived { let _ = self.tx.send(event); }
         }
         self.remember();
     }
@@ -2973,6 +3061,12 @@ impl EditorView {
             cx.notify();
         }
         for event in self.rx.try_iter().collect::<Vec<_>>() {
+            // User intents (notably Add/Restore) remain busy until their UI
+            // result has been applied or parked, not just until I/O returns.
+            let (event, _media_admission) = match event {
+                Event::MediaCompleted(event, admission) => (*event, Some(admission)),
+                event => (event, None),
+            };
             let g = self.generation.load(Ordering::Relaxed);
             match event {
                 Event::LoadPhase(generation, phase, at) if generation == g => { self.load_timing.entry(phase).or_insert(at); }
@@ -3168,11 +3262,11 @@ impl EditorView {
             }
             cx.notify();
         }
-        if let Some(task) = self.pending.pop_front()
-            && let Some(tx) = &self.tasks
-            && let Err(mpsc::TrySendError::Full(task)) = tx.try_send(task)
-        {
-            self.pending.push_front(task);
+        if let Some(task) = self.pending.pop_front() && let Some(tx) = &self.tasks {
+            match tx.try_send(MediaTask::new(task, &self.media_pending)) {
+                Err(mpsc::TrySendError::Full(MediaTask { task, .. })) => self.pending.push_front(task),
+                Ok(()) | Err(mpsc::TrySendError::Disconnected(_)) => {}
+            }
         }
         if self.save_due.is_some_and(|t| Instant::now() >= t)
             && let Some(tx) = &self.save_tx
@@ -3814,36 +3908,39 @@ impl EditorView {
         self.picker = false;
         self.focus.focus(window);
         cx.notify();
+        self.pending_dialogs = self.pending_dialogs.saturating_add(1);
         let selected = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some("Add a video recording to this clip".into()),
         });
-        cx.spawn_in(window, async move |view, cx| match selected.await {
-            Ok(Ok(Some(paths))) => {
-                if let Some(path) = paths.into_iter().next() {
-                    let _ = view.update(cx, |editor, cx| {
-                        if recordings::is_supported(&path) && !recordings::is_image(&path) {
-                            editor.add_clip(path, cx);
-                        } else {
-                            editor.error = Some(
-                                "Choose a video file. Images and .ssxe projects open from Library."
-                                    .into(),
-                            );
-                            cx.notify();
+        cx.spawn_in(window, async move |view, cx| {
+            let result = selected.await;
+            let _ = view.update(cx, |editor, cx| {
+                editor.pending_dialogs = editor.pending_dialogs.saturating_sub(1);
+                match result {
+                    Ok(Ok(Some(paths))) => {
+                        if let Some(path) = paths.into_iter().next() {
+                            if recordings::is_supported(&path) && !recordings::is_image(&path) {
+                                editor.add_clip(path, cx);
+                            } else {
+                                editor.error = Some(
+                                    "Choose a video file. Images and .ssxe projects open from Library."
+                                        .into(),
+                                );
+                                cx.notify();
+                            }
                         }
-                    });
+                    }
+                    Ok(Ok(None)) => {}
+                    _ => {
+                        editor.error = Some("Couldn’t open the file picker. Try Add clip again.".into());
+                        cx.notify();
+                    }
                 }
-            }
-            Ok(Ok(None)) => {}
-            _ => {
-                let _ = view.update(cx, |editor, cx| {
-                    editor.error =
-                        Some("Couldn’t open the file picker. Try Add clip again.".into());
-                    cx.notify();
-                });
-            }
+                cx.notify();
+            });
         })
         .detach();
     }

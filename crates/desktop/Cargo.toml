@@ -19,9 +19,13 @@ unicode-segmentation = "1.12"
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
 
 [target.'cfg(windows)'.dependencies]
+reqwest = { version = "=0.13.5", default-features = false, features = ["blocking", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.6"
+semver = "=1.0.28"
 raw-window-handle = "0.6"
 tray-icon = { version = "0.24", default-features = false }
-windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem", "Win32_System_Power"] }
+windows = { workspace = true, features = ["Win32_UI_Shell", "Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_Diagnostics_ToolHelp"] }
 windows-capture = { path = "../windows-capture" }
 recording-tools = { path = "../recording-tools", default-features = false, features = ["audio"] }
 screenshot.workspace = true
@@ -29,3 +33,6 @@ screenshot-windows.workspace = true
 
 [dev-dependencies]
 media-io = { path = "../media-io" }
+
+[build-dependencies]
+embed-resource = "=3.0.12"
