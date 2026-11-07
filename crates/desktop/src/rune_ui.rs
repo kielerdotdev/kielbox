@@ -66,6 +66,10 @@ pub enum JobResult {
     Trash(Vec<(PathBuf, PathBuf)>),
     Restored(Vec<(PathBuf, PathBuf)>, String),
     Capture(PathBuf),
+    /// A screenshot saved straight to the library.
+    Saved,
+    /// Work that reports elsewhere (the screenshot overlay).
+    Quiet,
 }
 struct FileJob {
     result: mpsc::Receiver<Result<JobResult, String>>,
@@ -98,6 +102,12 @@ pub struct State {
     pub disk: crate::rune_tools::Disk,
     jobs: Vec<FileJob>,
     removed: Vec<(PathBuf, PathBuf)>,
+    /// The notice as last seen by `poll`, and when it appeared, for auto-dismissal.
+    notice_seen: String,
+    notice_since: Option<std::time::Instant>,
+    pub thumbs: crate::rune_thumbs::Thumbs,
+    #[cfg(windows)]
+    pub shot: Option<rune::OverlayHandle<crate::rune_shot::Shot>>,
     pub handle: Option<AppHandle<State>>,
     pub wake: rune::Waker,
     pub headless: bool,
@@ -143,6 +153,11 @@ impl State {
             disk: Default::default(),
             jobs: vec![],
             removed: vec![],
+            notice_seen: String::new(),
+            notice_since: None,
+            thumbs: Default::default(),
+            #[cfg(windows)]
+            shot: None,
             handle: None,
             wake: std::sync::Arc::new(|| {}),
             headless,
@@ -218,6 +233,47 @@ impl State {
         self.page = Page::Editor;
         self.editor.open(path, self.wake.clone());
     }
+    /// A pending undo for the library fixture's toast.
+    pub(crate) fn fixture_trash(&mut self) {
+        self.removed = vec![(PathBuf::from("trashed.mkv"), PathBuf::from("trashed.mkv"))];
+    }
+    pub fn dismiss_notice(&mut self) {
+        self.notice.clear();
+        self.removed.clear();
+    }
+    pub fn undo_trash(&mut self) {
+        let mut moved = std::mem::take(&mut self.removed);
+        if moved.is_empty() {
+            return;
+        }
+        self.notice.clear();
+        self.job(move || {
+            let message = match recordings::restore(&mut moved) {
+                Ok(()) => "Restored captures.".into(),
+                Err(e) => format!("Restore incomplete: {e:#}"),
+            };
+            Ok(JobResult::Restored(moved, message))
+        });
+    }
+    /// Success toasts leave by themselves; failures stay until dismissed.
+    fn expire_notice(&mut self) -> bool {
+        if self.notice != self.notice_seen {
+            self.notice_seen = self.notice.clone();
+            self.notice_since = (!self.notice.is_empty()).then(std::time::Instant::now);
+            return false;
+        }
+        let Some(since) = self.notice_since else {
+            return false;
+        };
+        let keep = if self.removed.is_empty() { 5 } else { 10 };
+        if notice_failed(&self.notice) || since.elapsed() < Duration::from_secs(keep) {
+            return false;
+        }
+        self.dismiss_notice();
+        self.notice_seen.clear();
+        self.notice_since = None;
+        true
+    }
     pub fn browse(&mut self, tx: &mut Tx) {
         tx.open_file(
             rune::FileDialogOptions::default().filter(
@@ -272,6 +328,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             if let Some(e) = result.apply(&mut s.files) {
                 s.notice = format!("Could not scan {}: {:?}", e.root.display(), e.kind);
             }
+            s.thumbs.sync(&s.files, &s.wake);
             changed = true;
         }
     }
@@ -293,7 +350,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             Ok(JobResult::Notice(v)) => s.notice = v,
             Ok(JobResult::Trash(moved)) => {
                 s.removed = moved;
-                s.notice = "Moved to capture trash. Undo is available.".into();
+                s.notice = "Moved to capture trash.".into();
                 s.refresh();
             }
             Ok(JobResult::Restored(remaining, message)) => {
@@ -305,10 +362,17 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                 s.refresh();
                 s.open(path);
             }
+            Ok(JobResult::Saved) => {
+                s.refresh();
+                s.notice = "Screenshot saved to the library.".into();
+            }
+            Ok(JobResult::Quiet) => {}
             Err(e) => s.notice = e,
         }
     }
     changed |= s.editor.poll();
+    changed |= s.thumbs.poll();
+    changed |= s.expire_notice();
     changed |= s.tools.poll();
     changed |= s.disk.poll();
     crate::rune_annotation::flush_save(s);
@@ -448,7 +512,8 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         })
         .child(content);
     if !s.notice.is_empty() {
-        card = card.child(notice(s));
+        // Floats over the page's bottom-right corner; it never takes layout space.
+        card = card.child(notice(s).pin(None, None, Some(24.0), Some(16.0)));
     }
     let mut root = col()
         .w_full()
@@ -728,47 +793,54 @@ fn titlebar(s: &State, trailing: f32) -> El {
     bar
 }
 
-fn notice(s: &State) -> El {
-    let failed = ["could not", "error", "failed", "unavailable", "unexpected"]
+fn notice_failed(notice: &str) -> bool {
+    let lower = notice.to_lowercase();
+    ["could not", "error", "failed", "unavailable", "unexpected", "incomplete"]
         .iter()
-        .any(|w| s.notice.to_lowercase().contains(w));
-    row()
-        .w_full()
-        .px(24.0)
-        .pb(16.0)
-        .justify_end()
-        .child(
-            theme::floating(
-                row()
-                    .key("notice")
-                    .role("status")
-                    .max_w(560.0)
-                    .min_w(0.0)
-                    .pl(14.0)
-                    .pr(6.0)
-                    .py(6.0)
-                    .gap(10.0)
-                    .center_y(),
-            )
-            .child(theme::glyph(
-                if failed { &icons::WARNING } else { &icons::CHECK },
-                16.0,
-                theme::c(if failed { theme::REC_T } else { theme::ACCENT }),
-            ))
-            .child(
-                text(s.notice.clone())
-                    .font(theme::SMALL)
-                    .color(theme::c(theme::T1))
-                    .wrap()
-                    .grow(1.0)
-                    .min_w(0.0),
-            )
-            .child(
-                Btn::icon_only("dismiss-notice", "Dismiss", &icons::CLOSE)
-                    .on(|s, _| s.notice.clear())
-                    .build(),
-            ),
-        )
+        .any(|w| lower.contains(w))
+}
+
+fn notice(s: &State) -> El {
+    let failed = notice_failed(&s.notice);
+    let mut toast = theme::floating(
+        row()
+            .key("notice")
+            .role("status")
+            .max_w(560.0)
+            .min_w(0.0)
+            .pl(14.0)
+            .pr(6.0)
+            .py(6.0)
+            .gap(10.0)
+            .center_y(),
+    )
+    .child(theme::glyph(
+        if failed { &icons::WARNING } else { &icons::CHECK },
+        16.0,
+        theme::c(if failed { theme::REC_T } else { theme::ACCENT }),
+    ))
+    .child(
+        text(s.notice.clone())
+            .font(theme::SMALL)
+            .color(theme::c(theme::T1))
+            .wrap()
+            .min_w(0.0),
+    );
+    if !s.removed.is_empty() {
+        toast = toast.child(
+            Btn::new("undo-trash", "Undo")
+                .icon(&icons::UNDO)
+                .h(26.0)
+                .on(|s, _| s.undo_trash())
+                .build(),
+        );
+    }
+    toast.child(
+        Btn::icon_only("dismiss-notice", "Dismiss", &icons::CLOSE)
+            .h(26.0)
+            .on(|s, _| s.dismiss_notice())
+            .build(),
+    )
 }
 
 /// Page padding and the header line every page starts with.
@@ -917,27 +989,7 @@ fn library(s: &State) -> El {
     if count == 0 {
         body = body.child(empty_library(s));
     }
-    let mut page = page().child(header).child(scroll(body));
-    if !s.removed.is_empty() {
-        page = page.child(
-            row().child(
-                Btn::new("undo-trash", "Undo trash")
-                    .icon(&icons::UNDO)
-                    .on(|s, _| {
-                        let mut moved = std::mem::take(&mut s.removed);
-                        s.job(move || {
-                            let message = match recordings::restore(&mut moved) {
-                                Ok(()) => "Restored captures.".into(),
-                                Err(e) => format!("Restore incomplete: {e:#}"),
-                            };
-                            Ok(JobResult::Restored(moved, message))
-                        });
-                    })
-                    .build(),
-            ),
-        );
-    }
-    page
+    page().child(header).child(scroll(body))
 }
 
 struct TextStyleBold;
@@ -989,11 +1041,18 @@ fn clip_card(s: &State, i: usize, path: &std::path::Path, title: String, stamp: 
                 .focusable(true)
                 .w_full()
                 .on_press(move |s: &mut State| s.open(open.clone()))
-                .child(theme::tile(
-                    if image { &icons::IMAGE } else { &icons::FILM },
-                    &extension,
-                    selected,
-                )),
+                .child(match s.thumbs.get(path) {
+                    Some(thumb) => theme::thumb_tile(
+                        &thumb.pixels,
+                        thumb.duration.map(clock).as_deref(),
+                        selected,
+                    ),
+                    None => theme::tile(
+                        if image { &icons::IMAGE } else { &icons::FILM },
+                        &extension,
+                        selected,
+                    ),
+                }),
         )
         .child(
             row()

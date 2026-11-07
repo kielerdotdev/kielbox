@@ -12,7 +12,7 @@ use toolkit::{
 };
 pub struct Annotation {
     actor: Actor,
-    surface: NativeSurface,
+    pub surface: NativeSurface,
     raster: Vec<u8>,
     size: (u32, u32),
     viewport: (u32, u32),
@@ -22,6 +22,17 @@ pub struct Annotation {
     pub text: TextEdit,
     serial: u64,
     accepted: Option<Frame>,
+    /// The last preview's mapping from raster pixels to image pixels.
+    geometry: Geometry,
+    pub text_editing: bool,
+    pub can_undo: bool,
+}
+#[derive(Clone, Copy, Default)]
+struct Geometry {
+    raster: (f32, f32),
+    offset: (f32, f32),
+    padding: (f32, f32),
+    scale: f32,
 }
 impl Annotation {
     pub fn new(source: Source, wake: rune::Waker) -> anyhow::Result<Self> {
@@ -39,9 +50,32 @@ impl Annotation {
             text: TextEdit::new(""),
             serial: 0,
             accepted: None,
+            geometry: Geometry::default(),
+            text_editing: false,
+            can_undo: false,
         })
     }
-    fn send(&mut self, command: Command) {
+    /// A point on an element showing the preview with `SurfaceFit::Fit`, in image pixels:
+    /// undoes the letterbox and the fit's scale, then the actor's zoom and padding.
+    pub fn image_point(&self, x: f32, y: f32, element: (f32, f32)) -> a::PointF {
+        let g = self.geometry;
+        let (w, h) = (g.raster.0.max(1.0), g.raster.1.max(1.0));
+        let k = (element.0 / w).min(element.1 / h).max(1e-6);
+        let view = (
+            (x - (element.0 - w * k) / 2.0) / k,
+            (y - (element.1 - h * k) / 2.0) / k,
+        );
+        let scale = if g.scale > 0.0 { g.scale } else { 1.0 };
+        a::PointF::new(
+            (view.0 + g.offset.0) / scale - g.padding.0,
+            (view.1 + g.offset.1) / scale - g.padding.1,
+        )
+    }
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn take_accepted(&mut self) -> Option<Frame> {
+        self.accepted.take()
+    }
+    pub(crate) fn send(&mut self, command: Command) {
         if let Err(e) = self.actor.send(command) {
             self.message = format!("{e:#}");
         }
@@ -70,6 +104,14 @@ impl Annotation {
         if let Some(preview) = self.actor.take_preview() {
             changed = true;
             self.active = preview.active_tool;
+            self.text_editing = preview.text_editing;
+            self.can_undo = preview.can_undo;
+            self.geometry = Geometry {
+                raster: (preview.width as f32, preview.height as f32),
+                offset: preview.offset,
+                padding: (preview.padding.0 as f32, preview.padding.1 as f32),
+                scale: preview.scale,
+            };
             let size = (preview.width, preview.height);
             if preview.reset || self.size != size {
                 self.size = size;
@@ -119,7 +161,7 @@ impl Annotation {
         Some((self.save_path.take()?, frame))
     }
 }
-fn tool_icon(tool: a::Tool) -> &'static rune::Icon {
+pub(crate) fn tool_icon(tool: a::Tool) -> &'static rune::Icon {
     use a::Tool::*;
     match tool {
         Select | Cursor => &icons::SELECT,
@@ -142,7 +184,7 @@ fn tool_icon(tool: a::Tool) -> &'static rune::Icon {
         CutOut => &icons::SPLIT,
     }
 }
-fn tool_name(tool: a::Tool) -> String {
+pub(crate) fn tool_name(tool: a::Tool) -> String {
     // `HighlightPen` → `Highlight pen`.
     let raw = format!("{tool:?}");
     let mut name = String::new();
@@ -322,7 +364,7 @@ pub fn view(s: &AppState) -> El {
         })
         .on_drag(|s: &mut AppState, d, tx| {
             if let Some(a) = &mut s.editor.annotation {
-                let p = a::PointF::new(d.x, d.y);
+                let p = a.image_point(d.x, d.y, (d.w, d.h));
                 let mods = tx.mods();
                 let m = a::Modifiers {
                     ctrl: mods.cmd,

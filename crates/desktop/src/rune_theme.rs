@@ -687,6 +687,34 @@ pub fn tile(i: &'static Icon, caption: &str, selected: bool) -> El {
     t
 }
 
+/// A 16:9 tile showing a decoded thumbnail, cropped to fill, with an optional length badge.
+pub fn thumb_tile(pixels: &rune::Pixels, badge: Option<&str>, selected: bool) -> El {
+    let mut t = el()
+        .w_full()
+        .aspect_ratio(16.0 / 9.0)
+        .radius(6.0)
+        .clip_rounded(6.0)
+        .fill(c(0x0e0e0e))
+        .pixels_fit(pixels, rune::SurfaceFit::Fill);
+    if let Some(badge) = badge {
+        t = t.child(
+            text(badge.to_string())
+                .font(KBD)
+                .color(c(T1))
+                .px(5.0)
+                .py(1.0)
+                .radius(4.0)
+                .fill(black(0.6))
+                .pin(None, None, Some(6.0), Some(6.0)),
+        );
+    }
+    t = ring(t, white(0.1));
+    if selected {
+        t = t.outline(2.0, 2.0, c(T1));
+    }
+    t
+}
+
 /// A short horizontal level or proportion bar.
 pub fn meter(width: f32, fraction: f32, color: Color) -> El {
     let fraction = fraction.clamp(0.0, 1.0);

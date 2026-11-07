@@ -17,11 +17,11 @@ are not compiled or linked. Git retains the previous implementation.
 | Area | Rune frontend |
 | --- | --- |
 | Shell | Six pages, keyboard focus, native file dialogs, existing tray and global shortcut service |
-| Library | Background scanning, imports, search, favorites, open, trash and undo |
+| Library | Background scanning, imports, search, favorites, open, trash with undo in the toast, cached thumbnails with video length |
 | Capture | NVIDIA AV1 recording, instant replay/save, saved audio endpoint identities, GPU preview |
 | Screencast | Existing WGC/FFmpeg worker, desktop recording, pause, stop and finalization |
-| Screenshots | Full desktop, active window and region; region selection uses the existing native Win32 overlay |
-| Video editor | Load/validate existing edits, preview/playback, frame seeking, split/delete/trim, audio mute, undo/redo, autosave and MP4 export |
+| Screenshots | Full desktop and active window save straight to the library. Region capture freezes the monitor under the pointer in a Rune overlay: drag to select, move/resize it, annotate with the toolbar under the selection, then copy, save or open in the editor |
+| Video editor | Load/validate existing edits, preview/playback, frame seeking, split/delete, drag-to-trim grips with ripple (one undo step), audio mute, undo/redo, autosave and MP4 export |
 | Images | Existing annotation actor, all tool choices, drag input, text labels, crop, rotate, undo/redo, image/project save |
 | Disk | Existing cancellable directory/NTFS scanner, progress, directory navigation and size bars |
 | Utilities | Existing 17 utility backends, file/text inputs, result previews and output selection |
@@ -34,12 +34,12 @@ recording workers finalize through their existing stop paths.
 
 ## Remaining parity work
 
-- Library thumbnails, custom-name editing, sort/filter controls, grid/list layout,
+- Custom-name editing, sort/filter controls, grid/list layout,
   persistent trash recovery, watch queues and pagination beyond the first 500 matches.
 - Display/application-audio/device picker interfaces, capture recovery presentation,
   quick-recorder window/region targets, countdown and floating controls. Existing
   saved recording display and endpoint identities are still honored.
-- Dragging/moving timeline pieces and trim grips, speed/gain controls, waveforms,
+- Dragging/moving timeline pieces, speed/gain controls, waveforms,
   multi-clip joining, export presets, native GPU video playback, watch/share/fullscreen
   windows and editor-session caching. Playback currently uses the existing CPU path.
 - Annotation selection overlays, clipboard/IME integration, detailed style controls,

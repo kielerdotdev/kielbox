@@ -949,12 +949,14 @@ pub fn disk_view(s: &AppState) -> El {
 pub fn screenshot(s: &mut AppState, target: toolkit::core::workflow::CaptureTarget) {
     use toolkit::core::workflow::CaptureTarget;
     let folder = s.preferences.folder.clone();
+    #[cfg(windows)]
+    let overlay = s.shot.clone();
     s.job(move || {
         let capturer = toolkit::services::ScreenCapturer::detect(
             None,
             toolkit::services::LastRegionStore::none(),
         );
-        let mut frame = capturer
+        let frame = capturer
             .with(|source| {
                 if target == CaptureTarget::Window {
                     source
@@ -965,32 +967,51 @@ pub fn screenshot(s: &mut AppState, target: toolkit::core::workflow::CaptureTarg
                 }
             })
             .map_err(|e| format!("{e}"))?;
-        if target == CaptureTarget::Region {
+        if matches!(target, CaptureTarget::Region | CaptureTarget::LastRegion) {
+            // Select and annotate in place, on the monitor under the pointer.
+            #[cfg(windows)]
+            if let Some(overlay) = overlay {
+                let monitor = crate::rune_shot::monitor_under_pointer()
+                    .and_then(|r| frame.crop_desktop(r).ok());
+                let frame = match monitor {
+                    Some(frame) => frame,
+                    None => frame,
+                };
+                crate::rune_shot::begin(&overlay, frame, folder);
+                return Ok(JobResult::Quiet);
+            }
             let input = screenshot_overlay::OverlayInput {
                 desktop: frame.clone(),
                 monitors: vec![],
                 windows: vec![],
                 options: Default::default(),
             };
-            match screenshot_overlay::select(input).map_err(|e| e.to_string())? {
+            return match screenshot_overlay::select(input).map_err(|e| e.to_string())? {
                 screenshot_overlay::OverlayOutcome::Selected(selection) => {
-                    let r = selection.rect;
-                    frame = frame.crop_desktop(r).map_err(|e| format!("{e:#}"))?;
+                    let frame = frame
+                        .crop_desktop(selection.rect)
+                        .map_err(|e| format!("{e:#}"))?;
+                    save_screenshot(&folder, &frame).map(JobResult::Capture)
                 }
-                _ => return Ok(JobResult::Notice("Capture cancelled.".into())),
-            }
-        } else if target == CaptureTarget::LastRegion {
-            return Err("Select a region again; last-region restore is not yet available.".into());
+                _ => Ok(JobResult::Notice("Capture cancelled.".into())),
+            };
         }
-        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-        let path = folder.join(format!(
-            "screenshot-{}.png",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        util::save_image(&path, &frame).map_err(|e| format!("{e:#}"))?;
-        Ok(JobResult::Capture(path))
+        save_screenshot(&folder, &frame).map(|_| JobResult::Saved)
     });
+}
+
+fn save_screenshot(
+    folder: &std::path::Path,
+    frame: &toolkit::types::Frame,
+) -> Result<std::path::PathBuf, String> {
+    std::fs::create_dir_all(folder).map_err(|e| e.to_string())?;
+    let path = folder.join(format!(
+        "screenshot-{}.png",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    util::save_image(&path, frame).map_err(|e| format!("{e:#}"))?;
+    Ok(path)
 }

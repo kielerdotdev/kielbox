@@ -16,6 +16,7 @@ mod rune_annotation;
 #[cfg(windows)]
 mod rune_capture;
 mod rune_editor;
+mod rune_fixtures;
 #[cfg(windows)]
 mod rune_gpu;
 #[cfg(windows)]
@@ -23,6 +24,8 @@ static PENDING_UPDATE: std::sync::Mutex<Option<(updates::PreparedUpdate, std::pa
     std::sync::Mutex::new(None);
 mod rune_palette;
 mod rune_theme;
+mod rune_thumbs;
+mod rune_shot;
 mod rune_tools;
 mod rune_ui;
 #[cfg(windows)]
@@ -63,6 +66,10 @@ fn main() {
             "This GPUI proof has not been ported. Use scripts/verify-rune.ps1 for Rune validation."
         );
         std::process::exit(2);
+    }
+    if args.iter().any(|a| a == "--shot-fixture") {
+        rune_shot::run_fixture();
+        return;
     }
     let headless = rune::tooling::is_headless();
     #[cfg(windows)]
@@ -138,6 +145,8 @@ fn main() {
                 }
             }),
             ("library", |s| s.go(rune_ui::Page::Library)),
+            ("library-fixture", rune_fixtures::library),
+            ("editor-fixture", rune_fixtures::editor),
             ("capture", |s| s.go(rune_ui::Page::Capture)),
             ("editor", |s| s.page = rune_ui::Page::Editor),
             ("disk", |s| s.go_disk()),
@@ -160,7 +169,7 @@ fn main() {
             tx.quit();
         }
     });
-    let app = if headless {
+    let mut app = if headless {
         app.compositor(DesktopCompositor {
             logged: false,
             surface: None,
@@ -169,9 +178,15 @@ fn main() {
         app
     };
     let handle = app.handle();
+    #[cfg(windows)]
+    let shot = (!headless).then(|| rune_shot::install(&mut app));
     app.init(move || {
         let mut s = rune_ui::State::new();
         s.handle = Some(handle);
+        #[cfg(windows)]
+        {
+            s.shot = shot;
+        }
         s
     })
     .run();

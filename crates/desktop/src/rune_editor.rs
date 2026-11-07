@@ -42,6 +42,20 @@ pub struct State {
     pub annotation: Option<crate::rune_annotation::Annotation>,
     /// Drawn width of the timeline strip, for placing the playhead.
     pub strip_width: f32,
+    /// A trim grip being dragged: previewed on the strip, applied on release.
+    trim: Option<TrimDrag>,
+    /// Preview frames shown so far.
+    frames: u64,
+}
+#[derive(Clone, Copy)]
+struct TrimDrag {
+    id: core::Id,
+    left: bool,
+    /// The edge's frame when the drag began.
+    from: i64,
+    to: i64,
+    min: i64,
+    max: i64,
 }
 struct SaveWorker {
     pending: Arc<Mutex<Option<(u64, Project)>>>,
@@ -152,6 +166,20 @@ impl State {
             self.message = e.to_string();
         }
     }
+    pub fn has_frame(&self) -> bool {
+        self.frames > 0
+    }
+    pub(crate) fn split_at_position(&mut self) {
+        self.split();
+    }
+    /// Wait for the preview to show the current position, for scripted fixtures.
+    pub(crate) fn settle(&mut self, timeout: std::time::Duration) {
+        let (seen, start) = (self.frames, std::time::Instant::now());
+        while self.frames == seen && start.elapsed() < timeout {
+            self.poll();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
     pub fn playing(&self) -> bool {
         self.playback.is_some()
     }
@@ -239,6 +267,110 @@ impl State {
         if let Some(id) = self.selected() {
             self.execute(Edit::Delete { id, ripple: false });
         }
+    }
+    /// How far each edge of a piece may move, in timeline frames: as far as its source media
+    /// reaches. The left edge may go below zero when restoring the start of the first piece;
+    /// the ripple in `trim` keeps the result on the timeline.
+    fn trim_limits(&self, id: core::Id) -> Option<(i64, i64)> {
+        let project = &self.editor.as_ref()?.project;
+        let clip = core::pieces(project).into_iter().find(|c| c.id == id)?;
+        let fps = f64::from(project.fps);
+        let frames = |ns: u64| (ns as f64 / 1e9 * fps / clip.speed.max(1e-6)).floor() as i64;
+        let (before, after) = match clip.content {
+            core::Content::Media { asset, .. } => {
+                let total = project
+                    .assets
+                    .iter()
+                    .find(|a| a.id == asset)
+                    .map_or(0, |a| a.duration_ns);
+                let used = (clip.duration as f64 / fps * clip.speed * 1e9) as u64;
+                (
+                    frames(clip.source_in_ns),
+                    frames(total.saturating_sub(clip.source_in_ns + used)),
+                )
+            }
+            core::Content::Title { .. } => (0, i64::from(u32::MAX)),
+        };
+        Some((clip.start as i64 - before, clip.end() as i64 + after))
+    }
+    /// Move one edge of a piece to `to` and ripple the pieces after it, as one undo step, so
+    /// the timeline stays packed: cutting closes the gap, restoring makes room.
+    fn trim(&mut self, id: core::Id, left: bool, to: i64) {
+        let Some(project) = self.editor.as_ref().map(|e| &e.project) else {
+            return;
+        };
+        let pieces = core::pieces(project);
+        let Some(clip) = pieces.iter().find(|c| c.id == id) else {
+            return;
+        };
+        let (start, end) = (clip.start as i64, clip.end() as i64);
+        let (min, max) = self.trim_limits(id).unwrap_or((start, end));
+        let to = if left {
+            to.clamp(min, end - 1)
+        } else {
+            to.clamp(start + 1, max)
+        };
+        let later: Vec<(core::Id, i64)> = pieces
+            .iter()
+            .filter(|c| c.id != id && c.start as i64 >= end)
+            .map(|c| (c.id, c.start as i64))
+            .collect();
+        // Frames the piece loses (negative: frames it regains).
+        let cut = if left { to - start } else { end - to };
+        if cut == 0 || (left && to >= end) || (!left && to <= start) {
+            return;
+        }
+        let shift = |edits: &mut Vec<Edit>, by: i64| {
+            // Moving right goes last-first and moving left first-last, so pieces never cross.
+            let mut moves: Vec<_> = later
+                .iter()
+                .map(|(q, at)| Edit::Move {
+                    id: *q,
+                    to: (at + by).max(0) as u64,
+                })
+                .collect();
+            if by > 0 {
+                moves.reverse();
+            }
+            edits.extend(moves);
+        };
+        let mut edits = Vec::new();
+        if cut > 0 {
+            if left {
+                edits.push(Edit::TrimLeft { id, to: to as u64 });
+                edits.push(Edit::Move {
+                    id,
+                    to: start as u64,
+                });
+            } else {
+                edits.push(Edit::TrimRight { id, to: to as u64 });
+            }
+            shift(&mut edits, -cut);
+        } else {
+            let grow = -cut;
+            shift(&mut edits, grow);
+            if left {
+                // Slide right first so the restored start never precedes frame zero.
+                edits.push(Edit::Move {
+                    id,
+                    to: (start + grow) as u64,
+                });
+                edits.push(Edit::TrimLeft {
+                    id,
+                    to: start as u64,
+                });
+            } else {
+                edits.push(Edit::TrimRight { id, to: to as u64 });
+            }
+        }
+        self.selected = Some(id);
+        self.execute(Edit::Batch(edits));
+        let new_end = end - cut;
+        self.seek(if left {
+            start as u64
+        } else {
+            (new_end - 1).max(0) as u64
+        });
     }
     pub fn key(&mut self, event: &KeyEvent) -> bool {
         if let Some(a) = &mut self.annotation {
@@ -371,8 +503,9 @@ impl State {
                 changed = true;
                 match result {
                     Ok(f) => {
-                        if let Err(e) = self.pixels(f.width, f.height, f.bgra, true) {
-                            self.message = e;
+                        match self.pixels(f.width, f.height, f.bgra, true) {
+                            Ok(()) => self.frames += 1,
+                            Err(e) => self.message = e,
                         }
                     }
                     Err(e) => self.message = e,
@@ -442,6 +575,100 @@ fn clock(seconds: f64) -> String {
     let s = seconds.max(0.0);
     let whole = s as u64;
     format!("{}:{:04.1}", whole / 60, s - (whole / 60 * 60) as f64)
+}
+
+const STRIP_H: f32 = 68.0;
+
+/// Ruler labels: tenths of a second when the clip is short enough for whole seconds to repeat.
+fn tick(length: f64, step: u32) -> String {
+    let at = length * f64::from(step) / 4.0;
+    if length < 20.0 {
+        format!("{at:.1} s")
+    } else {
+        ui::clock(at)
+    }
+}
+
+/// A trim grip straddling a piece edge at `x`: drag it to move that edge.
+fn trim_grip(id: core::Id, left: bool, x: f32) -> El {
+    const W: f32 = 14.0;
+    el().key(if left {
+        "trim-grip-start"
+    } else {
+        "trim-grip-end"
+    })
+    .role("slider")
+    .label(if left { "Trim start" } else { "Trim end" })
+    .w(W)
+    .h(STRIP_H)
+    .absolute(x - W / 2.0, 0.0)
+    .center()
+    .cursor(rune::Cursor::ResizeColumn)
+    .child(
+        el().w(4.0)
+            .h(28.0)
+            .radius(2.0)
+            .fill(c(theme::T1))
+            .box_shadow(rune::Shadow {
+                blur: 3.0,
+                color: theme::black(0.5),
+                ..rune::Shadow::default()
+            }),
+    )
+    .on_drag(move |s: &mut AppState, d, tx| {
+        tx.instant();
+        let e = &mut s.editor;
+        match d.phase {
+            rune::Phase::Down => {
+                let Some(project) = e.editor.as_ref().map(|e| &e.project) else {
+                    return;
+                };
+                let Some(piece) = core::pieces(project).into_iter().find(|p| p.id == id) else {
+                    return;
+                };
+                let from = if left { piece.start } else { piece.end() } as i64;
+                let (min, max) = e.trim_limits(id).unwrap_or((from, from));
+                let (min, max) = if left {
+                    (min, piece.end() as i64 - 1)
+                } else {
+                    (piece.start as i64 + 1, max)
+                };
+                e.selected = Some(id);
+                e.trim = Some(TrimDrag {
+                    id,
+                    left,
+                    from,
+                    to: from,
+                    min,
+                    max,
+                });
+            }
+            rune::Phase::Move => {
+                let Some(total) = e.editor.as_ref().map(|e| e.project.duration().max(1)) else {
+                    return;
+                };
+                let per_point = total as f32 / e.strip_width.max(1.0);
+                if let Some(t) = &mut e.trim {
+                    t.to = (t.from + (d.dx * per_point).round() as i64).clamp(t.min, t.max);
+                    // Show the frame the cut lands on.
+                    let at = if t.left { t.to } else { t.to - 1 };
+                    let t = *t;
+                    if (0..total as i64).contains(&at) {
+                        e.seek(at as u64);
+                    }
+                    e.trim = Some(t);
+                }
+            }
+            rune::Phase::Up => {
+                if let Some(t) = e.trim.take()
+                    && !d.cancelled()
+                    && t.to != t.from
+                {
+                    e.trim(t.id, t.left, t.to);
+                }
+            }
+        }
+    })
 }
 
 pub fn view(s: &AppState) -> El {
@@ -610,18 +837,20 @@ pub fn view(s: &AppState) -> El {
                         .color(c(theme::T1)),
                 ),
         );
-        // The strip: one segment per piece, sized by its length; drag anywhere to seek.
+        // The strip: pieces at their timeline positions; drag the strip to seek, or the grips
+        // on the selected piece's edges to trim it.
         let selected = e.selected();
-        let mut strip = row()
+        let width = e.strip_width.max(1.0);
+        let x_of = |frame: i64| frame as f32 / duration as f32 * width;
+        let mut strip = el()
             .key("seek")
             .role("slider")
             .label("Seek")
             .range_value(position as f64, 0.0, duration as f64)
             .w_full()
-            .h(68.0)
-            .gap(2.0)
+            .h(STRIP_H)
             .radius(6.0)
-            .clip_rounded(6.0)
+            .fill(c(theme::DEEP))
             .on_layout(|s: &mut AppState, r| {
                 if (s.editor.strip_width - r[2]).abs() > 0.5 {
                     s.editor.strip_width = r[2];
@@ -639,7 +868,9 @@ pub fn view(s: &AppState) -> El {
             let id = piece.id;
             let at = piece.start;
             let on = selected == Some(id);
-            let mut segment = col()
+            let left = x_of(piece.start as i64);
+            let right = x_of(piece.end() as i64);
+            let segment = col()
                 .key(format!("piece-{id}"))
                 .role("button")
                 .label(format!(
@@ -647,9 +878,10 @@ pub fn view(s: &AppState) -> El {
                     i + 1,
                     project.seconds(piece.duration)
                 ))
-                .grow(piece.duration.max(1) as f32)
-                .min_w(4.0)
-                .h_full()
+                .w((right - left - 2.0).max(4.0))
+                .h(STRIP_H)
+                .absolute(left + 1.0, 0.0)
+                .radius(5.0)
                 .padding(8.0)
                 .justify_end()
                 .fill(c(if on { 0x34363c } else { theme::BG2 }))
@@ -664,24 +896,55 @@ pub fn view(s: &AppState) -> El {
                         .color(c(theme::T2))
                         .single_line(),
                 );
-            if on {
-                segment = segment.border(2.0, c(theme::T1));
-            }
             strip = strip.child(segment);
         }
-        let x = (position as f32 / duration as f32) * e.strip_width;
-        strip = strip.child(
-            el().key("playhead")
-                .w(2.0)
-                .h(68.0)
-                .fill(c(theme::ACCENT))
-                .absolute((x - 1.0).max(0.0), 0.0),
-        );
+        // The selected piece's grips, and the part a drag in progress would cut or restore.
+        if let Some(piece) = core::pieces(project)
+            .into_iter()
+            .find(|p| Some(p.id) == selected)
+        {
+            let (start, end) = (piece.start as i64, piece.end() as i64);
+            let drag = e.trim.filter(|t| t.id == piece.id);
+            let shown_start = drag.filter(|t| t.left).map_or(start, |t| t.to);
+            let shown_end = drag.filter(|t| !t.left).map_or(end, |t| t.to);
+            if let Some(t) = drag {
+                let (a, b) = if t.left {
+                    (t.to.min(start), t.to.max(start))
+                } else {
+                    (t.to.min(end), t.to.max(end))
+                };
+                let restoring = if t.left { t.to < start } else { t.to > end };
+                strip = strip.child(
+                    el().key("trim-preview")
+                        .w((x_of(b) - x_of(a)).max(1.0))
+                        .h(STRIP_H)
+                        .absolute(x_of(a).clamp(0.0, width), 0.0)
+                        .fill(if restoring {
+                            theme::white(0.12)
+                        } else {
+                            theme::black(0.6)
+                        })
+                        .a11y_hidden(),
+                );
+            }
+            let frame = el()
+                .key("trim-frame")
+                .w((x_of(shown_end) - x_of(shown_start)).max(2.0))
+                .h(STRIP_H)
+                .absolute(x_of(shown_start).clamp(0.0, width), 0.0)
+                .radius(6.0)
+                .border(2.0, c(theme::T1))
+                .a11y_hidden();
+            strip = strip
+                .child(frame)
+                .child(trim_grip(piece.id, true, x_of(shown_start)))
+                .child(trim_grip(piece.id, false, x_of(shown_end)));
+        }
         main = main.child(strip);
         let mut ticks = row().w_full().justify_between();
         for step in 0..=4 {
             ticks = ticks.child(
-                rune::text(ui::clock(project.seconds(duration) * step as f64 / 4.0))
+                rune::text(tick(project.seconds(duration), step))
                     .font(TextStyle::new(11.5, 440.0).lh(14.0).features("'tnum' 1"))
                     .color(c(theme::T2)),
             );
@@ -697,10 +960,8 @@ pub fn view(s: &AppState) -> El {
                     .disabled(selected.is_none())
                     .on(|s, _| {
                         if let Some(id) = s.editor.selected() {
-                            s.editor.execute(Edit::TrimLeft {
-                                id,
-                                to: s.editor.position,
-                            });
+                            let at = s.editor.position as i64;
+                            s.editor.trim(id, true, at);
                         }
                     })
                     .build(),
@@ -710,10 +971,8 @@ pub fn view(s: &AppState) -> El {
                     .disabled(selected.is_none())
                     .on(|s, _| {
                         if let Some(id) = s.editor.selected() {
-                            s.editor.execute(Edit::TrimRight {
-                                id,
-                                to: s.editor.position,
-                            });
+                            let at = s.editor.position as i64 + 1;
+                            s.editor.trim(id, false, at);
                         }
                     })
                     .build(),
@@ -824,6 +1083,37 @@ mod rune_tests {
         }));
         assert_eq!(core::pieces(&s.editor.as_ref().unwrap().project).len(), 1);
         assert_eq!(s.editor.as_ref().unwrap().project.duration(), duration);
+    }
+    fn spans(s: &State) -> Vec<(u64, u64)> {
+        core::pieces(&s.editor.as_ref().unwrap().project)
+            .iter()
+            .map(|c| (c.start, c.end()))
+            .collect()
+    }
+    #[test]
+    fn dragging_trim_grips_ripples_the_timeline_and_restores_within_the_source() {
+        let mut s = editor();
+        let total = s.editor.as_ref().unwrap().project.duration();
+        s.position = total / 2;
+        s.split();
+        let first = core::pieces(&s.editor.as_ref().unwrap().project)[0].id;
+        let half = total / 2;
+        // Cut 10 frames off the first piece's start: everything stays packed from zero.
+        s.trim(first, true, 10);
+        assert_eq!(spans(&s), vec![(0, half - 10), (half - 10, total - 10)]);
+        // Cut 5 off its end: the second piece follows.
+        s.trim(first, false, (half - 15) as i64);
+        assert_eq!(spans(&s), vec![(0, half - 15), (half - 15, total - 15)]);
+        // Restore the start beyond frame zero; the source still has those frames.
+        s.trim(first, true, -10);
+        assert_eq!(spans(&s), vec![(0, half - 5), (half - 5, total - 5)]);
+        // The second piece already ends at its source's last frame: extending clamps to it.
+        let second = core::pieces(&s.editor.as_ref().unwrap().project)[1].id;
+        s.trim(second, false, total as i64 + 1_000);
+        assert_eq!(spans(&s), vec![(0, half - 5), (half - 5, total - 5)]);
+        // Each drag is one undo step.
+        s.undo(false);
+        assert_eq!(spans(&s), vec![(0, half - 15), (half - 15, total - 15)]);
     }
     #[test]
     fn save_worker_drains_final_pending_edits_after_ui_owner_is_dropped() {
