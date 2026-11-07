@@ -41,13 +41,6 @@ jobs:
 
       - name: Configure Windows build
         run: |
-          . ./scripts/packaging/Find-fxc.ps1
-          $sdkRoots = @(
-            "${env:ProgramFiles(x86)}/Windows Kits/10/bin",
-            "$env:ProgramFiles/Windows Kits/10/bin"
-          )
-          $fxc = Find-RcrFxcCompiler -ExplicitPath $env:GPUI_FXC_PATH -PathDirectories ($env:PATH -split ';') -SdkBinRoots $sdkRoots
-          "GPUI_FXC_PATH=$fxc" | Add-Content $env:GITHUB_ENV
           # Cargo's encoded format preserves paths containing spaces. Remap both
           # separator forms because rustc's prefix substitution is textual.
           $flags = @(

@@ -7,6 +7,7 @@ fn resource_text(value: &str) -> String {
 fn main() {
     println!("cargo:rerun-if-env-changed=KIELBOX_BUILD_VERSION");
     println!("cargo:rerun-if-changed=../../assets/kielbox.ico");
+    println!("cargo:rerun-if-changed=app.manifest");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -18,9 +19,11 @@ fn main() {
     let patch = numbers.get(2).copied().unwrap_or(0);
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let icon = resource_text(&root.join("../../assets/kielbox.ico").to_string_lossy());
+    let manifest = resource_text(&root.join("app.manifest").to_string_lossy());
     let version = resource_text(&display_version);
     let content = format!(r#"#pragma code_page(65001)
 1 ICON "{icon}"
+1 24 "{manifest}"
 1 VERSIONINFO
 FILEVERSION {major},{minor},{patch},0
 PRODUCTVERSION {major},{minor},{patch},0

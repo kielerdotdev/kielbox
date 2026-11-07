@@ -1,10 +1,22 @@
 # Third-party source and runtime components
 
-## GPUI 0.2.2
+## Rune
+
+The desktop uses [Anomaly's Rune](https://github.com/anomalyco/rune), pinned to
+`a9da7e3ebf5a8ab9bf19c3015032674b6e042df2` in Cargo.toml and Cargo.lock.
+Rune and its motion, staging, and layout crates use the MIT license, retained
+in `assets/licenses/Rune-MIT.txt`. Rune embeds Inter and IBM Plex Mono under
+the SIL Open Font License; their complete notices are retained alongside it.
+
+Windows preview frames cross from the existing D3D11 producer to Rune's D3D12
+renderer through named shared GPU textures and release fences in
+`crates/desktop/src/rune_gpu.rs`.
+
+## Historical GPUI source (not linked into the desktop)
 
 `vendor/gpui-0.2.2` is the published GPUI 0.2.2 crate from the Zed project, licensed under Apache-2.0. Its license is retained as `vendor/gpui-0.2.2/LICENSE-APACHE`.
 
-Local changes add a Windows D3D11 shared-texture surface source, scene/window plumbing, keyed-mutex synchronization and cached SRV import in the DirectX renderer. Two floating point literals in the Taffy integration have explicit `f32` types for Rust 1.99 compatibility. The return type of the already-public window input dispatcher is public so native hidden-window interaction regression checks can call it. The workspace pins this copy through `[patch.crates-io]`.
+Local changes added a Windows D3D11 shared-texture surface source, scene/window plumbing, keyed-mutex synchronization and cached SRV import in the DirectX renderer. This historical reference is no longer a Cargo dependency or patch. Remaining GPUI view files are uncompiled reference material while feature parity is completed; see `docs/RUNE_MIGRATION.md`.
 
 `crates/desktop/src/text_input.rs` is adapted from this crate's `examples/input.rs`, retaining the GPUI text input, IME, selection and clipboard approach under Apache-2.0. RCR-specific changes expose an editable value and use the application's styling.
 

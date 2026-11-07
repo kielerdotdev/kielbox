@@ -1,7 +1,6 @@
 [workspace]
 members = ["crates/*"]
 default-members = ["crates/media-core", "crates/media-io", "crates/editor-core", "crates/dpdfnet", "crates/nvenc-sys", "crates/windows-capture", "crates/desktop", "crates/toolkit"]
-exclude = ["vendor/gpui-0.2.2"]
 resolver = "3"
 
 [workspace.package]
@@ -66,7 +65,7 @@ opt-level = 3
 
 # The normal development desktop is used for interactive verification. Keep UI
 # layout and scene construction optimized without optimizing the entire workspace.
-[profile.dev.package.gpui]
+[profile.dev.package.rune]
 opt-level = 2
 [profile.dev.package.taffy]
 opt-level = 2
@@ -100,9 +99,6 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
-
-[patch.crates-io]
-gpui = { path = "vendor/gpui-0.2.2" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

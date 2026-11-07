@@ -17,10 +17,10 @@ pub fn set_root(path: PathBuf) {
         .write()
         .unwrap() = path;
 }
-#[path = "shell_actions.rs"]
-mod shell_actions;
-pub(crate) use shell_actions::Kind as ShellAction;
-pub(crate) use shell_actions::begin as begin_shell_action;
+// Shell actions are dispatched by Rune background jobs.
+
+
+
 /// Run on a worker: directory preparation and shell startup may block on a drive.
 pub(crate) fn try_open_folder(path: &Path) -> Result<(), String> {
     open_folder_with(path, |path| {

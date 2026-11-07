@@ -115,23 +115,27 @@ pub fn quick_binding_conflicts(bindings: &[String; 7]) -> bool {
     let Ok(Some(quick)) = parse(&bindings[6]) else { return false; };
     bindings[..6].iter().any(|binding| parse(binding).ok().flatten() == Some(quick))
 }
-pub fn from_keystroke(stroke: &gpui::Keystroke) -> Result<String, String> {
+pub fn from_keystroke(stroke: &rune::KeyEvent) -> Result<String, String> {
     let mut parts = Vec::new();
-    if stroke.modifiers.control {
+    if stroke.mods.ctrl {
         parts.push("Ctrl".to_owned());
     }
-    if stroke.modifiers.alt {
+    if stroke.mods.alt {
         parts.push("Alt".to_owned());
     }
-    if stroke.modifiers.shift {
+    if stroke.mods.shift {
         parts.push("Shift".to_owned());
     }
-    if stroke.modifiers.platform {
+    if stroke.mods.logo {
         parts.push("Win".to_owned());
     }
-    let key = match stroke.key.as_str() {
-        "print_screen" | "snapshot" | "printscreen" => "PrintScreen".to_owned(),
-        other => other.to_ascii_uppercase(),
+    let key = match &stroke.key {
+        rune::Key::PrintScreen => "PrintScreen".to_owned(),
+        rune::Key::Function(n) => format!("F{n}"),
+        rune::Key::Command(c) => c.to_ascii_uppercase().to_string(),
+        rune::Key::Text(text) if text == " " => "Space".into(),
+        rune::Key::Text(text) => text.to_ascii_uppercase(),
+        key => format!("{key:?}"),
     };
     parts.push(key);
     let text = parts.join("+");
@@ -272,13 +276,13 @@ mod tests {
         }
     }
     #[test]
-    fn gpui_keystrokes_round_trip_to_persisted_chords() {
-        for (input, expected) in [
-            ("ctrl-shift-f9", "Ctrl+Shift+F9"),
-            ("alt-printscreen", "Alt+PrintScreen"),
-            ("ctrl-a", "Ctrl+A"),
+    fn rune_keystrokes_round_trip_to_persisted_chords() {
+        for (key, mods, expected) in [
+            (rune::Key::Function(9), rune::Mods { ctrl: true, shift: true, ..Default::default() }, "Ctrl+Shift+F9"),
+            (rune::Key::PrintScreen, rune::Mods { alt: true, ..Default::default() }, "Alt+PrintScreen"),
+            (rune::Key::Command('a'), rune::Mods { ctrl: true, ..Default::default() }, "Ctrl+A"),
         ] {
-            let stroke = gpui::Keystroke::parse(input).unwrap();
+            let stroke = rune::KeyEvent { key, mods };
             assert_eq!(from_keystroke(&stroke).unwrap(), expected);
         }
     }

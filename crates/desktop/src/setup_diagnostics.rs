@@ -237,16 +237,7 @@ fn collect_with(config: Config, cancel: &CancelToken, runner: &impl Runner) -> R
     let mut working = Check::new("working_directory", Status::Warning, false,
         "Projects and default captures depend on the launch folder", Some("Keep the same working folder when updating rcr to retain these data locations."));
     working.path = Some(config.working_directory.clone()); checks.push(working);
-    if config.debug_build {
-        let shaders = config.checkout.join("vendor/gpui-0.2.2/src/platform/windows");
-        let present = ["shaders.hlsl", "color_text_raster.hlsl", "alpha_correction.hlsl"].iter().all(|f| shaders.join(f).is_file());
-        let mut check = Check::new("debug_shaders", if present { Status::Warning } else { Status::Error }, !present,
-            if present { "Development build still depends on this source checkout" } else { "Development-build shader files are missing" },
-            Some("Keep the source checkout at its build-time location, or use a release package with embedded shaders."));
-        check.path = Some(shaders); checks.push(check);
-    } else {
-        checks.push(Check::new("debug_shaders", Status::Ready, false, "Release build embeds its shaders", None));
-    }
+    checks.push(Check::new("debug_shaders", Status::Ready, false, "Rune embeds its WGSL shaders in development and release builds", None));
     let mut runtime = Check::new("shared_ffmpeg", Status::NotVerified, false,
         "Optional native playback DLL compatibility was not tested", Some("External FFmpeg can provide fallback when installed. No DLL was loaded or GPU initialized by this check."));
     runtime.path = config.shared_library_directory.clone();
@@ -330,7 +321,8 @@ mod tests {
         let report = collect_with(config.clone(), &CancelToken::new(), &runner);
         assert!(report.has_blocking_issues());
         assert!(check(&report, "ffmpeg").detail.as_ref().unwrap().contains("deadline"));
-        assert!(check(&report, "debug_shaders").blocking);
+        assert!(!check(&report, "debug_shaders").blocking);
+        assert_eq!(check(&report, "debug_shaders").status, Status::Ready);
         assert_eq!(runner.calls.lock().unwrap().len(), 2);
         let cancel = CancelToken::new(); cancel.cancel(); let unused = fake();
         let report = collect_with(config, &cancel, &unused);

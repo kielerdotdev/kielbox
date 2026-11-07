@@ -57,3 +57,7 @@ installer requires .NET or a PowerShell launcher.
 
 The desktop app is GPL-3.0-or-later. Original RCR core packages are Apache-2.0.
 See [LICENSE-GPL-3.0](LICENSE-GPL-3.0) and [LICENSE](LICENSE).
+
+The desktop frontend now uses [Rune](https://github.com/anomalyco/rune).
+This migration is in progress; see [migration status and validation](docs/RUNE_MIGRATION.md)
+for the supported workflows and remaining gaps before using this build for daily work.

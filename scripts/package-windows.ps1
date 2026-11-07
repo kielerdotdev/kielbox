@@ -41,14 +41,6 @@ if ($DevelopmentExecutable) {
     $rcrPackageSource = Resolve-PackagePath $DevelopmentExecutable
 } else {
     if (-not $SkipBuild) {
-        . (Join-Path $PSScriptRoot 'packaging/Find-fxc.ps1')
-        $rcrFxcSdkRoots = @(
-            foreach ($rcrFxcProgramFiles in @([Environment]::GetEnvironmentVariable('ProgramFiles(x86)'), [Environment]::GetEnvironmentVariable('ProgramFiles'))) {
-                if ($rcrFxcProgramFiles) { Join-Path $rcrFxcProgramFiles 'Windows Kits/10/bin' }
-            }
-        )
-        $rcrFxcCompiler = Find-RcrFxcCompiler -ExplicitPath ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')) -PathDirectories ([Environment]::GetEnvironmentVariable('PATH') -split ';') -SdkBinRoots $rcrFxcSdkRoots
-        Write-Output "Release shader compiler: $rcrFxcCompiler"
         Push-Location $rcrPackageRoot
         $rcrPreviousEncodedFlags = [Environment]::GetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', 'Process')
         try {
@@ -57,10 +49,8 @@ if ($DevelopmentExecutable) {
             elseif ($env:RUSTFLAGS) { throw 'Use CARGO_ENCODED_RUSTFLAGS rather than RUSTFLAGS for release packaging, so static CRT flags can be appended without changing quoting.' }
             $rcrReleaseFlags += @('-C', 'target-feature=+crt-static')
             [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', ($rcrReleaseFlags -join [char]31), 'Process')
-            Invoke-RcrWithFxc -Compiler $rcrFxcCompiler -Build {
-                & cargo build --locked --release -p desktop -p clean -j1
-                if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE" }
-            }
+            & cargo build --locked --release -p desktop -p clean -j1
+            if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE" }
         } finally {
             if ($null -eq $rcrPreviousEncodedFlags) { [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', [NullString]::Value, 'Process') }
             else { [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', $rcrPreviousEncodedFlags, 'Process') }
@@ -90,7 +80,9 @@ $rcrPackageFiles = [ordered]@{
     'licenses/DPDFNet-NOTICE.md' = (Join-Path $rcrPackageRoot 'crates/dpdfnet/NOTICE.md')
     'licenses/NVENC-MIT.txt' = (Join-Path $rcrPackageRoot 'crates/nvenc-sys/LICENSE')
     'licenses/NVENC-NOTICE.md' = (Join-Path $rcrPackageRoot 'crates/nvenc-sys/NOTICE.md')
-    'licenses/GPUI-Apache-2.0.txt' = (Join-Path $rcrPackageRoot 'vendor/gpui-0.2.2/LICENSE-APACHE')
+    'licenses/Rune-MIT.txt' = (Join-Path $rcrPackageRoot 'assets/licenses/Rune-MIT.txt')
+    'licenses/Rune-Inter-OFL.txt' = (Join-Path $rcrPackageRoot 'assets/licenses/Rune-Inter-OFL.txt')
+    'licenses/Rune-IBMPlexMono-OFL.txt' = (Join-Path $rcrPackageRoot 'assets/licenses/Rune-IBMPlexMono-OFL.txt')
     'licenses/FFmpeg-HEADER-NOTICES.txt' = (Join-Path $rcrPackageRoot 'crates/editor-core/src/playback_gpu/ffmpeg7/HEADER-NOTICES.txt')
     'licenses/FFmpeg-PROVIDER-LICENSE' = (Join-Path $rcrPackageRoot 'crates/editor-core/src/playback_gpu/ffmpeg7/PROVIDER-LICENSE')
 }
@@ -131,8 +123,8 @@ try {
     $rcrPackageManifest = [ordered]@{
         schema_version = 1; version_label = $Version; package_kind = $rcrPackageKind
         created_utc = [DateTime]::UtcNow.ToString('o'); source_commit = $rcrPackageCommit; source_tree_dirty = $rcrPackageDirty
-        debug_shaders_require_checkout = [bool]$DevelopmentExecutable
-        release_shader_policy = 'Normal release GPUI embeds compiled shaders; verify with diagnose and clean-folder UI before distribution.'
+        debug_shaders_require_checkout = $false
+        release_shader_policy = 'Rune embeds WGSL shader sources and uses wgpu. Verify on the target GPU before distribution.'
         corresponding_source_included = [bool]$SourceArchive
         distribution_review = 'Staging is not a license/source-compliance certification. Review transitive dependency notices and provide exact corresponding source including local changes before external distribution.'
         files = @($rcrPackageEntries)
@@ -153,5 +145,5 @@ try {
 Write-Output "Packaged application: $(Join-Path $rcrPackageFolder 'rcr.exe')"
 Write-Output "Manifest: $(Join-Path $rcrPackageFolder 'package-manifest.json')"
 Write-Output 'Choose your existing working/data folder with Start-rcr.ps1; no user data was moved.'
-if ($DevelopmentExecutable) { Write-Output 'DEVELOPMENT ONLY: debug GPUI shaders require this source checkout; not a portable release.' }
+if ($DevelopmentExecutable) { Write-Output 'DEVELOPMENT ONLY: this package contains an unoptimized development build.' }
 Write-Output 'No FFmpeg, FFprobe, FFplay, driver DLLs, recordings or projects are bundled.'

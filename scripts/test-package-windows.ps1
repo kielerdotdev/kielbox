@@ -23,7 +23,8 @@ $rcrTestDestination = Join-Path $rcrTestRoot 'new package with spaces'
 & $rcrTestPackager -DevelopmentExecutable $rcrTestSource -SkipBuild -OutputDirectory $rcrTestDestination -Version 'test-0.1' | Out-Null
 & (Join-Path $rcrTestDestination 'Verify-package.ps1') | Out-Null
 $rcrTestManifest = Get-Content -LiteralPath (Join-Path $rcrTestDestination 'package-manifest.json') -Raw | ConvertFrom-Json
-Assert-PackageTest ($rcrTestManifest.debug_shaders_require_checkout -and $rcrTestManifest.version_label -eq 'test-0.1') 'Development/version provenance missing.'
+Assert-PackageTest (-not $rcrTestManifest.debug_shaders_require_checkout -and $rcrTestManifest.version_label -eq 'test-0.1') 'Rune shader/version provenance missing.'
+Assert-PackageTest (Test-Path -LiteralPath (Join-Path $rcrTestDestination 'licenses/Rune-MIT.txt')) 'Rune license is missing.'
 Assert-PackageTest ($rcrTestManifest.files.Count -ge 20) 'License/helper payload inventory incomplete.'
 Assert-PackageTest ((Get-FileHash -LiteralPath $rcrTestSource).Hash -eq (Get-FileHash -LiteralPath (Join-Path $rcrTestDestination 'rcr.exe')).Hash) 'Executable copy changed.'
 Assert-PackageTest (-not (Test-Path -LiteralPath (Join-Path $rcrTestDestination 'ffmpeg.exe'))) 'FFmpeg must not be bundled.'
