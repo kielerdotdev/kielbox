@@ -36,7 +36,12 @@ struct Geometry {
 }
 impl Annotation {
     pub fn new(source: Source, wake: rune::Waker) -> anyhow::Result<Self> {
-        let actor = Actor::new(source)?;
+        Self::with_actor(Actor::new(source)?, wake)
+    }
+    pub fn desktop(frame: Frame, wake: rune::Waker) -> anyhow::Result<Self> {
+        Self::with_actor(Actor::desktop(frame)?, wake)
+    }
+    fn with_actor(actor: Actor, wake: rune::Waker) -> anyhow::Result<Self> {
         actor.set_waker(move || wake());
         Ok(Self {
             actor,

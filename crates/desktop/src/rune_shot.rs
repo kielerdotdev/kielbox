@@ -16,7 +16,7 @@ use rune::{
 use std::path::PathBuf;
 use toolkit::{
     annotation as a,
-    image_editor::{Command, Source},
+    image_editor::Command,
     types::{Frame, Rect},
 };
 
@@ -71,7 +71,6 @@ struct Session {
     gesture: Option<Gesture>,
     /// The drawing tool, or `None` while the pointer moves and resizes the selection.
     tool: Option<a::Tool>,
-    viewport_sent: bool,
     bar_width: f32,
     finishing: Option<Finish>,
     folder: PathBuf,
@@ -176,7 +175,7 @@ fn start(s: &mut Shot, frame: Frame, rgba: Option<(u32, u32, Vec<u8>)>, folder: 
     if let Some((w, h, rgba)) = rgba {
         frozen.set(w, h, rgba);
     }
-    match Annotation::new(Source::Image(frame), wake) {
+    match Annotation::desktop(frame, wake) {
         Ok(annotation) => {
             s.session = Some(Session {
                 annotation,
@@ -186,7 +185,6 @@ fn start(s: &mut Shot, frame: Frame, rgba: Option<(u32, u32, Vec<u8>)>, folder: 
                 selection: None,
                 gesture: None,
                 tool: None,
-                viewport_sent: false,
                 bar_width: 560.0,
                 finishing: None,
                 folder,
@@ -713,11 +711,6 @@ pub fn view(s: &Shot, _: &mut Cx<Shot>) -> El {
         .on_layout(|s: &mut Shot, r| {
             if let Some(session) = &mut s.session {
                 session.view = (r[2], r[3]);
-                if !session.viewport_sent && r[2] > 0.0 {
-                    session.viewport_sent = true;
-                    let (w, h) = (session.size.0 as u32, session.size.1 as u32);
-                    session.annotation.send(Command::Viewport(w, h));
-                }
             }
         });
     let Some(session) = &s.session else {
