@@ -37,3 +37,9 @@ export const KIND_LABEL: Record<Kind, string> = {
   clip: 'Clip',
   other: 'Other',
 }
+
+const shortDateFmt = new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+export const formatShortDate = (ms: number) => shortDateFmt.format(ms)
+
+const linkStampFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+export const formatLinkStamp = (ms: number) => linkStampFmt.format(ms)

@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, HeadContent, Link, Outlet, Scripts } from '@tanstack/react-router'
-import { Cloud } from 'lucide-react'
+import { Brand } from '../components/Brand'
 import type { ReactNode } from 'react'
 import { ToastProvider } from '../components/ui/toast'
 import { TooltipProvider } from '../components/ui/tooltip'
@@ -42,16 +42,15 @@ function RootLayout() {
     <div id="app-root">
       <TooltipProvider>
         <ToastProvider>
-          <header className="flex items-center justify-between border-b border-line px-6 py-3">
-            <Link to="/" className="flex items-center gap-2 text-[15px] font-semibold">
-              <Cloud size={18} className="text-accent" aria-hidden />
-              Kielbox Cloud
+          <header className="app-header">
+            <Link to="/" className="brand-link">
+              <Brand />
             </Link>
-            <span className="text-[12.5px] text-t3" data-testid="identity">
+            <span className="app-identity" data-testid="identity">
               {me.identity}
             </span>
           </header>
-          <main className="mx-auto max-w-[1400px] px-6 py-6">
+          <main className="app-main">
             <Outlet />
           </main>
         </ToastProvider>

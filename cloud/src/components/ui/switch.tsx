@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Switch as Base } from '@base-ui/react/switch'
 
 export function Switch({
@@ -7,16 +8,16 @@ export function Switch({
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
-  label: string
+  label: ReactNode
 }) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-[13px] text-t1">
+    <label className="flex w-full cursor-pointer flex-row-reverse items-center justify-between gap-4 text-[13px] text-t1">
       <Base.Root
         checked={checked}
         onCheckedChange={onCheckedChange}
-        className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-surface-3 p-0.5 transition-colors data-[checked]:bg-accent"
+        className="relative inline-flex h-[18px] w-[30px] shrink-0 cursor-pointer items-center rounded-full bg-surface-3 p-0.5 transition-colors data-[checked]:bg-accent"
       >
-        <Base.Thumb className="size-4 rounded-full bg-t1 transition-transform data-[checked]:translate-x-4 data-[checked]:bg-ink" />
+        <Base.Thumb className="size-[14px] rounded-full bg-t1 transition-transform data-[checked]:translate-x-3 data-[checked]:bg-white" />
       </Base.Root>
       {label}
     </label>

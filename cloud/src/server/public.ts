@@ -64,6 +64,10 @@ export async function handlePublic(
     contentType: item.content_type,
     allowDownload: share.allow_download === 1,
     hasThumb: item.thumb_key !== null,
+    size: item.size,
+    width: item.width,
+    height: item.height,
+    durationMs: item.duration_ms,
   })
   return new Response(request.method === 'HEAD' ? null : html, { status: 200, headers: SHARE_PAGE_HEADERS })
 }

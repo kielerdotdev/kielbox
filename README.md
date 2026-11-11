@@ -68,3 +68,6 @@ installer requires .NET or a PowerShell launcher.
 
 The desktop app is GPL-3.0-or-later. Original RCR core packages are Apache-2.0.
 See [LICENSE-GPL-3.0](LICENSE-GPL-3.0) and [LICENSE](LICENSE).
+The public marketing website is a separate [Astro project](site/README.md),
+configured for [box.kieler.dev](https://box.kieler.dev). The cloud companion
+remains a separate deployment in `cloud/`.

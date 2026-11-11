@@ -26,13 +26,13 @@ export function ToggleGroup<T extends string>({
         const picked = next.find((v) => v !== value) ?? next[0]
         if (picked) onValueChange(picked as T)
       }}
-      className="flex flex-wrap gap-1.5"
+      className="filter-chips flex flex-wrap gap-0.5"
     >
       {choices.map((c) => (
         <Toggle
           key={c.value}
           value={c.value}
-          className="h-7 cursor-pointer rounded-full bg-surface-2 px-3 text-[12.5px] font-medium text-t2 ring-1 ring-line transition-colors hover:text-t1 data-[pressed]:bg-t1 data-[pressed]:text-deep"
+          className="filter-chip"
         >
           {c.label}
         </Toggle>

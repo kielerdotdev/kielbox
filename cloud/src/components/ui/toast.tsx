@@ -8,7 +8,7 @@ function Toasts() {
   const { toasts } = Base.useToastManager()
   return (
     <Base.Portal>
-      <Base.Viewport className="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+      <Base.Viewport className="fixed bottom-4 right-4 z-50 flex w-[min(320px,calc(100vw-32px))] flex-col gap-2">
         {toasts.map((toast) => (
           <Base.Root
             key={toast.id}

@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T20:17:00.837553+00:00",
+  "title": "Design System: Kielbox web",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 16px 32px rgb(0 0 0 / 0.35), 0 8px 16px rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(255 255 255 / 0.16)",
+        "purpose": "Floating app UI."
+      },
+      {
+        "name": "landing-preview",
+        "value": "0 32px 80px rgba(0,0,0,0.55)",
+        "purpose": "Landing illustration frame."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "600px"
+      }
+    ],
+    "motion": [
+      {
+        "name": "pressed-control",
+        "value": "translateY(1px)",
+        "purpose": "Cloud button press feedback."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition: none; animation: none; scroll-behavior: auto",
+        "purpose": "Cloud reduced-motion preference; landing disables smooth scrolling."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Implemented cloud button variant.",
+      "html": "<button class=\"ds-button-primary\">Continue</button>",
+      "css": ".ds-button-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);font-family:var(--font-sans,Geist,sans-serif);font-size:13px;font-weight:530;cursor:pointer;background:var(--color-accent,#49c970);color:var(--color-ink,#07210e)}.ds-button-primary:hover{background:var(--color-accent-hover,#5bd27e)}.ds-button-primary:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}.ds-button-primary:active{transform:translateY(1px)}.ds-button-primary:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Implemented cloud button variant.",
+      "html": "<button class=\"ds-button-secondary\">Continue</button>",
+      "css": ".ds-button-secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);font-family:var(--font-sans,Geist,sans-serif);font-size:13px;font-weight:530;cursor:pointer;background:var(--color-surface-2,#262626);color:var(--color-t1,#f2f2f2)}.ds-button-secondary:hover{background:var(--color-surface-3,#2f2f2f)}.ds-button-secondary:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}.ds-button-secondary:active{transform:translateY(1px)}.ds-button-secondary:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Ghost button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Implemented cloud button variant.",
+      "html": "<button class=\"ds-button-ghost\">Continue</button>",
+      "css": ".ds-button-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);font-family:var(--font-sans,Geist,sans-serif);font-size:13px;font-weight:530;cursor:pointer;background:transparent;color:var(--color-t2,#a8a8a8)}.ds-button-ghost:hover{background:var(--color-surface-2,#262626)}.ds-button-ghost:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}.ds-button-ghost:active{transform:translateY(1px)}.ds-button-ghost:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Danger button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Implemented cloud button variant.",
+      "html": "<button class=\"ds-button-danger\">Delete</button>",
+      "css": ".ds-button-danger{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);font-family:var(--font-sans,Geist,sans-serif);font-size:13px;font-weight:530;cursor:pointer;background:rgb(241 72 79 / .14);color:var(--color-rec-text,#f29b96)}.ds-button-danger:hover{background:rgb(241 72 79 / .22)}.ds-button-danger:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}.ds-button-danger:active{transform:translateY(1px)}.ds-button-danger:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Search field",
+      "kind": "input",
+      "description": "Compact cloud text field.",
+      "html": "<input class=\"ds-input\" aria-label=\"Search captures\" placeholder=\"Search captures\">",
+      "css": ".ds-input{height:28px;padding:0 10px;border:0;border-radius:6px;background:rgb(255 255 255 / .03);color:var(--color-t1,#f2f2f2);font:13px var(--font-sans,Geist,sans-serif);box-shadow:0 0 0 .5px rgb(255 255 255 / .16)}.ds-input::placeholder{color:var(--color-t3,#8f8f8f)}.ds-input:focus{outline:2px solid var(--color-accent,#49c970);outline-offset:0}"
+    },
+    {
+      "name": "Filter chip",
+      "kind": "chip",
+      "description": "Exclusive cloud filter with selected state.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"true\">All captures</button>",
+      "css": ".ds-chip{height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--color-t2,#a8a8a8);font:530 13px/16px var(--font-sans,Geist,sans-serif);cursor:pointer}.ds-chip:hover{color:var(--color-t1,#f2f2f2);background:rgb(255 255 255 / .04)}.ds-chip[aria-pressed=true]{background:rgb(255 255 255 / .08);color:var(--color-t1,#f2f2f2);box-shadow:0 1px 2px rgb(0 0 0 / .4),0 0 0 .5px rgb(255 255 255 / .18)}.ds-chip:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}"
+    },
+    {
+      "name": "App header",
+      "kind": "nav",
+      "description": "Compact brand and account header.",
+      "html": "<nav class=\"ds-header\" aria-label=\"Application\"><a href=\"#\" class=\"ds-brand\">Kielbox</a><span>Account</span></nav>",
+      "css": ".ds-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;padding:0 14px;background:var(--color-deep,#141414);color:var(--color-t2,#a8a8a8);font:12.5px var(--font-sans,Geist,sans-serif)}.ds-brand{font-size:13px;font-weight:530;color:var(--color-t1,#f2f2f2);text-decoration:none}.ds-brand:focus-visible{outline:2px solid var(--color-accent,#49c970);outline-offset:2px}"
+    },
+    {
+      "name": "Share panel",
+      "kind": "card",
+      "description": "Inset detail sidebar container.",
+      "html": "<aside class=\"ds-panel\"><h2>Share</h2><p>Create a share link for this capture.</p></aside>",
+      "css": ".ds-panel{display:flex;flex-direction:column;gap:16px;padding:16px;border-radius:10px;background:rgb(255 255 255 / .03);box-shadow:0 0 0 .5px rgb(255 255 255 / .08);color:var(--color-t1,#f2f2f2);font-family:var(--font-sans,Geist,sans-serif)}.ds-panel h2{margin:0;font-size:15px;line-height:20px;font-weight:600}.ds-panel p{margin:0;font-size:12.5px;line-height:18px;color:var(--color-t2,#a8a8a8)}"
+    }
+  ],
+  "narrative": {
+    "overview": "The supplied Kielbox HTML references are the visual authority. Preserve their desktop palette, compact controls and media-first composition. This document records the implemented system, not a new visual direction.\n\nThe authenticated cloud library uses **Operate** mode. The landing page uses **Persuade** mode, with larger headings and more space while retaining the same type and green accent. No separate product or brand doctrine is inferred.",
+    "keyCharacteristics": [
+      "Self-hosted Geist and Geist Mono.",
+      "Dark inset app layout with compact controls.",
+      "Unboxed thumbnail captions and wrapping detail columns.",
+      "Static landing and public share pages without runtime JavaScript."
+    ],
+    "rules": [],
+    "dos": [
+      "Do preserve the supplied references as the visual authority.",
+      "Do keep native media controls, keyboard focus and reduced-motion behavior.",
+      "Do include loading, empty, no-results, failed-image and unavailable-share states."
+    ],
+    "donts": [
+      "Don't add a containing card behind library thumbnail captions.",
+      "Don't treat landing illustrations as uploaded captures.",
+      "Don't require runtime JavaScript for landing or public share pages."
+    ]
+  }
+}

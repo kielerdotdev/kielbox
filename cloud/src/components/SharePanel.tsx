@@ -1,15 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
-import { Copy, Link2, Trash2 } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { useState } from 'react'
 import { createShare, revokeShare } from '../functions/shares'
 import type { ShareJson } from '../functions/types'
-import { formatStamp } from '../lib/format'
+import { formatStamp, formatLinkStamp } from '../lib/format'
 import { AlertDialog } from './ui/alert-dialog'
-import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Input } from './ui/field'
-import { Select } from './ui/select'
+import { ToggleGroup } from './ui/toggle-group'
 import { Switch } from './ui/switch'
 import { useToast } from './ui/toast'
 
@@ -67,73 +66,40 @@ export function SharePanel({ itemId, shares }: { itemId: string; shares: ShareJs
   const now = Date.now()
 
   return (
-    <section className="rounded-card bg-surface p-4 ring-1 ring-line" aria-labelledby="shares-h">
-      <h2 id="shares-h" className="flex items-center gap-2 text-[15px] font-semibold">
-        <Link2 size={16} aria-hidden /> Share links
-      </h2>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Select<Expiry>
-          label="Expires after"
-          value={expiry}
-          onValueChange={setExpiry}
-          options={[
-            { value: '1d', label: 'Expires in 1 day' },
-            { value: '7d', label: 'Expires in 7 days' },
-            { value: '30d', label: 'Expires in 30 days' },
-            { value: 'never', label: 'Never expires' },
-          ]}
-        />
-        <Switch checked={allowDownload} onCheckedChange={setAllowDownload} label="Allow download" />
-        <Button variant="primary" disabled={create.isPending} onClick={() => create.mutate()}>
-          Create link
-        </Button>
-      </div>
-
+    <aside className="share-panel" aria-labelledby="shares-h">
+      <h2 id="shares-h">Share links</h2>
       {fresh ? (
-        <div className="mt-3 flex items-center gap-2" role="status">
+        <div className="fresh-link" role="status">
+          <h3>Link created</h3>
           <Input readOnly value={fresh} aria-label="New share link" onFocus={(e) => e.currentTarget.select()} />
-          <Button onClick={() => copy(fresh)}>
-            <Copy size={14} aria-hidden /> Copy
-          </Button>
+          <p>Copy it now. The full link is shown only this once and can't be retrieved later.</p>
+          <div className="flex gap-2"><Button variant="primary" onClick={() => void copy(fresh)}><Copy size={14} aria-hidden /> Copy link</Button><Button variant="ghost" onClick={() => setFresh(null)}>Done</Button></div>
         </div>
-      ) : null}
-
-      <ul className="mt-4 divide-y divide-line">
-        {shares.length === 0 ? <li className="py-2 text-[12.5px] text-t3">No links yet.</li> : null}
-        {shares.map((s) => {
-          const st = status(s, now)
-          return (
-            <li key={s.id} className="flex items-center justify-between gap-3 py-2 text-[12.5px]">
+      ) : (
+        <div className="share-create">
+          <div><span className="field-label">Expires after</span><div className="expiry-options"><ToggleGroup<Expiry> label="Expires after" value={expiry} onValueChange={setExpiry} choices={[{ value: '1d', label: '1 day' }, { value: '7d', label: '7 days' }, { value: '30d', label: '30 days' }, { value: 'never', label: 'Never' }]} /></div></div>
+          <Switch checked={allowDownload} onCheckedChange={setAllowDownload} label={<span className="download-label">Allow download<span>Recipients get a download button</span></span>} />
+          <Button variant="primary" disabled={create.isPending} onClick={() => create.mutate()}>{create.isPending ? 'Creating…' : 'Create link'}</Button>
+        </div>
+      )}
+      <div className="share-list">
+        {shares.length ? <h3 className="field-label">Links</h3> : <div className="shares-empty"><h3>No links yet</h3><p>Anyone with a link can view this capture without an account. Links you create are listed here.</p></div>}
+        <ul>
+          {shares.map((s) => {
+            const st = status(s, now)
+            return <li key={s.id}>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Badge className={st.live ? 'bg-accent text-ink' : ''}>{st.label}</Badge>
-                  <span className="text-t2">Created {formatStamp(s.created_at)}</span>
-                </div>
-                <div className="mt-0.5 text-t3">
-                  {s.expires_at === null ? 'Never expires' : `Expires ${formatStamp(s.expires_at)}`} · {s.view_count}{' '}
-                  {s.view_count === 1 ? 'view' : 'views'} · {s.allow_download ? 'download allowed' : 'view only'}
-                </div>
+                <div className="share-row-title"><span className={st.live ? '' : 'text-t2'}>Created {formatLinkStamp(s.created_at)}</span><span className={`share-status status-${st.label.toLowerCase()}`}><i />{st.label}</span></div>
+                <p>{s.revoked_at !== null ? `Revoked ${formatLinkStamp(s.revoked_at)}` : s.expires_at === null ? 'Never expires' : `${st.live ? 'Expires' : 'Expired'} ${formatLinkStamp(s.expires_at)}`} · {s.view_count} {s.view_count === 1 ? 'view' : 'views'} · Download {s.allow_download ? 'on' : 'off'}</p>
               </div>
-              {s.revoked_at === null ? (
-                <Button variant="ghost" onClick={() => setRevoking(s)} aria-label="Revoke link">
-                  <Trash2 size={14} aria-hidden /> Revoke
-                </Button>
-              ) : null}
+              {st.live ? <Button variant="ghost" onClick={() => setRevoking(s)} aria-label="Revoke link">Revoke</Button> : null}
             </li>
-          )
-        })}
-      </ul>
-
-      <AlertDialog
-        open={revoking !== null}
-        onOpenChange={(open) => !open && setRevoking(null)}
-        title="Revoke this link?"
-        description="Anyone holding the link loses access immediately. This cannot be undone."
-        confirmLabel="Revoke"
-        pending={revoke.isPending}
-        onConfirm={() => revoking && revoke.mutate(revoking.id)}
-      />
-    </section>
+          })}
+        </ul>
+      </div>
+      <AlertDialog open={revoking !== null} onOpenChange={(open) => !open && setRevoking(null)} title="Revoke this link?"
+        description={`The link${revoking ? ` created ${formatStamp(revoking.created_at)}` : ''} will stop working right away. Anyone who opens it will see “This link isn't available”. This can't be undone, but you can create a new link.`}
+        confirmLabel="Revoke link" pending={revoke.isPending} onConfirm={() => revoking && revoke.mutate(revoking.id)} />
+    </aside>
   )
 }

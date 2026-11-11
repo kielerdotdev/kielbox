@@ -1,10 +1,11 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Search } from 'lucide-react'
+import { Search, Library as LibraryIcon, CircleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 import { FilterChips, filterOf, searchOf } from '../components/FilterChips'
 import { Grid, SkeletonGrid } from '../components/Grid'
+import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/field'
 import { listItems } from '../functions/items'
 import { KINDS } from '../lib/format'
@@ -21,6 +22,8 @@ export const Route = createFileRoute('/')({
   // Prefetch the first page so it is server-rendered.
   loader: ({ deps }) => listItems({ data: deps }),
   component: Library,
+  pendingComponent: () => <div className="library-page"><div className="library-toolbar"><h1>Library</h1></div><SkeletonGrid /></div>,
+  errorComponent: ({ reset }) => <div className="library-empty" role="alert"><CircleAlert size={28} aria-hidden /><h1>Couldn't load your library</h1><p>The server didn't respond. Your captures are safe; check your connection and try again.</p><Button onClick={reset}>Try again</Button></div>,
 })
 
 function Library() {
@@ -64,20 +67,21 @@ function Library() {
   const items = query.data.pages.flatMap((p) => p.items)
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="library-page">
+      <div className="library-toolbar">
+        <h1>Library</h1>
         <FilterChips
           value={filterOf(search.kind, search.favorite)}
           onChange={(f) =>
             void navigate({ search: (prev) => ({ q: prev.q, kind: undefined, favorite: undefined, ...searchOf(f) }) })
           }
         />
-        <div className="relative w-full max-w-xs">
+        <div className="library-search relative">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-t3" aria-hidden />
           <Input
             type="search"
             aria-label="Search library"
-            placeholder="Search title or filename"
+            placeholder="Search captures"
             className="pl-9"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -85,12 +89,20 @@ function Library() {
         </div>
       </div>
 
-      {query.isPending ? (
+      {query.isError ? (
+        <div className="library-empty" role="alert"><CircleAlert size={28} aria-hidden /><h2>Couldn't load your library</h2><p>Your captures are safe. Check your connection and try again.</p><Button onClick={() => void query.refetch()}>Try again</Button></div>
+      ) : query.isPending ? (
         <SkeletonGrid />
       ) : items.length === 0 ? (
-        <p className="py-16 text-center text-t3">
-          {search.q || search.kind || search.favorite ? 'Nothing matches.' : 'No captures uploaded yet.'}
-        </p>
+        <div className="library-empty">
+          {search.q || search.kind || search.favorite ? <Search size={28} aria-hidden /> : <LibraryIcon size={28} aria-hidden />}
+          <h2>{search.q || search.kind || search.favorite ? 'Nothing matches' : 'No captures yet'}</h2>
+          <p>{search.q || search.kind || search.favorite ? 'Try another filter or search.' : 'Captures you upload from the Kielbox desktop app land here, newest first. Turn it on under Settings, then Cloud.'}</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {search.kind || search.favorite ? <Button onClick={() => void navigate({ search: { q: search.q } })}>Search all kinds</Button> : null}
+            {search.q ? <Button variant="ghost" onClick={() => { setText(''); void navigate({ search: (prev) => ({ ...prev, q: undefined }) }) }}>Clear search</Button> : null}
+          </div>
+        </div>
       ) : (
         <Grid items={items} loadingMore={isFetchingNextPage} />
       )}

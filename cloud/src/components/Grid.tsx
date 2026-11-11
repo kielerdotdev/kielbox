@@ -13,11 +13,11 @@ export function Grid({ items, loadingMore }: { items: ItemJson[]; loadingMore?: 
     else groups.push({ label, items: [item] })
   }
   return (
-    <div className="flex flex-col gap-8">
+    <div className="capture-groups">
       {groups.map((g) => (
         <section key={g.label}>
-          <h2 className="mb-3 text-[12px] font-medium uppercase tracking-wide text-t3">{g.label}</h2>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+          <h2 className="month-heading">{g.label}</h2>
+          <div className="capture-grid">
             {g.items.map((item) => (
               <Card key={item.id} item={item} />
             ))}
@@ -31,9 +31,9 @@ export function Grid({ items, loadingMore }: { items: ItemJson[]; loadingMore?: 
 
 export function SkeletonGrid({ count = 8 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4" aria-busy>
+    <div className="capture-grid" aria-busy>
       {Array.from({ length: count }, (_, i) => (
-        <Skeleton key={i} className="aspect-[4/3] rounded-card" />
+        <Skeleton key={i} className="aspect-video rounded-control" />
       ))}
     </div>
   )

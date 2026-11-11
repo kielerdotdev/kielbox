@@ -79,3 +79,12 @@ signer; the migration is applied in `test/setup.ts`. Multipart sizes are shrunk 
 ## Deploying
 
 Not wired up here. See `docs/CLOUD.md` (written in milestone 7).
+
+The authenticated library is served at `/`. The marketing site is a separate
+Astro project in [`../site/`](../site/README.md), configured for `box.kieler.dev`.
+Cloud has not been deployed; it still requires the setup in `docs/CLOUD.md`.
+
+Local design verification on 11 November 2026 covered desktop/mobile rendering,
+inline rename, favorite changes, link creation, revocation with a 404 response,
+search and clear-search. These checks used a temporary image fixture that was
+removed afterwards; they do not validate Cloudflare deployment or video seeking.

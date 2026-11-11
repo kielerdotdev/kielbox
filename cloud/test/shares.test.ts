@@ -101,7 +101,7 @@ describe('share host', () => {
     const { url } = await makeShare(item.id)
     for (const r of [await shareReq(url), await shareReq('http://127.0.0.1/s/' + 'A'.repeat(43))]) {
       expect(r.headers.get('content-security-policy')).toBe(
-        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       )
       expect(r.headers.get('referrer-policy')).toBe('no-referrer')
       expect(r.headers.get('x-robots-tag')).toBe('noindex, nofollow')

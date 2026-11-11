@@ -1,40 +1,37 @@
-import { Link } from '@tanstack/react-router'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Link, useRouter } from '@tanstack/react-router'
 import { Film, Image as ImageIcon, Star } from 'lucide-react'
 import type { ItemJson } from '../functions/types'
-import { formatDate, formatDuration, formatSize, KIND_LABEL, type Kind } from '../lib/format'
-import { Badge } from './ui/badge'
+import { updateItem } from '../functions/items'
+import { formatShortDate, formatDuration, formatSize, KIND_LABEL, type Kind } from '../lib/format'
+import { useToast } from './ui/toast'
 
 export function Card({ item }: { item: ItemJson }) {
   const isImage = item.content_type.startsWith('image/')
   const thumb = item.thumb_url ?? (isImage ? item.media_url : null)
+  const [failedThumb, setFailedThumb] = useState<string | null>(null)
+  const router = useRouter()
+  const client = useQueryClient()
+  const toast = useToast()
+  const favorite = useMutation({
+    mutationFn: () => updateItem({ data: { id: item.id, favorite: !item.favorite } }),
+    onSuccess: async () => { await client.invalidateQueries({ queryKey: ['items'] }); await router.invalidate() },
+    onError: (e) => toast.add({ title: 'Could not save favorite', description: e.message }),
+  })
+  const starred = favorite.isPending ? !item.favorite : item.favorite
   return (
-    <Link
-      to="/items/$itemId"
-      params={{ itemId: item.id }}
-      className="group block overflow-hidden rounded-card bg-surface ring-1 ring-line transition hover:ring-ring"
-    >
-      <div className="relative aspect-video bg-deep">
-        {thumb ? (
-          <img src={thumb} alt="" loading="lazy" className="size-full object-cover" />
-        ) : (
-          <div className="flex size-full items-center justify-center text-t3">
-            {isImage ? <ImageIcon size={28} aria-hidden /> : <Film size={28} aria-hidden />}
-          </div>
-        )}
-        <Badge className="absolute left-2 top-2 bg-black/60 text-t1">{KIND_LABEL[item.kind as Kind]}</Badge>
-        {item.favorite ? (
-          <Star size={16} className="absolute right-2 top-2 fill-busy text-busy" aria-label="Favorite" />
-        ) : null}
+    <article className="capture-card">
+      <Link to="/items/$itemId" params={{ itemId: item.id }} className="capture-thumb" aria-label={`Open ${item.title}`}>
+        {thumb && failedThumb !== thumb ? <img src={thumb} alt="" loading="lazy" onError={() => setFailedThumb(thumb)} /> : <div className="thumb-fallback">{isImage ? <ImageIcon size={26} aria-hidden /> : <Film size={26} aria-hidden />}<span>{item.content_type.split('/')[1]?.toUpperCase()}</span></div>}
+        <span className="thumb-label">{KIND_LABEL[item.kind as Kind]}</span>
+        <span className="thumb-label thumb-detail">{item.duration_ms != null ? formatDuration(item.duration_ms) : formatSize(item.size)}</span>
+      </Link>
+      <div className="capture-caption">
+        <Link to="/items/$itemId" params={{ itemId: item.id }} title={item.title}>{item.title}</Link>
+        <span className="capture-date">{formatShortDate(item.captured_at)}</span>
+        <button type="button" className="favorite-button" aria-label={starred ? 'Unfavorite' : 'Favorite'} aria-pressed={starred} disabled={favorite.isPending} onClick={() => favorite.mutate()}><Star size={16} fill={starred ? 'currentColor' : 'none'} aria-hidden /></button>
       </div>
-      <div className="p-3">
-        <div className="truncate text-[13px] font-medium" title={item.title}>
-          {item.title}
-        </div>
-        <div className="mt-0.5 flex justify-between text-[12px] text-t3">
-          <span>{formatDate(item.captured_at)}</span>
-          <span>{item.duration_ms != null ? formatDuration(item.duration_ms) : formatSize(item.size)}</span>
-        </div>
-      </div>
-    </Link>
+    </article>
   )
 }

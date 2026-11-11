@@ -9,9 +9,9 @@ export function Player({ item }: { item: ItemJson }) {
         preload="metadata"
         poster={item.thumb_url ?? undefined}
         src={item.media_url}
-        className="max-h-[70vh] w-full rounded-card bg-black"
+        className="capture-player"
       />
     )
   }
-  return <img src={item.media_url} alt={item.title} className="max-h-[70vh] w-full rounded-card bg-black object-contain" />
+  return <img src={item.media_url} alt={item.title} className="capture-player object-contain" />
 }

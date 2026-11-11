@@ -72,6 +72,8 @@ export async function dispatch(
   }
 
   if (host === config.shareHost) {
+    // The public page uses only this static font; all other assets stay private.
+    if (isSafeMethod(request.method) && url.pathname === '/fonts/Geist.ttf') return env.ASSETS.fetch(request)
     return handlePublic(request, buildServices(env, url, config), exec)
   }
 
