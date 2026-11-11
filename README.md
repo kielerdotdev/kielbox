@@ -3,12 +3,14 @@
 Screen capture, clips, and disk tools in one desktop app. I’m building it to
 replace the handful of utilities I install and configure on every machine.
 
-Currently Windows only. macOS and Linux are planned.
+Currently Windows only. macOS and Linux are planned. The Rune frontend is an
+experimental preview with incomplete parity; see [current capabilities and gaps](docs/RUNE_MIGRATION.md).
+Configured upload destinations and the former watch/share windows are not wired in Rune.
 
 - Screen recording and instant replay, with separate audio tracks.
-- Screenshots, annotations, and sharing through configured destinations.
+- Screenshots and annotations with local image/project output.
 - Clip trimming, audio editing, and video export.
-- A clip viewer for browsing videos while screen-sharing with friends.
+- A local library with search, filters, favorites and video thumbnails.
 - Disk usage views and a CLI for cleaning old development files.
 
 This is early software. Game recording requires an NVIDIA GPU with AV1 encoding.
@@ -22,13 +24,17 @@ and run it. Kielbox installs for your Windows account and appears in the Start
 menu. The setup wizard lets you choose the installation folder, a desktop
 shortcut, and whether Kielbox starts when you sign in. Preview builds are unsigned.
 
-Used RCR or an older Kielbox build? Choose **Use existing data** on the welcome
-screen and select the folder containing your projects and recordings. Your files
-stay where they are.
+Used RCR or an older Kielbox build? In an installed build, open
+**Settings → Storage → Use existing data…** and choose the existing workspace.
+Quit safely and reopen to activate it. Files stay in place; nothing is moved or
+merged. First-run guidance opens Storage. Source/portable builds can select a
+root with `--working-directory "C:\path\to\existing-data"` on each launch.
+**Capture folder** changes only the recordings location, not the whole workspace.
+Native installer and migration acceptance remain pending.
 
-Installed builds check for updates in the background. **Settings → Updates**
-lets you check, download, and restart to update. Updates wait for recording and
-saves to finish. Closing the window leaves the app in the tray; choose **Quit
+Installed builds check for updates in the background. **Settings → App → Updates**
+lets you check, download, and restart to update. Updates and quit wait for capture, jobs and editable recovery checkpoints.
+See the [implementation tracker](plans/implementation-tracker.md) for validation limits. Closing the window leaves the app in the tray; choose **Quit
 Kielbox** to exit. Uninstall through Windows **Installed apps** or **Apps & features**.
 
 Kielbox was previously called RCR. Existing data formats keep their older

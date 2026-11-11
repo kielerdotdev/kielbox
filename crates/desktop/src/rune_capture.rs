@@ -1,4 +1,5 @@
 //! Native capture/replay ownership, independent of the view tree.
+use crate::tray::QuickState;
 use crate::{
     preferences::Preferences,
     quick_recording,
@@ -31,7 +32,19 @@ pub struct State {
     bridge: Option<crate::rune_gpu::Bridge>,
     preview_error: Option<String>,
     quick: Option<quick_recording::Worker>,
-    quick_paused: bool,
+    quick_state: QuickState,
+    quick_stats: recording_tools::stats::StatsSnapshot,
+    quick_warnings: Vec<String>,
+    source_choices: Vec<(Option<crate::preferences::SavedDisplay>, String)>,
+    source_events: Option<
+        mpsc::Receiver<
+            anyhow::Result<(
+                Vec<windows_capture::display::Info>,
+                Vec<windows_capture::audio_endpoint::AudioEndpoint>,
+            )>,
+        >,
+    >,
+    audio_choices: Vec<windows_capture::audio_endpoint::AudioEndpoint>,
     pending: Vec<pipeline::ReplaySave>,
     fixture: bool,
 }
@@ -182,6 +195,7 @@ impl State {
     pub fn quick(&mut self, prefs: &Preferences, notice: &mut String) {
         if let Some(worker) = &self.quick {
             worker.stop();
+            self.quick_state = QuickState::Finishing;
             *notice = "Finishing screencast…".into();
             return;
         }
@@ -196,9 +210,55 @@ impl State {
         match quick_recording::Worker::start(options) {
             Ok(w) => {
                 self.quick = Some(w);
+                self.quick_state = QuickState::Starting;
+                self.quick_stats = Default::default();
+                self.quick_warnings.clear();
                 *notice = "Starting screencast…".into();
             }
-            Err(e) => *notice = format!("{e:#}"),
+            Err(e) => {
+                self.quick_state = QuickState::Failed;
+                *notice = format!("{e:#}");
+            }
+        }
+    }
+    fn refresh_sources(&mut self, notice: &mut String) {
+        if self.source_events.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        match std::thread::Builder::new().name("capture-source-list".into()).spawn(move || {
+            let result = (|| {
+                use windows_capture::audio_endpoint::{enumerate_audio_endpoints, AudioEndpointKind};
+                let displays = windows_capture::display::enumerate()?;
+                let mut audio = enumerate_audio_endpoints(AudioEndpointKind::Render)?;
+                let microphones = enumerate_audio_endpoints(AudioEndpointKind::Capture)?;
+                audio.truncated |= microphones.truncated;
+                audio.unavailable_entries += microphones.unavailable_entries;
+                audio.endpoints.extend(microphones.endpoints);
+                if audio.truncated || audio.unavailable_entries > 0 {
+                    anyhow::bail!("Some audio devices could not be listed. Refresh devices to retry; saved choices are unchanged.");
+                }
+                Ok((displays, audio.endpoints))
+            })();
+            let _ = tx.send(result);
+        }) {
+            Ok(_) => { self.source_events = Some(rx); *notice = "Loading capture devices…".into(); }
+            Err(error) => *notice = format!("Could not load capture devices: {error}"),
+        }
+    }
+    pub fn quick_tray_state(&self) -> QuickState {
+        self.quick_state
+    }
+    pub fn pause_quick(&mut self) {
+        if self.quick_state.can_pause() {
+            self.quick_state = if self.quick_state == QuickState::Paused {
+                QuickState::Recording
+            } else {
+                QuickState::Paused
+            };
+            if let Some(worker) = &self.quick {
+                worker.pause(self.quick_state == QuickState::Paused);
+            }
         }
     }
     pub fn tray_state(&self) -> crate::tray::TrayState {
@@ -210,12 +270,61 @@ impl State {
             replay_seconds: self.stats.replay_seconds as u64,
         }
     }
-    pub fn poll(&mut self, notice: &mut String) -> bool {
+    pub fn poll(&mut self, notices: &mut Vec<(ui::NoticeKind, String)>) -> bool {
         let mut changed = false;
-        let events: Vec<_> = self
+        if let Some(result) = self
+            .source_events
+            .as_ref()
+            .and_then(|rx| match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => Some(Err(anyhow::anyhow!(
+                    "Device discovery stopped unexpectedly. Refresh devices to retry."
+                ))),
+            })
+        {
+            self.source_events = None;
+            changed = true;
+            match result {
+                Ok((displays, audio)) => {
+                    self.source_choices = displays
+                        .into_iter()
+                        .filter_map(|d| {
+                            if d.unsupported_reason.is_some() {
+                                return None;
+                            }
+                            let id = d.device_path?;
+                            let label = format!("{} · {} × {}", d.label, d.width, d.height);
+                            Some((
+                                Some(crate::preferences::SavedDisplay {
+                                    id,
+                                    label: label.clone(),
+                                }),
+                                label,
+                            ))
+                        })
+                        .collect();
+                    self.audio_choices = audio;
+                    notices.push((
+                        ui::NoticeKind::Success,
+                        "Capture devices refreshed. Selections apply to the next native session."
+                            .into(),
+                    ));
+                }
+                Err(error) => notices.push((
+                    ui::NoticeKind::Error,
+                    format!("Could not load capture devices: {error:#}"),
+                )),
+            }
+        }
+        let (events, native_retired) = self
             .events
             .as_ref()
-            .map(|e| e.try_iter().collect())
+            .map(|receiver| {
+                quick_recording::collect_events(receiver, || {
+                    self.worker.as_ref().is_some_and(JoinHandle::is_finished)
+                })
+            })
             .unwrap_or_default();
         for event in events {
             changed = true;
@@ -232,20 +341,22 @@ impl State {
                     self.active = false;
                     self.stopping = false;
                     self.bridge = None;
-                    *notice = "Recording finished.".into();
+                    notices.push((ui::NoticeKind::Success, "Recording finished.".into()));
                 }
                 PipelineEvent::Error(e) => {
                     self.active = false;
                     self.stopping = false;
                     self.bridge = None;
-                    *notice = e;
+                    notices.push((ui::NoticeKind::Error, e));
                 }
-                PipelineEvent::Notice(v) => *notice = v,
-                PipelineEvent::ReplaySaved(path) => *notice = format!("Saved {}", path.display()),
+                PipelineEvent::Notice(v) => notices.push((ui::NoticeKind::Error, v)),
+                PipelineEvent::ReplaySaved(path) => {
+                    notices.push((ui::NoticeKind::Success, format!("Saved {}", path.display())))
+                }
                 PipelineEvent::ReplayPending(job) => self.pending.push(job),
             }
         }
-        if self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+        if native_retired {
             if let Some(w) = self.worker.take() {
                 let _ = w.join();
             }
@@ -269,35 +380,69 @@ impl State {
         while i < self.pending.len() {
             if self.pending[i].is_finished() {
                 let job = self.pending.swap_remove(i);
-                *notice = match job.complete() {
-                    Ok(path) => format!("Saved {}", path.display()),
-                    Err(e) => format!("Replay failed: {e:#}"),
-                };
+                notices.push(match job.complete() {
+                    Ok(path) => (ui::NoticeKind::Success, format!("Saved {}", path.display())),
+                    Err(e) => (ui::NoticeKind::Error, format!("Replay failed: {e:#}")),
+                });
                 changed = true;
             } else {
                 i += 1;
             }
         }
-        let events: Vec<_> = self
-            .quick
-            .as_ref()
-            .map(|w| w.events.try_iter().collect())
-            .unwrap_or_default();
+        let (events, retired) = self.quick.as_ref().map(|w| w.poll()).unwrap_or_default();
+        let mut terminal = false;
         for event in events {
             changed = true;
             match event {
+                quick_recording::Event::Started => {
+                    if self.quick_state == QuickState::Starting {
+                        self.quick_state = QuickState::Recording;
+                    }
+                }
+                quick_recording::Event::Progress(stats, warnings) => {
+                    self.quick_stats = stats;
+                    self.quick_warnings = warnings;
+                    if stats.encoded > 0 && self.quick_state == QuickState::Starting {
+                        self.quick_state = QuickState::Recording;
+                    }
+                }
                 quick_recording::Event::Saved(path, warnings) => {
-                    *notice = format!("Saved {} {}", path.display(), warnings.join("; "));
-                    self.quick = None;
+                    notices.push((
+                        if warnings.is_empty() {
+                            ui::NoticeKind::Success
+                        } else {
+                            ui::NoticeKind::Error
+                        },
+                        format!("Saved {} {}", path.display(), warnings.join("; ")),
+                    ));
+                    self.quick_state = QuickState::Idle;
+                    terminal = true;
                 }
                 quick_recording::Event::Failed(e) => {
-                    *notice = e;
-                    self.quick = None;
+                    notices.push((ui::NoticeKind::Error, e));
+                    self.quick_state = QuickState::Failed;
+                    terminal = true;
                 }
-                quick_recording::Event::Cancelled => self.quick = None,
-                quick_recording::Event::Finishing => *notice = "Finishing screencast…".into(),
-                _ => {}
+                quick_recording::Event::Cancelled => {
+                    self.quick_state = QuickState::Idle;
+                    terminal = true;
+                }
+                quick_recording::Event::Finishing => {
+                    self.quick_state = QuickState::Finishing;
+                    notices.push((ui::NoticeKind::Success, "Finishing screencast…".into()));
+                }
             }
+        }
+        if terminal || retired {
+            if retired && !terminal {
+                self.quick_state = QuickState::Failed;
+                notices.push((
+                    ui::NoticeKind::Error,
+                    "Screencast worker exited without a result. Try again.".into(),
+                ));
+            }
+            self.quick = None;
+            changed = true;
         }
         changed
     }
@@ -317,12 +462,17 @@ impl Drop for State {
 impl State {
     /// What the rail light and title bar show, and the time beside it.
     pub fn status(&self) -> (ui::Status, String) {
-        if self.stopping || !self.pending.is_empty() {
+        if self.stopping || !self.pending.is_empty() || self.quick_state == QuickState::Finishing {
             (ui::Status::Saving, String::new())
-        } else if self.quick.is_some() {
-            (ui::Status::Recording, String::new())
+        } else if self.quick_state == QuickState::Recording {
+            (
+                ui::Status::Recording,
+                ui::clock(self.quick_stats.recorded.as_secs_f64()),
+            )
         } else if self.active && self.recording {
             (ui::Status::Recording, ui::clock(self.stats.elapsed_seconds))
+        } else if matches!(self.quick_state, QuickState::Starting | QuickState::Paused) {
+            (ui::Status::Ready, self.quick_state.label().into())
         } else if self.active {
             (ui::Status::Ready, ui::clock(self.stats.replay_seconds))
         } else {
@@ -363,7 +513,11 @@ pub fn view(s: &AppState) -> rune::El {
                     } else {
                         "Live".into()
                     })
-                    .font(rune::TextStyle::new(12.0, 600.0).lh(16.0).features("'tnum' 1"))
+                    .font(
+                        rune::TextStyle::new(12.0, 600.0)
+                            .lh(16.0)
+                            .features("'tnum' 1"),
+                    )
                     .color(theme::c(theme::T1)),
                 )
                 .absolute(12.0, 12.0),
@@ -407,7 +561,7 @@ pub fn view(s: &AppState) -> rune::El {
                         .gap(8.0)
                         .center_y()
                         .child(theme::glyph(&icons::DISPLAY, 16.0, theme::c(theme::T2)))
-                        .child(theme::small(display)),
+                        .child(theme::small(display.clone())),
                 ),
         )
         .child(preview)
@@ -417,30 +571,124 @@ pub fn view(s: &AppState) -> rune::El {
                 .gap(28.0)
                 .center_y()
                 .flex_wrap()
-                .child(theme::switch_line(
-                    "system-audio",
-                    "Desktop audio",
-                    p.system_audio,
-                    |s, _| {
+                .child(
+                    theme::switch_line("system-audio", "Desktop audio", p.system_audio, |s, _| {
                         s.preferences.system_audio = !s.preferences.system_audio;
                         s.save_preferences();
-                    },
-                ))
-                .child(theme::switch_line(
-                    "microphone",
-                    "Microphone",
-                    p.microphone,
-                    |s, _| {
+                    })
+                    .disabled(c.active || c.quick.is_some()),
+                )
+                .child(
+                    theme::switch_line("microphone", "Microphone", p.microphone, |s, _| {
                         s.preferences.microphone = !s.preferences.microphone;
                         s.save_preferences();
-                    },
-                ))
+                    })
+                    .disabled(c.active || c.quick.is_some()),
+                )
                 .child(theme::spacer())
-                .child(theme::small(format!(
-                    "{}p · {} fps · AV1",
-                    p.height, p.fps
-                ))),
+                .child(theme::small(format!("{}p · {} fps · AV1", p.height, p.fps))),
         );
+    let source_locked = c.active || c.worker.is_some();
+    let mut sources = rune::col().w_full().gap(8.0)
+        .child(theme::h2("Native capture sources"))
+        .child(theme::small("Applies to the next recording or instant replay session. Stop capture to change sources. Unavailable saved devices fail explicitly; they are never replaced by name.").wrap().w_full().min_w(0.0))
+        .child(theme::small(format!("Display: {}", display)))
+        .child(Btn::new("refresh-capture-sources", if c.source_events.is_some() { "Loading devices…" } else { "Refresh devices" })
+            .disabled(c.source_events.is_some()).on(|s, _| s.capture.refresh_sources(&mut s.notice)).build())
+        .child(Btn::new("capture-primary", "Use Windows primary display").disabled(source_locked)
+            .checked(p.display.is_none()).on(|s, _| { s.preferences.display = None; s.save_preferences(); }).build());
+    for (index, (choice, label)) in c.source_choices.iter().enumerate() {
+        let choice = choice.clone();
+        let selected = p.display.as_ref().map(|d| &d.id) == choice.as_ref().map(|d| &d.id);
+        sources = sources.child(
+            Btn::new(format!("capture-display-{index}"), label.clone())
+                .checked(selected)
+                .disabled(source_locked)
+                .on(move |s, _| {
+                    s.preferences.display = choice.clone();
+                    s.save_preferences();
+                })
+                .build(),
+        );
+    }
+    use windows_capture::audio_endpoint::AudioEndpointKind;
+    for (microphone, kind, title, saved) in [
+        (
+            false,
+            AudioEndpointKind::Render,
+            "Desktop audio",
+            &p.system_audio_device,
+        ),
+        (
+            true,
+            AudioEndpointKind::Capture,
+            "Microphone",
+            &p.microphone_device,
+        ),
+    ] {
+        let enabled = if microphone {
+            p.microphone
+        } else {
+            p.system_audio
+        };
+        sources = sources
+            .child(theme::small(format!(
+                "{}: {}{}",
+                title,
+                saved
+                    .as_ref()
+                    .map(|e| e.display_label())
+                    .unwrap_or_else(|| "Windows default endpoint".into()),
+                if enabled { "" } else { " · disabled" }
+            )))
+            .child(
+                Btn::new(
+                    format!("capture-audio-default-{microphone}"),
+                    format!("{title}: use Windows default"),
+                )
+                .checked(saved.is_none())
+                .disabled(source_locked)
+                .on(move |s, _| {
+                    if microphone {
+                        s.preferences.microphone_device = None;
+                    } else {
+                        s.preferences.system_audio_device = None;
+                    }
+                    s.save_preferences();
+                })
+                .build(),
+            );
+        for (index, endpoint) in c
+            .audio_choices
+            .iter()
+            .filter(|e| e.kind == kind)
+            .enumerate()
+        {
+            let choice = crate::preferences::SavedAudioEndpoint {
+                id: endpoint.id.clone(),
+                label: endpoint.name.clone(),
+            };
+            let selected = saved.as_ref().is_some_and(|saved| saved.id == choice.id);
+            sources = sources.child(
+                Btn::new(
+                    format!("capture-audio-{microphone}-{index}"),
+                    choice.display_label(),
+                )
+                .checked(selected)
+                .disabled(source_locked)
+                .on(move |s, _| {
+                    if microphone {
+                        s.preferences.microphone_device = Some(choice.clone());
+                    } else {
+                        s.preferences.system_audio_device = Some(choice.clone());
+                    }
+                    s.save_preferences();
+                })
+                .build(),
+            );
+        }
+    }
+    left = left.child(sources);
     if c.active {
         left = left.child(theme::small(format!(
             "{} encoded frames · {} dropped",
@@ -462,28 +710,20 @@ pub fn view(s: &AppState) -> rune::El {
     }
     // Right: replay, recording and screenshots, one section each.
     let replay_on = c.active && !c.recording;
-    let mut replay = rune::col()
-        .w_full()
-        .gap(14.0)
-        .child(
-            row()
-                .w_full()
-                .gap(10.0)
-                .center_y()
-                .child(theme::h2("Instant replay").grow(1.0))
-                .child(
-                    theme::switch(
-                        "toggle-replay",
-                        "Instant replay",
-                        replay_on,
-                        |s, _| {
-                            s.capture
-                                .toggle(false, &s.preferences, s.wake.clone(), &mut s.notice)
-                        },
-                    )
-                    .disabled(recording || c.stopping),
-                ),
-        );
+    let mut replay = rune::col().w_full().gap(14.0).child(
+        row()
+            .w_full()
+            .gap(10.0)
+            .center_y()
+            .child(theme::h2("Instant replay").grow(1.0))
+            .child(
+                theme::switch("toggle-replay", "Instant replay", replay_on, |s, _| {
+                    s.capture
+                        .toggle(false, &s.preferences, s.wake.clone(), &mut s.notice)
+                })
+                .disabled(recording || c.stopping),
+            ),
+    );
     if recording {
         replay = replay
             .child(
@@ -497,40 +737,37 @@ pub fn view(s: &AppState) -> rune::El {
             )
             .child(theme::small("Saves a separate clip. Recording continues."));
     } else {
-        replay = replay
-            .child(
-                row()
-                    .gap(10.0)
-                    .items_end()
-                    .child(
-                        rune::text(ui::clock(if replay_on {
-                            c.stats.replay_seconds
-                        } else {
-                            p.replay_seconds as f64
-                        }))
-                        .font(theme::BIG)
-                        .color(theme::c(if replay_on { theme::T1 } else { theme::T3 })),
-                    )
-                    .child(
-                        theme::t1(if replay_on {
-                            "ready to save"
-                        } else {
-                            "off"
-                        })
-                        .color(theme::c(theme::T2))
-                        .pb(4.0),
-                    ),
-            )
-            .child(
-                Btn::new("save-replay", "Save replay")
-                    .primary()
-                    .h(44.0)
-                    .wide()
-                    .hint(ui::keys(&keys[1]))
-                    .disabled(!replay_on || c.stopping)
-                    .on(|s, _| s.capture.save_replay(&s.preferences, &mut s.notice))
-                    .build(),
-            );
+        replay =
+            replay
+                .child(
+                    row()
+                        .gap(10.0)
+                        .items_end()
+                        .child(
+                            rune::text(ui::clock(if replay_on {
+                                c.stats.replay_seconds
+                            } else {
+                                p.replay_seconds as f64
+                            }))
+                            .font(theme::BIG)
+                            .color(theme::c(if replay_on { theme::T1 } else { theme::T3 })),
+                        )
+                        .child(
+                            theme::t1(if replay_on { "ready to save" } else { "off" })
+                                .color(theme::c(theme::T2))
+                                .pb(4.0),
+                        ),
+                )
+                .child(
+                    Btn::new("save-replay", "Save replay")
+                        .primary()
+                        .h(44.0)
+                        .wide()
+                        .hint(ui::keys(&keys[1]))
+                        .disabled(!replay_on || c.stopping)
+                        .on(|s, _| s.capture.save_replay(&s.preferences, &mut s.notice))
+                        .build(),
+                );
     }
     let mut record = rune::col().w_full().gap(12.0);
     if recording {
@@ -552,7 +789,12 @@ pub fn view(s: &AppState) -> rune::El {
                     .rec()
                     .h(44.0)
                     .wide()
-                    .lead(rune::el().size(10.0, 10.0).radius(2.0).fill(theme::c(theme::REC_T)))
+                    .lead(
+                        rune::el()
+                            .size(10.0, 10.0)
+                            .radius(2.0)
+                            .fill(theme::c(theme::REC_T)),
+                    )
                     .hint(ui::keys(&keys[2]))
                     .disabled(c.stopping)
                     .on(|s, _| {
@@ -604,8 +846,18 @@ pub fn view(s: &AppState) -> rune::El {
             row()
                 .w_full()
                 .gap(8.0)
-                .child(shot("screenshot-region", "Region", &icons::REGION, CaptureTarget::Region))
-                .child(shot("screenshot-window", "Window", &icons::WINDOW, CaptureTarget::Window))
+                .child(shot(
+                    "screenshot-region",
+                    "Region",
+                    &icons::REGION,
+                    CaptureTarget::Region,
+                ))
+                .child(shot(
+                    "screenshot-window",
+                    "Window",
+                    &icons::WINDOW,
+                    CaptureTarget::Window,
+                ))
                 .child(shot(
                     "screenshot-screen",
                     "Screen",
@@ -625,7 +877,11 @@ pub fn view(s: &AppState) -> rune::El {
                 .child(
                     Btn::new(
                         "quick-record",
-                        if c.quick.is_some() {
+                        if c.quick_state == QuickState::Finishing {
+                            "Finishing screencast…"
+                        } else if c.quick_state == QuickState::Starting {
+                            "Cancel starting screencast"
+                        } else if c.quick.is_some() {
                             "Stop screencast"
                         } else {
                             "Record screencast"
@@ -638,23 +894,22 @@ pub fn view(s: &AppState) -> rune::El {
                     })
                     .wide()
                     .hint(ui::keys(&keys[6]))
+                    .disabled(c.quick_state == QuickState::Finishing)
                     .on(|s, _| s.capture.quick(&s.preferences, &mut s.notice))
                     .build(),
                 )
                 .child(theme::switch(
                     "quick-pause",
                     "Pause screencast",
-                    c.quick_paused,
-                    |s, _| {
-                        s.capture.quick_paused = !s.capture.quick_paused;
-                        if let Some(w) = &s.capture.quick {
-                            w.pause(s.capture.quick_paused);
-                        }
-                    },
-                ))
+                    c.quick_state == QuickState::Paused,
+                    |s, _| s.capture.pause_quick(),
+                ).disabled(!c.quick_state.can_pause()))
                 .child(theme::small("Pause")),
         )
-        .child(theme::small("Uses FFmpeg, without the game recorder."));
+        .child(theme::small(format!("{} · {}", c.quick_state.label(), ui::clock(c.quick_stats.recorded.as_secs_f64()))))
+        .child(theme::small("FFmpeg MP4 · primary display with cursor · maximum 10 minutes (600 seconds).").wrap().w_full().min_w(0.0))
+        .child(theme::small("Quick audio uses Windows default playback and microphone endpoints when enabled above. Native device selections do not apply.").wrap().w_full().min_w(0.0))
+        .child(theme::small(c.quick_warnings.join("; ")));
     let _ = status;
     let right = rune::col()
         .w(340.0)
@@ -678,4 +933,61 @@ pub fn view(s: &AppState) -> rune::El {
             .child(left)
             .child(right),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_preserves_error_and_later_success_as_distinct_typed_outcomes() {
+        let mut state = State::default();
+        let (tx, rx) = mpsc::channel();
+        tx.send(PipelineEvent::Error("finalization failed".into()))
+            .unwrap();
+        tx.send(PipelineEvent::ReplaySaved(PathBuf::from("clip.mkv")))
+            .unwrap();
+        state.events = Some(rx);
+        let mut notices = Vec::new();
+        assert!(state.poll(&mut notices));
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0].0, ui::NoticeKind::Error));
+        assert_eq!(notices[0].1, "finalization failed");
+        assert!(matches!(notices[1].0, ui::NoticeKind::Success));
+    }
+
+    #[test]
+    fn pause_is_unavailable_outside_a_running_session() {
+        let mut state = State::default();
+        for phase in [
+            QuickState::Idle,
+            QuickState::Starting,
+            QuickState::Finishing,
+            QuickState::Failed,
+        ] {
+            state.quick_state = phase;
+            state.pause_quick();
+            assert_eq!(state.quick_tray_state(), phase);
+        }
+    }
+
+    #[test]
+    fn quick_lifecycle_does_not_claim_recording_while_starting_paused_or_saving() {
+        let mut state = State::default();
+        state.quick_state = QuickState::Starting;
+        assert!(matches!(state.status().0, ui::Status::Ready));
+        state.quick_state = QuickState::Recording;
+        assert!(matches!(state.status().0, ui::Status::Recording));
+        state.pause_quick();
+        assert_eq!(state.quick_tray_state(), QuickState::Paused);
+        assert!(matches!(state.status().0, ui::Status::Ready));
+        state.pause_quick();
+        assert_eq!(state.quick_tray_state(), QuickState::Recording);
+        state.quick_state = QuickState::Finishing;
+        assert!(matches!(state.status().0, ui::Status::Saving));
+        state.quick_state = QuickState::Paused;
+        state.active = true;
+        state.recording = true;
+        assert!(matches!(state.status().0, ui::Status::Recording));
+    }
 }

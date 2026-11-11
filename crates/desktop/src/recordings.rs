@@ -19,18 +19,25 @@ pub fn set_root(path: PathBuf) {
 }
 // Shell actions are dispatched by Rune background jobs.
 
-
-
 /// Run on a worker: directory preparation and shell startup may block on a drive.
 pub(crate) fn try_open_folder(path: &Path) -> Result<(), String> {
     open_folder_with(path, |path| {
-        std::process::Command::new("explorer.exe").arg(path).spawn()
-            .map(|_| ()).map_err(|error| error.to_string())
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     })
 }
-fn open_folder_with(path: &Path, launch: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
-    std::fs::create_dir_all(path).map_err(|error| format!("Could not prepare capture folder: {error}"))?;
-    let path = path.canonicalize().map_err(|error| format!("Could not locate capture folder: {error}"))?;
+fn open_folder_with(
+    path: &Path,
+    launch: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|error| format!("Could not prepare capture folder: {error}"))?;
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("Could not locate capture folder: {error}"))?;
     launch(&path).map_err(|error| format!("Could not open capture folder: {error}"))
 }
 pub fn is_image(path: &Path) -> bool {
@@ -88,16 +95,26 @@ pub(crate) struct RootScanError {
     pub root: PathBuf,
     pub kind: std::io::ErrorKind,
 }
-fn scan_entry<T>(entry: std::io::Result<T>, folder: &Path, depth: usize) -> Result<Option<T>, RootScanError> {
+fn scan_entry<T>(
+    entry: std::io::Result<T>,
+    folder: &Path,
+    depth: usize,
+) -> Result<Option<T>, RootScanError> {
     match entry {
         Ok(entry) => Ok(Some(entry)),
-        Err(error) if depth == 0 => Err(RootScanError { root: folder.to_owned(), kind: error.kind() }),
+        Err(error) if depth == 0 => Err(RootScanError {
+            root: folder.to_owned(),
+            kind: error.kind(),
+        }),
         Err(_) => Ok(None),
     }
 }
 
 /// The caller controls cancellation and thread placement; no media is opened.
-pub(crate) fn scan_in(root: PathBuf, cancelled: impl Fn() -> bool) -> Option<Result<Vec<ScannedCapture>, RootScanError>> {
+pub(crate) fn scan_in(
+    root: PathBuf,
+    cancelled: impl Fn() -> bool,
+) -> Option<Result<Vec<ScannedCapture>, RootScanError>> {
     let mut paths = vec![];
     let mut directories = vec![(root, 0)];
     let mut visited = std::collections::BTreeSet::new();
@@ -115,7 +132,14 @@ pub(crate) fn scan_in(root: PathBuf, cancelled: impl Fn() -> bool) -> Option<Res
         let entries = match std::fs::read_dir(&folder) {
             Ok(entries) => entries,
             Err(error) if depth == 0 => {
-                return if cancelled() { None } else { Some(Err(RootScanError { root: folder, kind: error.kind() })) };
+                return if cancelled() {
+                    None
+                } else {
+                    Some(Err(RootScanError {
+                        root: folder,
+                        kind: error.kind(),
+                    }))
+                };
             }
             Err(_) => continue,
         };
@@ -129,7 +153,7 @@ pub(crate) fn scan_in(root: PathBuf, cancelled: impl Fn() -> bool) -> Option<Res
                 Err(error) => return if cancelled() { None } else { Some(Err(error)) },
             };
             let path = entry.path();
-            if entry.file_name().to_string_lossy().starts_with('.') {
+            if entry.file_name().to_string_lossy().starts_with('.') || is_image_recovery(&path) {
                 continue;
             }
             let Ok(metadata) = std::fs::metadata(&path) else {
@@ -409,10 +433,26 @@ fn backup_sidecar(sidecar: &Path) -> anyhow::Result<Option<PathBuf>> {
 pub fn trash(paths: &[PathBuf], root: &Path) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
     use anyhow::ensure;
     let root = root.canonicalize()?;
-    let sources = paths
+    let mut sources = paths
         .iter()
         .map(|p| p.canonicalize())
         .collect::<std::io::Result<Vec<_>>>()?;
+    for source in sources.clone() {
+        let recovery = image_recovery_path(&source);
+        match std::fs::symlink_metadata(&recovery) {
+            Ok(metadata) => {
+                ensure!(
+                    metadata.is_file() && !metadata.file_type().is_symlink(),
+                    "Invalid image recovery sidecar"
+                );
+                sources.push(recovery.canonicalize()?);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    sources.sort();
+    sources.dedup();
     for source in &sources {
         ensure!(
             source.starts_with(&root)
@@ -466,12 +506,134 @@ pub fn trash(paths: &[PathBuf], root: &Path) -> anyhow::Result<Vec<(PathBuf, Pat
     }
     Ok(moved)
 }
+pub fn image_recovery_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".rune-recovery.ssxe");
+    PathBuf::from(name)
+}
+fn is_image_recovery(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(".rune-recovery.ssxe"))
+}
+#[derive(Default)]
+pub struct TrashRecovery {
+    pub moves: Vec<(PathBuf, PathBuf)>,
+    pub warnings: Vec<String>,
+}
+fn safe_restore_parent(source: &Path, root: &Path) -> bool {
+    if !source.starts_with(root)
+        || source.starts_with(root.join(".trash"))
+        || source
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    source
+        .parent()
+        .and_then(|p| p.ancestors().find(|a| a.exists()))
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|p| p.starts_with(root) && !p.starts_with(root.join(".trash")))
+}
+/// A bad or obsolete batch never prevents recovery of unrelated captures.
+pub fn trash_recovery(root: &Path) -> anyhow::Result<TrashRecovery> {
+    let mut result = TrashRecovery::default();
+    let root = match root.canonicalize() {
+        Ok(root) => root,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(result),
+        Err(e) => return Err(e.into()),
+    };
+    let trash = root.join(".trash");
+    let entries = match std::fs::read_dir(&trash) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(result),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let batch_result = (|| -> anyhow::Result<()> {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                return Ok(());
+            }
+            let batch = entry.path().canonicalize()?;
+            anyhow::ensure!(batch.starts_with(&trash), "Trash batch escaped Library");
+            let journal = batch.join("recovery.json");
+            let metadata = std::fs::symlink_metadata(&journal)?;
+            anyhow::ensure!(
+                metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && metadata.len() <= 4 * 1024 * 1024,
+                "Invalid journal {}",
+                journal.display()
+            );
+            #[derive(serde::Deserialize)]
+            struct Journal {
+                version: u32,
+                moves: Vec<(PathBuf, PathBuf)>,
+            }
+            let record: Journal = serde_json::from_reader(std::fs::File::open(&journal)?)?;
+            anyhow::ensure!(
+                record.version == 1,
+                "Unsupported journal {}",
+                journal.display()
+            );
+            for (source, destination) in record.moves {
+                let item = (|| -> anyhow::Result<()> {
+                    anyhow::ensure!(
+                        destination.parent() == Some(batch.as_path()),
+                        "Invalid destination in {}",
+                        journal.display()
+                    );
+                    let metadata = match std::fs::symlink_metadata(&destination) {
+                        Ok(metadata) => metadata,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                        Err(e) => return Err(e.into()),
+                    };
+                    anyhow::ensure!(
+                        metadata.is_file()
+                            && !metadata.file_type().is_symlink()
+                            && safe_restore_parent(&source, &root),
+                        "Unsafe recovery path in {}",
+                        journal.display()
+                    );
+                    result.moves.push((source, destination));
+                    Ok(())
+                })();
+                if let Err(error) = item {
+                    result.warnings.push(format!("{error:#}"));
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = batch_result {
+            result.warnings.push(format!("{error:#}"));
+        }
+    }
+    Ok(result)
+}
+#[cfg(test)]
+pub fn recoverable_trash(root: &Path) -> anyhow::Result<Vec<(PathBuf, PathBuf)>> {
+    Ok(trash_recovery(root)?.moves)
+}
+
 pub fn restore(moved: &mut Vec<(PathBuf, PathBuf)>) -> anyhow::Result<()> {
     while let Some((source, destination)) = moved.last() {
         anyhow::ensure!(
             !source.exists(),
             "A file already exists at the original location"
         );
+        let root = destination
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .ok_or_else(|| anyhow::anyhow!("Invalid trash location"))?
+            .canonicalize()?;
+        anyhow::ensure!(
+            safe_restore_parent(source, &root),
+            "Unsafe restore destination"
+        );
+        std::fs::create_dir_all(source.parent().unwrap())?;
+        anyhow::ensure!(safe_restore_parent(source, &root), "Restore parent changed");
         move_file_noclobber(destination, source)?;
         moved.pop();
     }
@@ -498,10 +660,17 @@ fn move_file_noclobber(source: &Path, destination: &Path) -> anyhow::Result<()> 
 /// Build CF_HDROP without converting Windows paths through lossy UTF-8.
 #[cfg(any(windows, test))]
 fn dropfiles_payload(path: &[u16]) -> anyhow::Result<Vec<u8>> {
-    anyhow::ensure!(!path.is_empty() && path.len() <= 32768 && !path.contains(&0), "Invalid or oversized clipboard file path");
+    anyhow::ensure!(
+        !path.is_empty() && path.len() <= 32768 && !path.contains(&0),
+        "Invalid or oversized clipboard file path"
+    );
     let mut names = if let Some(rest) = path.strip_prefix(&[92, 92, 63, 92, 85, 78, 67, 92]) {
         [vec![92, 92], rest.to_vec()].concat()
-    } else { path.strip_prefix(&[92, 92, 63, 92]).unwrap_or(path).to_vec() };
+    } else {
+        path.strip_prefix(&[92, 92, 63, 92])
+            .unwrap_or(path)
+            .to_vec()
+    };
     names.extend([0, 0]);
     // DROPFILES: byte offset, POINT, fNC, fWide, then double-NUL UTF-16.
     let mut bytes = vec![0u8; 20 + names.len() * 2];
@@ -514,10 +683,16 @@ fn dropfiles_payload(path: &[u16]) -> anyhow::Result<Vec<u8>> {
 }
 
 #[cfg(windows)]
-fn copy_file_with(path: &Path, owner: isize, write: impl FnOnce(isize, &[u8]) -> anyhow::Result<()>) -> anyhow::Result<()> {
+fn copy_file_with(
+    path: &Path,
+    owner: isize,
+    write: impl FnOnce(isize, &[u8]) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     anyhow::ensure!(owner != 0, "The editor window is no longer available");
-    let resolved = path.canonicalize().map_err(|error| anyhow::anyhow!("Could not locate {}: {error}", path.display()))?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|error| anyhow::anyhow!("Could not locate {}: {error}", path.display()))?;
     let payload = dropfiles_payload(&resolved.as_os_str().encode_wide().collect::<Vec<_>>())?;
     write(owner, &payload)
 }
@@ -535,7 +710,10 @@ fn write_file_clipboard(owner: isize, bytes: &[u8]) -> anyhow::Result<()> {
 #[cfg(windows)]
 pub(crate) fn write_clipboard_owned(owner: isize, format: u32, bytes: &[u8]) -> anyhow::Result<()> {
     anyhow::ensure!(owner != 0, "The editor window is no longer available");
-    anyhow::ensure!(matches!(format, 13 | 15) && !bytes.is_empty(), "Unsupported clipboard payload");
+    anyhow::ensure!(
+        matches!(format, 13 | 15) && !bytes.is_empty(),
+        "Unsupported clipboard payload"
+    );
     use windows::Win32::{
         Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND},
         System::{
@@ -544,27 +722,42 @@ pub(crate) fn write_clipboard_owned(owner: isize, format: u32, bytes: &[u8]) -> 
         },
     };
     struct Memory(Option<HGLOBAL>);
-    impl Drop for Memory { fn drop(&mut self) { if let Some(memory) = self.0.take() { let _ = unsafe { GlobalFree(Some(memory)) }; } } }
+    impl Drop for Memory {
+        fn drop(&mut self) {
+            if let Some(memory) = self.0.take() {
+                let _ = unsafe { GlobalFree(Some(memory)) };
+            }
+        }
+    }
     struct Clipboard;
-    impl Drop for Clipboard { fn drop(&mut self) { let _ = unsafe { CloseClipboard() }; } }
+    impl Drop for Clipboard {
+        fn drop(&mut self) {
+            let _ = unsafe { CloseClipboard() };
+        }
+    }
     // Allocate before EmptyClipboard; transfer allocation ownership only after
     // Windows actually accepts the prepared format. No retries or UI waits.
     unsafe {
-        let mut memory = Memory(Some(GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes.len())?));
+        let mut memory = Memory(Some(GlobalAlloc(
+            GMEM_MOVEABLE | GMEM_ZEROINIT,
+            bytes.len(),
+        )?));
         let data = GlobalLock(memory.0.unwrap());
         if data.is_null() {
             anyhow::bail!("Could not lock clipboard memory");
         }
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast(), bytes.len());
         let _ = GlobalUnlock(memory.0.unwrap());
-        OpenClipboard(Some(HWND(owner as *mut std::ffi::c_void)))
-            .map_err(|error| anyhow::anyhow!("Clipboard is busy or the editor window closed: {error}"))?;
+        OpenClipboard(Some(HWND(owner as *mut std::ffi::c_void))).map_err(|error| {
+            anyhow::anyhow!("Clipboard is busy or the editor window closed: {error}")
+        })?;
         let clipboard = Clipboard;
         EmptyClipboard().map_err(|error| anyhow::anyhow!("Could not clear clipboard: {error}"))?;
         SetClipboardData(format, Some(HANDLE(memory.0.unwrap().0)))
             .map_err(|error| anyhow::anyhow!("Could not transfer clipboard data: {error}"))?;
         memory.0 = None;
-        let result = CloseClipboard().map_err(|error| anyhow::anyhow!("Could not finish clipboard copy: {error}"));
+        let result = CloseClipboard()
+            .map_err(|error| anyhow::anyhow!("Could not finish clipboard copy: {error}"));
         std::mem::forget(clipboard);
         result?;
     }
@@ -589,18 +782,34 @@ mod tests {
         for (input, expected) in [
             (r"\\?\C:\clips\game.mp4", r"C:\clips\game.mp4"),
             (r"\\?\UNC\Server\Share\clip.mp4", r"\\Server\Share\clip.mp4"),
-            (r"C:\clips\spaces, commas.mp4", r"C:\clips\spaces, commas.mp4"),
+            (
+                r"C:\clips\spaces, commas.mp4",
+                r"C:\clips\spaces, commas.mp4",
+            ),
         ] {
             let payload = dropfiles_payload(&input.encode_utf16().collect::<Vec<_>>()).unwrap();
             assert_eq!(&payload[..4], &20u32.to_le_bytes());
             assert_eq!(&payload[16..20], &1u32.to_le_bytes());
             assert!(payload[4..16].iter().all(|byte| *byte == 0));
-            let units = payload[20..].as_chunks::<2>().0.iter().copied().map(u16::from_le_bytes).collect::<Vec<_>>();
-            assert_eq!(units, expected.encode_utf16().chain([0, 0]).collect::<Vec<_>>());
+            let units = payload[20..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .copied()
+                .map(u16::from_le_bytes)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                units,
+                expected.encode_utf16().chain([0, 0]).collect::<Vec<_>>()
+            );
         }
         let unpaired = [67, 58, 92, 0xd800, 46, 109, 112, 52];
         let payload = dropfiles_payload(&unpaired).unwrap();
-        assert_eq!(&payload[26..28], &0xd800u16.to_le_bytes(), "Unpaired Windows UTF-16 was replaced");
+        assert_eq!(
+            &payload[26..28],
+            &0xd800u16.to_le_bytes(),
+            "Unpaired Windows UTF-16 was replaced"
+        );
         assert!(dropfiles_payload(&[67, 0, 92]).is_err());
         assert!(dropfiles_payload(&vec![65; 32769]).is_err());
         assert!(dropfiles_payload(&[]).is_err());
@@ -612,25 +821,50 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("owned clip, with spaces.mp4");
         std::fs::write(&source, b"original media").unwrap();
-        let expected = dropfiles_payload(&source.canonicalize().unwrap().as_os_str().encode_wide().collect::<Vec<_>>()).unwrap();
+        let expected = dropfiles_payload(
+            &source
+                .canonicalize()
+                .unwrap()
+                .as_os_str()
+                .encode_wide()
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         let error = copy_file_with(&source, 42, |owner, payload| {
             assert_eq!(owner, 42, "Captured HWND changed during worker preparation");
             assert_eq!(payload, expected.as_slice());
             anyhow::bail!("Injected clipboard ownership failure")
-        }).unwrap_err();
-        assert!(error.to_string().contains("Injected clipboard ownership failure"));
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Injected clipboard ownership failure")
+        );
         assert_eq!(std::fs::read(&source).unwrap(), b"original media");
-        assert!(copy_file_with(&source, 0, |_, _| panic!("Invalid owner reached clipboard")).is_err());
-        assert!(copy_file_with(&directory.path().join("missing.mp4"), 42, |_, _| panic!("Missing source reached clipboard")).is_err());
+        assert!(
+            copy_file_with(&source, 0, |_, _| panic!("Invalid owner reached clipboard")).is_err()
+        );
+        assert!(
+            copy_file_with(&directory.path().join("missing.mp4"), 42, |_, _| panic!(
+                "Missing source reached clipboard"
+            ))
+            .is_err()
+        );
     }
 
     #[test]
     fn root_iteration_errors_are_typed_while_nested_errors_remain_scoped() {
         let root = Path::new("owned-root");
-        let error = scan_entry::<()>(Err(std::io::ErrorKind::PermissionDenied.into()), root, 0).unwrap_err();
+        let error = scan_entry::<()>(Err(std::io::ErrorKind::PermissionDenied.into()), root, 0)
+            .unwrap_err();
         assert_eq!(error.root, root);
         assert_eq!(error.kind, std::io::ErrorKind::PermissionDenied);
-        assert!(scan_entry::<()>(Err(std::io::ErrorKind::NotFound.into()), root, 1).unwrap().is_none());
+        assert!(
+            scan_entry::<()>(Err(std::io::ErrorKind::NotFound.into()), root, 1)
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(scan_entry(Ok(42), root, 0).unwrap(), Some(42));
     }
 
@@ -640,9 +874,15 @@ mod tests {
         let original = directory.path().join("original.mp4");
         std::fs::write(&original, b"preserved original").unwrap();
         let called = std::cell::Cell::new(false);
-        let result = open_folder_with(&original, |_| { called.set(true); Ok(()) });
+        let result = open_folder_with(&original, |_| {
+            called.set(true);
+            Ok(())
+        });
         assert!(result.unwrap_err().contains("prepare capture folder"));
-        assert!(!called.get(), "A failed directory preparation must not invoke the shell");
+        assert!(
+            !called.get(),
+            "A failed directory preparation must not invoke the shell"
+        );
         assert_eq!(std::fs::read(&original).unwrap(), b"preserved original");
         let folder = directory.path().join("new-capture-folder");
         let result = open_folder_with(&folder, |resolved| {
@@ -650,7 +890,11 @@ mod tests {
             assert_eq!(resolved, folder.canonicalize().unwrap());
             Err("owned injected launch failure".into())
         });
-        assert!(result.unwrap_err().contains("owned injected launch failure"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("owned injected launch failure")
+        );
         assert!(folder.is_dir());
         assert_eq!(std::fs::read(original).unwrap(), b"preserved original");
     }
@@ -802,5 +1046,47 @@ mod tests {
         assert!(move_file_noclobber(&source, &destination).is_err());
         assert_eq!(std::fs::read(&source).unwrap(), b"recoverable original");
         assert_eq!(std::fs::read(&destination).unwrap(), b"new recording");
+    }
+    #[test]
+    fn image_trash_includes_recovery_and_stale_batches_do_not_block_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let image = nested.join("capture.png");
+        std::fs::write(&image, b"image").unwrap();
+        let recovery = image_recovery_path(&image);
+        std::fs::write(&recovery, b"editable original").unwrap();
+        let mut moved = trash(&[image.clone()], dir.path()).unwrap();
+        assert_eq!(moved.len(), 2);
+        assert!(!image.exists() && !recovery.exists());
+        std::fs::remove_dir(&nested).unwrap();
+        restore(&mut moved).unwrap();
+        assert_eq!(std::fs::read(&recovery).unwrap(), b"editable original");
+        std::fs::remove_dir_all(&nested).unwrap();
+        let other = dir.path().join("other.png");
+        std::fs::write(&other, b"other").unwrap();
+        trash(&[other], dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join(".trash/incomplete-batch")).unwrap();
+        let recovered = trash_recovery(dir.path()).unwrap();
+        assert_eq!(recovered.moves.len(), 1);
+        assert_eq!(recovered.warnings.len(), 1);
+    }
+
+    #[test]
+    fn journal_recovery_survives_session_loss_and_preserves_collision() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("capture.png");
+        std::fs::write(&original, b"capture").unwrap();
+        drop(trash(std::slice::from_ref(&original), directory.path()).unwrap());
+        let mut recovered = recoverable_trash(directory.path()).unwrap();
+        assert_eq!(recovered.len(), 1);
+        std::fs::write(&original, b"new capture").unwrap();
+        assert!(restore(&mut recovered).is_err());
+        assert_eq!(std::fs::read(&original).unwrap(), b"new capture");
+        assert_eq!(recoverable_trash(directory.path()).unwrap().len(), 1);
+        std::fs::remove_file(&original).unwrap();
+        restore(&mut recovered).unwrap();
+        assert_eq!(std::fs::read(&original).unwrap(), b"capture");
+        assert!(recoverable_trash(directory.path()).unwrap().is_empty());
     }
 }

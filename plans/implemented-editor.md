@@ -1,0 +1,23 @@
+# Editor implementation
+
+Implemented F01, F05, F07 and the editor portion of F17 in `rune_editor.rs`, `rune_annotation.rs`, and the existing annotation actor backend `toolkit/src/image_editor.rs`.
+
+- `rune_editor::State::prepare_to_leave(&mut self) -> bool` is the shared close/replacement/quit gate. It blocks an active video export and unsaved video edits. For images it queues an ordered editable checkpoint and returns false until `poll()` receives a successful acknowledgement for the current revision. Failure retains the actor, edits, and retry path. A later edit invalidates the older checkpoint. `open()` and `close()` already call this gate.
+- Loaded images recover from `<full-source-path>.rune-recovery.ssxe` when present. A recovered document remains visibly unsaved until Save editable succeeds. Recovery for an annotation created without an original path goes under `recordings::root()/image-recovery/image-<time>-<pid>-<sequence>.ssxe`. Recovery files persist across application exit and can also be opened directly. Library scanning includes these nested supported files. Recovery is written on attempted close/replacement/quit, rather than continuously while editing; process crashes before that attempt are not covered.
+- Editable saves acknowledge the revision actually queued, use the existing no-clobber output helper, and clear dirty state only on success. PNG export remains separate and never clears editable dirty state. Project/recovery retention of original pixels, including cropped/covered areas, is disclosed above the canvas before saving. A failed editable save cannot overwrite an existing project. Existing backend `Project` callers retain their prior API and behavior.
+- Video redo handles Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y. Timeline pieces are focusable and activate with Enter/Space. Seek and trim sliders are focusable, expose ranges, and handle arrows, with Shift stepping ten frames. Seek supports Home/End. Existing Start here/End here controls remain.
+- Annotation canvas supports arrow placement, Shift ten-pixel placement, Home to reset, and Enter to begin/finish geometry. Select mode arrows nudge selected objects through the existing undoable backend. Next/previous annotation buttons cycle visible unlocked objects. Text-mode navigation, deletion, and Enter route to existing text editing. In-progress placement is finished before editable checkpointing.
+
+## Integration required outside ownership
+
+For every quit and restart-to-update path in `rune_ui.rs` and the actual quit branch of `main.rs`'s close handler, require `s.editor.prepare_to_leave()` before `tx.quit()` or process restart. On false, keep the app/editor alive, restore the window and preferably route to the Editor page so its recovery/error message is visible. Continue normal `poll()`. The user retries close, open, or quit after the acknowledgement; the gate does not remember or automatically replay an old navigation/quit intent.
+
+The shared checkout now has `State::request_quit` / `prepare_shutdown` in `rune_ui.rs`, and `main.rs` calls that method. Prefer calling the public editor gate there directly, combined with the other job/capture guards. The raw `annotation.dirty()` check must not permanently block exit after successful recovery, because retained recovery intentionally does not mean the user explicitly saved an editable project. The current temporary removal of the annotation around `shutdown_blocked()` avoids that distinction but can be simplified using the public gate. Hide-to-tray can retain the live editor without checkpointing.
+
+If dirty gating blocks open/close while the user is on Library, display `editor.annotation.message` there or route to Editor. Also keep the separate shell fix for focused non-text editor shortcuts; local spatial controls now handle their own keys even when focused.
+
+## Validation
+
+No local Rust compilation, cargo build, or tests were executed. `rustfmt --edition 2024` parsed/formatted the two Rune files; `git diff --check` passed for owned files. Backend changes were inspected against the pinned actor/session APIs and reuse existing atomic-write/no-clobber helpers. No commits or subagents.
+
+Added unexecuted targeted regressions for failed checkpoint acknowledgement, retained editable document/undo, existing-output protection, keyboard selection/nudge/undo, current-revision recovery gating, PNG-vs-editable dirty semantics, failed editable/recovery saves, and modifier-aware video redo/leave gating. Boat should run toolkit and desktop tests, then native Windows acceptance should cover dialogs, close/replacement/quit retry, unwritable folders, keyboard focus/Narrator slider ranges, and recovered-file reopening. No runtime or accessibility conformance claim is made.

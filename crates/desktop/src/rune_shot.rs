@@ -13,7 +13,17 @@ use rune::{
     OverlayInput, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, Tx, col, el, row,
     text,
 };
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+static OPEN_CAPTURES: AtomicUsize = AtomicUsize::new(0);
+
+/// Guard quit/restart while a frozen capture or its delivery is still owned.
+pub fn shutdown_blocked() -> bool {
+    OPEN_CAPTURES.load(Ordering::Acquire) != 0
+}
 use toolkit::{
     annotation as a,
     image_editor::{Command, Source},
@@ -75,6 +85,32 @@ struct Session {
     bar_width: f32,
     finishing: Option<Finish>,
     folder: PathBuf,
+    output_path: Option<PathBuf>,
+    choosing_path: bool,
+    error: String,
+    destination: CaptureDestination,
+}
+
+/// Utility callers capture their request/session identity in this callback and reject
+/// delivery if that origin has disappeared. Called once, on the main app thread.
+pub enum CaptureDestination {
+    Library,
+    Utility(Box<dyn FnOnce(&mut AppState, PathBuf) -> Result<(), String> + Send>),
+}
+
+type Delivery = Result<Option<PathBuf>, String>;
+
+struct DeliveryWorker(std::thread::JoinHandle<Delivery>);
+impl Drop for Shot {
+    fn drop(&mut self) {
+        // The worker never queues UI updates or waits for the UI thread.
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.0.join();
+        }
+        if self.session.is_some() {
+            OPEN_CAPTURES.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -86,6 +122,7 @@ pub struct Shot {
     /// Scripted fixture runs wait for the annotation worker each frame, so virtual time
     /// never outruns it.
     patient: bool,
+    worker: Option<DeliveryWorker>,
 }
 
 /// Adds the overlay, hidden until a region capture starts.
@@ -153,6 +190,29 @@ pub fn monitor_under_pointer() -> Option<Rect> {
 
 /// Freeze `frame` (the monitor under the pointer) and start selecting. Any thread.
 pub fn begin(handle: &OverlayHandle<Shot>, frame: Frame, folder: PathBuf) {
+    begin_with_destination(handle, frame, folder, CaptureDestination::Library);
+}
+
+pub fn begin_for_utility(
+    handle: &OverlayHandle<Shot>,
+    frame: Frame,
+    folder: PathBuf,
+    complete: impl FnOnce(&mut AppState, PathBuf) -> Result<(), String> + Send + 'static,
+) {
+    begin_with_destination(
+        handle,
+        frame,
+        folder,
+        CaptureDestination::Utility(Box::new(complete)),
+    );
+}
+
+fn begin_with_destination(
+    handle: &OverlayHandle<Shot>,
+    frame: Frame,
+    folder: PathBuf,
+    destination: CaptureDestination,
+) {
     let rgba = frame
         .clone()
         .into_rgba8()
@@ -160,6 +220,7 @@ pub fn begin(handle: &OverlayHandle<Shot>, frame: Frame, folder: PathBuf) {
     let show = handle.clone();
     handle.update(move |s, tx| {
         if start(s, frame, rgba.ok(), folder) {
+            s.session.as_mut().unwrap().destination = destination;
             show.show();
             show.request_keys();
             tx.instant();
@@ -168,6 +229,10 @@ pub fn begin(handle: &OverlayHandle<Shot>, frame: Frame, folder: PathBuf) {
 }
 
 fn start(s: &mut Shot, frame: Frame, rgba: Option<(u32, u32, Vec<u8>)>, folder: PathBuf) -> bool {
+    if s.session.is_some() || s.worker.is_some() {
+        notify(s, "Finish or cancel the current screenshot first.".into());
+        return false;
+    }
     let Some(wake) = s.wake.clone() else {
         return false;
     };
@@ -178,6 +243,7 @@ fn start(s: &mut Shot, frame: Frame, rgba: Option<(u32, u32, Vec<u8>)>, folder: 
     }
     match Annotation::new(Source::Image(frame), wake) {
         Ok(annotation) => {
+            OPEN_CAPTURES.fetch_add(1, Ordering::AcqRel);
             s.session = Some(Session {
                 annotation,
                 frozen,
@@ -190,6 +256,10 @@ fn start(s: &mut Shot, frame: Frame, rgba: Option<(u32, u32, Vec<u8>)>, folder: 
                 bar_width: 560.0,
                 finishing: None,
                 folder,
+                output_path: None,
+                choosing_path: false,
+                error: String::new(),
+                destination: CaptureDestination::Library,
             });
             true
         }
@@ -288,8 +358,30 @@ impl Session {
     }
 }
 
+/// Main-window shutdown/restart integration should defer while this is true.
+pub fn busy(s: &Shot) -> bool {
+    s.worker.is_some()
+        || s.session
+            .as_ref()
+            .is_some_and(|session| session.finishing.is_some() || session.choosing_path)
+}
+
 fn close(s: &mut Shot) {
-    s.session = None;
+    if busy(s) {
+        return;
+    }
+    if s.session
+        .as_ref()
+        .is_some_and(|session| matches!(&session.destination, CaptureDestination::Utility(_)))
+    {
+        notify(
+            s,
+            "Screenshot cancelled. No utility input was added.".into(),
+        );
+    }
+    if s.session.take().is_some() {
+        OPEN_CAPTURES.fetch_sub(1, Ordering::AcqRel);
+    }
     if let Some(h) = &s.handle {
         h.hide();
     }
@@ -303,12 +395,65 @@ fn finish(s: &mut Shot, how: Finish) {
         return;
     };
     if session.finishing.is_none() {
+        session.annotation.message.clear();
+        session.error.clear();
         session.finishing = Some(how);
         session.annotation.send(Command::AcceptRegion(region));
     }
 }
 
 fn poll(s: &mut Shot, _: f64, tx: &mut Tx) -> bool {
+    if s.worker.as_ref().is_some_and(|w| w.0.is_finished()) {
+        let result = s
+            .worker
+            .take()
+            .unwrap()
+            .0
+            .join()
+            .unwrap_or_else(|_| Err("Screenshot delivery worker stopped unexpectedly.".into()));
+        let Some(session) = s.session.as_mut() else {
+            return true;
+        };
+        let how = session.finishing.take().unwrap_or(Finish::Save);
+        match result {
+            Ok(path) => {
+                let destination =
+                    std::mem::replace(&mut session.destination, CaptureDestination::Library);
+                if let Some(app) = &s.app {
+                    app.update(move |s, _| {
+                        if let Some(path) = path {
+                            s.refresh();
+                            match destination {
+                                _ if how == Finish::Edit => {
+                                    s.open(path);
+                                    if let Some(h) = &s.handle {
+                                        h.open();
+                                    }
+                                }
+                                CaptureDestination::Utility(complete) => {
+                                    if let Err(e) = complete(s, path.clone()) {
+                                        s.notice =
+                                            format!("Screenshot saved at {}. {e}", path.display());
+                                    }
+                                }
+                                _ => s.notice = "Screenshot saved.".into(),
+                            }
+                        } else {
+                            s.notice = "Screenshot copied. No file was saved.".into();
+                        }
+                    });
+                }
+                close(s);
+            }
+            Err(e) => {
+                session.error = format!(
+                    "{e} Your capture and edits are still here. Retry Save, Save elsewhere, or Copy."
+                );
+                notify(s, s.session.as_ref().unwrap().error.clone());
+            }
+        }
+        return true;
+    }
     let Some(session) = &mut s.session else {
         return false;
     };
@@ -316,21 +461,28 @@ fn poll(s: &mut Shot, _: f64, tx: &mut Tx) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
     let changed = session.annotation.poll();
-    if !session.annotation.message.is_empty() && session.finishing.is_some() {
-        let message = std::mem::take(&mut session.annotation.message);
+    if !session.annotation.message.is_empty() && session.finishing.is_some() && s.worker.is_none() {
+        session.error = std::mem::take(&mut session.annotation.message);
         session.finishing = None;
-        notify(s, message);
         return true;
     }
-    if let (Some(how), Some(frame)) = (session.finishing, session.annotation.take_accepted()) {
-        let folder = session.folder.clone();
-        let app = s.app.clone();
-        close(s);
-        let worker = std::thread::spawn(move || deliver(frame, how, folder, app));
-        if s.patient {
-            let _ = worker.join();
+    if s.worker.is_none() {
+        if let (Some(how), Some(frame)) = (session.finishing, session.annotation.take_accepted()) {
+            let folder = session.folder.clone();
+            let path = session.output_path.clone();
+            match std::thread::Builder::new()
+                .name("kielbox-screenshot-delivery".into())
+                .spawn(move || deliver(frame, how, folder, path))
+            {
+                Ok(worker) => s.worker = Some(DeliveryWorker(worker)),
+                Err(e) => {
+                    session.finishing = None;
+                    session.error = format!(
+                        "Could not start delivery: {e}. Your capture and edits are still here."
+                    );
+                }
+            }
         }
-        return true;
     }
     if session.finishing.is_some() {
         tx.wake_after(std::time::Duration::from_millis(16));
@@ -338,61 +490,103 @@ fn poll(s: &mut Shot, _: f64, tx: &mut Tx) -> bool {
     changed
 }
 
-/// Save the capture to the library, copy it when asked, and tell the app.
-fn deliver(frame: Frame, how: Finish, folder: PathBuf, app: Option<AppHandle<AppState>>) {
-    let result = (|| -> Result<(PathBuf, Option<String>), String> {
-        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-        let path = folder.join(format!(
-            "screenshot-{}.png",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        toolkit::utilities::save_image(&path, &frame).map_err(|e| format!("{e:#}"))?;
-        let copied = if how == Finish::Copy {
-            use toolkit::core::workflow::Clipboard;
-            Some(
-                match toolkit::services::SystemClipboard::new(Default::default()).set_image(&frame)
-                {
-                    Ok(()) => "Screenshot copied and saved to the library.".into(),
-                    Err(e) => format!("Saved, but the clipboard is unavailable: {e}"),
-                },
-            )
-        } else {
-            None
-        };
-        Ok((path, copied))
-    })();
-    let Some(app) = app else {
-        return;
-    };
-    app.update(move |s, _| match result {
-        Ok((path, copied)) => {
-            s.refresh();
-            if how == Finish::Edit {
-                s.open(path);
-                if let Some(h) = &s.handle {
-                    h.open();
-                }
-            } else {
-                s.notice = copied.unwrap_or_else(|| "Screenshot saved to the library.".into());
-            }
-        }
-        Err(e) => s.notice = format!("Screenshot could not be saved: {e}"),
-    });
+/// Copy deliberately performs no filesystem operations. Save uses the shared
+/// no-clobber publisher; errors leave the original annotation actor alive.
+fn deliver(frame: Frame, how: Finish, folder: PathBuf, path: Option<PathBuf>) -> Delivery {
+    deliver_with_clipboard(frame, how, folder, path, |frame| {
+        use toolkit::core::workflow::Clipboard;
+        toolkit::services::SystemClipboard::new(Default::default())
+            .set_image(frame)
+            .map_err(|e| format!("Clipboard unavailable: {e}"))
+    })
 }
 
-fn on_key(s: &mut Shot, event: &KeyEvent, _: &mut Tx) -> bool {
+fn deliver_with_clipboard(
+    frame: Frame,
+    how: Finish,
+    folder: PathBuf,
+    path: Option<PathBuf>,
+    copy: impl FnOnce(&Frame) -> Result<(), String>,
+) -> Delivery {
+    if how == Finish::Copy {
+        copy(&frame)?;
+        return Ok(None);
+    }
+    let path = match path {
+        Some(path) => path,
+        None => {
+            std::fs::create_dir_all(&folder)
+                .map_err(|e| format!("Could not create capture folder: {e}"))?;
+            folder.join(format!(
+                "screenshot-{}.png",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ))
+        }
+    };
+    toolkit::utilities::save_image(&path, &frame)
+        .map_err(|e| format!("Could not save screenshot: {e:#}"))?;
+    Ok(Some(path))
+}
+
+/// Arrows create/move a region; Alt+arrows resize its right/bottom edge.
+fn keyboard_region(
+    selection: Option<[f32; 4]>,
+    size: (f32, f32),
+    dx: f32,
+    dy: f32,
+    resize: bool,
+) -> [f32; 4] {
+    let [mut x, mut y, mut w, mut h] =
+        selection.unwrap_or([0.0, 0.0, size.0.min(100.0), size.1.min(100.0)]);
+    if resize {
+        w = (w + dx).clamp(2.0, size.0.max(2.0));
+        h = (h + dy).clamp(2.0, size.1.max(2.0));
+    } else {
+        x += dx;
+        y += dy;
+    }
+    [
+        x.clamp(0.0, (size.0 - w).max(0.0)),
+        y.clamp(0.0, (size.1 - h).max(0.0)),
+        w,
+        h,
+    ]
+}
+
+fn on_key(s: &mut Shot, event: &KeyEvent, tx: &mut Tx) -> bool {
     let Some(session) = &mut s.session else {
         return false;
     };
+    if session.finishing.is_some() || session.choosing_path {
+        return true;
+    }
     if session.annotation.text_editing {
         if matches!(event.key, Key::Escape) {
             session.annotation.send(Command::ClearSelection);
             return true;
         }
         return session.annotation.key(event);
+    }
+    if session.tool.is_some()
+        && matches!(
+            event.key,
+            Key::Left | Key::Right | Key::Up | Key::Down | Key::Home | Key::End | Key::Enter
+        )
+    {
+        return session.annotation.key(event);
+    }
+    if let Key::Text(text) = &event.key {
+        if matches!(text.as_str(), "[" | "]") {
+            session.tool = Some(a::Tool::Select);
+            session.annotation.send(Command::Tool(a::Tool::Select));
+            session
+                .annotation
+                .send(Command::CycleSelection(text == "["));
+            return true;
+        }
     }
     match &event.key {
         Key::Escape => {
@@ -402,8 +596,25 @@ fn on_key(s: &mut Shot, event: &KeyEvent, _: &mut Tx) -> bool {
                 close(s);
             }
         }
+        Key::Left | Key::Right | Key::Up | Key::Down if session.tool.is_none() => {
+            let step = if event.mods.shift { 10.0 } else { 1.0 };
+            let (dx, dy) = match event.key {
+                Key::Left => (-step, 0.0),
+                Key::Right => (step, 0.0),
+                Key::Up => (0.0, -step),
+                _ => (0.0, step),
+            };
+            session.selection = Some(keyboard_region(
+                session.selection,
+                session.size,
+                dx,
+                dy,
+                event.mods.alt,
+            ));
+        }
         Key::Enter => finish(s, Finish::Save),
         Key::Command('c') => finish(s, Finish::Copy),
+        Key::Command('s') if event.mods.shift => save_elsewhere(s, tx),
         Key::Command('s') => finish(s, Finish::Save),
         Key::Command('e') => finish(s, Finish::Edit),
         Key::Command('a') => {
@@ -454,7 +665,7 @@ fn pointer(s: &mut Shot, d: &mut rune::Drag, tx: &mut Tx) {
     let Some(session) = &mut s.session else {
         return;
     };
-    if session.finishing.is_some() {
+    if session.finishing.is_some() || session.choosing_path {
         return;
     }
     let k = session.k();
@@ -608,6 +819,49 @@ fn divider() -> El {
     el().w(1.0).h(20.0).mx(4.0).fill(theme::white(0.14))
 }
 
+fn save_elsewhere_button() -> El {
+    el().role("button")
+        .label("Save screenshot elsewhere (Ctrl+Shift+S)")
+        .focusable(true)
+        .h(32.0)
+        .px(10.0)
+        .cursor(Cursor::Pointer)
+        .hover(theme::white(0.08))
+        .child(theme::small("Save elsewhere…"))
+        .on_press_tx(save_elsewhere)
+}
+
+fn save_elsewhere(s: &mut Shot, tx: &mut Tx) {
+    if busy(s) {
+        return;
+    }
+    if let Some(session) = &mut s.session {
+        session.choosing_path = true;
+    }
+    tx.save_file(
+        rune::FileDialogOptions::default().filter("PNG", &["png"]),
+        |s: &mut Shot, result, _| {
+            if let Some(session) = &mut s.session {
+                session.choosing_path = false;
+            }
+            match result {
+                Ok(Some(path)) => {
+                    if let Some(session) = &mut s.session {
+                        session.output_path = Some(path);
+                    }
+                    finish(s, Finish::Save);
+                }
+                Err(e) => {
+                    if let Some(session) = &mut s.session {
+                        session.error = format!("Could not choose destination: {e}");
+                    }
+                }
+                _ => {}
+            }
+        },
+    );
+}
+
 fn toolbar(session: &Session) -> El {
     let mut bar = row()
         .key("shot-toolbar")
@@ -632,6 +886,9 @@ fn toolbar(session: &Session) -> El {
         &icons::SELECT,
         session.tool.is_none(),
         |s| {
+            if busy(s) {
+                return;
+            }
             if let Some(session) = &mut s.session {
                 session.tool = None;
                 session.annotation.send(Command::Tool(a::Tool::Select));
@@ -645,6 +902,9 @@ fn toolbar(session: &Session) -> El {
             tool_icon(tool),
             session.tool == Some(tool),
             move |s| {
+                if busy(s) {
+                    return;
+                }
                 if let Some(session) = &mut s.session {
                     session.choose(Some(tool));
                 }
@@ -658,6 +918,9 @@ fn toolbar(session: &Session) -> El {
             &icons::UNDO,
             false,
             |s| {
+                if busy(s) {
+                    return;
+                }
                 if let Some(session) = &mut s.session {
                     session.annotation.send(Command::Undo);
                 }
@@ -669,6 +932,9 @@ fn toolbar(session: &Session) -> El {
             &icons::REDO,
             false,
             |s| {
+                if busy(s) {
+                    return;
+                }
                 if let Some(session) = &mut s.session {
                     session.annotation.send(Command::Redo);
                 }
@@ -684,7 +950,13 @@ fn toolbar(session: &Session) -> El {
         ))
         .child(text_button(
             "shot-save",
-            "Save",
+            if !session.error.is_empty() {
+                "Retry Save"
+            } else if matches!(&session.destination, CaptureDestination::Utility(_)) {
+                "Use capture"
+            } else {
+                "Save"
+            },
             &icons::DOWNLOAD,
             false,
             Finish::Save,
@@ -752,7 +1024,7 @@ pub fn view(s: &Shot, _: &mut Cx<Shot>) -> El {
                 row().pin(Some(0.0), Some(28.0), Some(0.0), None).justify_center().items_start().child(
                     theme::floating(row().px(14.0).py(8.0).gap(10.0).center_y())
                         .child(theme::glyph(&icons::REGION, 16.0, c(theme::ACCENT)))
-                        .child(theme::small("Drag to capture an area").color(c(theme::T1)))
+                        .child(theme::small("Drag or use arrows to select. Shift: 10 px. Alt+arrows: resize.").color(c(theme::T1)))
                         .child(theme::kbd("Ctrl A"))
                         .child(theme::small("whole screen"))
                         .child(theme::kbd("Esc"))
@@ -805,7 +1077,7 @@ pub fn view(s: &Shot, _: &mut Cx<Shot>) -> El {
     let [_, _, pw, ph] = session.selection.unwrap_or_default();
     let label_y = if sy >= 30.0 { sy - 28.0 } else { sy + 6.0 };
     root = root.child(
-        text(format!("{} × {}", pw.round(), ph.round()))
+        text(format!("{} × {} · Arrows move region · Alt resizes · Tool + Enter draws · [ / ] select annotations", pw.round(), ph.round()))
             .font(theme::NUM)
             .color(c(theme::T1))
             .px(7.0)
@@ -813,7 +1085,7 @@ pub fn view(s: &Shot, _: &mut Cx<Shot>) -> El {
             .radius(5.0)
             .fill(theme::black(0.7))
             .absolute(sx.max(4.0), label_y)
-            .a11y_hidden(),
+            .label(format!("Region width {} height {} pixels. Arrows move; Alt arrows resize; Shift increases step.", pw.round(), ph.round())),
     );
     if session.gesture.is_some_and(|g| !matches!(g, Gesture::Draw)) && session.tool.is_none() {
         return root;
@@ -829,14 +1101,169 @@ pub fn view(s: &Shot, _: &mut Cx<Shot>) -> El {
         (sy + sh - GAP - BAR_H).max(8.0)
     };
     root = root.child(theme::floating(toolbar(session)).absolute(bx, by));
+    if !session.error.is_empty() {
+        root = root.child(
+            theme::floating(
+                col()
+                    .px(14.0)
+                    .py(10.0)
+                    .child(
+                        theme::small(session.error.clone())
+                            .color(c(theme::T1))
+                            .role("status"),
+                    )
+                    .child(save_elsewhere_button()),
+            )
+            .absolute(16.0, 16.0),
+        );
+    }
     if session.finishing.is_some() {
         root = root.child(
-            col()
-                .absolute(sx, sy)
-                .size(sw, sh)
-                .center()
-                .child(theme::small("Saving…").color(c(theme::T1))),
+            col().absolute(sx, sy).size(sw, sh).center().child(
+                theme::small(if session.finishing == Some(Finish::Copy) {
+                    "Copying…"
+                } else {
+                    "Saving…"
+                })
+                .color(c(theme::T1)),
+            ),
         );
     }
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use toolkit::image_editor::{Actor, Event};
+
+    fn frame() -> Frame {
+        Frame::from_image(image::RgbaImage::from_pixel(
+            32,
+            24,
+            image::Rgba([20, 40, 60, 255]),
+        ))
+    }
+
+    #[test]
+    fn clipboard_success_and_failure_never_touch_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let blocked_folder = temp.path().join("a-file");
+        std::fs::write(&blocked_folder, b"unchanged").unwrap();
+        let output = temp.path().join("must-not-exist.png");
+        let result = deliver_with_clipboard(
+            frame(),
+            Finish::Copy,
+            blocked_folder.clone(),
+            Some(output.clone()),
+            |_| Ok(()),
+        );
+        assert_eq!(result.unwrap(), None);
+        let result = deliver_with_clipboard(
+            frame(),
+            Finish::Copy,
+            blocked_folder.clone(),
+            Some(output.clone()),
+            |_| Err("clipboard busy".into()),
+        );
+        assert_eq!(result.unwrap_err(), "clipboard busy");
+        assert!(!output.exists());
+        assert_eq!(std::fs::read(blocked_folder).unwrap(), b"unchanged");
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    fn accepted(actor: &Actor, rect: Rect) -> Frame {
+        actor.send(Command::AcceptRegion(rect)).unwrap();
+        loop {
+            match actor
+                .events
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+            {
+                Event::Accepted(frame) => return frame,
+                Event::Error(e) => panic!("{e}"),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn failed_save_preserves_annotation_actor_for_retry_elsewhere() {
+        let temp = tempfile::tempdir().unwrap();
+        let existing = temp.path().join("existing.png");
+        std::fs::write(&existing, b"keep existing file").unwrap();
+        let original = frame();
+        let actor = Actor::new(Source::Image(original.clone())).unwrap();
+        actor.send(Command::Tool(a::Tool::Rectangle)).unwrap();
+        actor
+            .send(Command::Down(
+                a::PointF::new(4.0, 4.0),
+                a::Modifiers::default(),
+            ))
+            .unwrap();
+        actor
+            .send(Command::Up(
+                a::PointF::new(20.0, 18.0),
+                a::Modifiers::default(),
+            ))
+            .unwrap();
+        let rect = Rect::new(0, 0, 32, 24);
+        let edited = accepted(&actor, rect);
+        assert_ne!(edited.data(), original.data());
+        assert!(
+            deliver(
+                edited.clone(),
+                Finish::Save,
+                temp.path().into(),
+                Some(existing.clone())
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(existing).unwrap(), b"keep existing file");
+        let retry = accepted(&actor, rect);
+        assert_eq!(retry.data(), edited.data());
+        let elsewhere = temp.path().join("elsewhere.png");
+        assert_eq!(
+            deliver(
+                retry,
+                Finish::Save,
+                temp.path().into(),
+                Some(elsewhere.clone())
+            )
+            .unwrap(),
+            Some(elsewhere.clone())
+        );
+        assert_eq!(
+            image::open(elsewhere)
+                .unwrap()
+                .to_rgba8()
+                .as_raw()
+                .as_slice(),
+            edited.data()
+        );
+    }
+
+    #[test]
+    fn keyboard_region_can_be_created_moved_and_resized_within_monitor() {
+        let first = keyboard_region(None, (640.0, 480.0), 1.0, 0.0, false);
+        assert_eq!(first, [1.0, 0.0, 100.0, 100.0]);
+        let edge = keyboard_region(Some(first), (640.0, 480.0), 1000.0, -10.0, false);
+        assert_eq!(edge, [540.0, 0.0, 100.0, 100.0]);
+        let resized = keyboard_region(Some(edge), (640.0, 480.0), 10.0, -1000.0, true);
+        assert_eq!(resized, [530.0, 0.0, 110.0, 2.0]);
+    }
+
+    #[test]
+    fn dropping_shot_joins_owned_delivery() {
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_done = done.clone();
+        let worker = std::thread::spawn(move || {
+            worker_done.store(true, Ordering::Release);
+            Ok(None)
+        });
+        let mut shot = Shot::default();
+        shot.worker = Some(DeliveryWorker(worker));
+        drop(shot);
+        assert!(done.load(Ordering::Acquire));
+    }
 }

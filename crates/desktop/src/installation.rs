@@ -8,6 +8,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+static CURRENT: std::sync::OnceLock<State> = std::sync::OnceLock::new();
+pub fn current() -> Option<&'static State> {
+    CURRENT.get()
+}
+
 const MAX_BOOTSTRAP_BYTES: u64 = 64 * 1024;
 const BOOTSTRAP_FILE: &str = "bootstrap.json";
 
@@ -109,6 +114,7 @@ pub fn initialize(managed: bool, args: &[String]) -> Result<State, String> {
             state.working_directory.display()
         )
     })?;
+    let _ = CURRENT.set(state.clone());
     Ok(state)
 }
 

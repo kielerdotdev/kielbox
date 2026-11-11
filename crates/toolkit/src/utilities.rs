@@ -85,10 +85,8 @@ impl Tool {
     }
     pub fn description(self) -> &'static str {
         match self {
-            Self::Color => {
-                "Convert #RRGGBB / #RRGGBBAA to RGB, HSL and HSV. Pick from the screen using the screen tools."
-            }
-            Self::Viewer => "Preview an image, copy it, save a copy or pin it above other windows.",
+            Self::Color => "Convert a typed #RRGGBB / #RRGGBBAA color to RGB, HSL and HSV.",
+            Self::Viewer => "Preview an image, copy it or save a copy.",
             Self::Beautify => {
                 "Add rounded corners, a soft shadow and a colored background. Padding is in pixels."
             }
@@ -123,9 +121,7 @@ impl Tool {
                 "Generate a text, HTML, JSON or XML folder index. Depth 0 means all levels. Links and hidden entries are skipped."
             }
             Self::Clipboard => "Read the current clipboard image, text or file list on demand.",
-            Self::Windows => {
-                "Inspect visible windows. Remove a selected window's borders or restore its original style."
-            }
+            Self::Windows => "List visible windows and inspect their details.",
         }
     }
     pub fn accepts_files(self) -> bool {
@@ -248,9 +244,17 @@ pub fn color_text(c: [u8; 4]) -> String {
     )
 }
 pub fn run(r: Request, cancel: &CancelToken) -> Result<Output> {
+    run_with_frame(r, None, cancel)
+}
+
+/// Runs with ephemeral captured pixels; no source image is written to disk.
+pub fn run_with_frame(r: Request, frame: Option<Frame>, cancel: &CancelToken) -> Result<Output> {
     cancel.check()?;
     let first = || r.files.first().context("Choose an input file");
-    let image = || load(first()?);
+    let image = || match &frame {
+        Some(frame) => Ok(frame.clone()),
+        None => load(first()?),
+    };
     let out = match r.tool {
         Tool::Windows => Output::text(serde_json::to_string_pretty(&crate::window_tools::list()?)?),
         Tool::Color => {
@@ -853,6 +857,19 @@ mod tests {
             color: "#123456".into(),
             output: None,
         }
+    }
+    #[test]
+    fn captured_pixels_need_no_file_and_text_save_refuses_overwrite() {
+        let cancel = CancelToken::new();
+        let frame = fx::solid_frame(7, 5, [12, 34, 56, 255]);
+        let output = run_with_frame(request(Tool::Viewer), Some(frame), &cancel).unwrap();
+        assert_eq!(output.image.unwrap().width(), 7);
+        assert!(output.files.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.txt");
+        save_new(&path, b"first").unwrap();
+        assert!(save_new(&path, b"second").is_err());
+        assert_eq!(fs::read(path).unwrap(), b"first");
     }
     #[test]
     fn hash_vectors_compare_and_never_change_input() {

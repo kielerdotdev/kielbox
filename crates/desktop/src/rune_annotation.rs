@@ -4,7 +4,7 @@ use crate::{
     rune_ui::{JobResult, State as AppState, color},
 };
 use rune::{El, Key, KeyEvent, NativeSurface, TextEdit, col, el, row};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::mpsc};
 use toolkit::{
     annotation as a,
     image_editor::{Actor, Command, Event, Source},
@@ -26,6 +26,15 @@ pub struct Annotation {
     geometry: Geometry,
     pub text_editing: bool,
     pub can_undo: bool,
+    revision: u64,
+    saved_revision: u64,
+    recovered_revision: u64,
+    checkpoint_pending: bool,
+    recovery_path: PathBuf,
+    cursor: a::PointF,
+    anchor: bool,
+    image_size: (u32, u32),
+    checkpoints: Vec<(u64, PathBuf, bool, mpsc::Receiver<Result<(), String>>)>,
 }
 #[derive(Clone, Copy, Default)]
 struct Geometry {
@@ -36,6 +45,32 @@ struct Geometry {
 }
 impl Annotation {
     pub fn new(source: Source, wake: rune::Waker) -> anyhow::Result<Self> {
+        static NEXT_RECOVERY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = NEXT_RECOVERY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Reserve a session name without writing: opening/viewing still works when the
+        // capture folder is unwritable, so Save editable elsewhere remains available.
+        let recovery_path = crate::recordings::root()
+            .join("image-recovery")
+            .join(format!(
+                "image-{time}-{}-{sequence}.ssxe",
+                std::process::id()
+            ));
+        Self::with_recovery(source, wake, recovery_path)
+    }
+    fn with_recovery(
+        source: Source,
+        wake: rune::Waker,
+        recovery_path: PathBuf,
+    ) -> anyhow::Result<Self> {
+        let saved_revision = if matches!(&source, Source::Project(_)) {
+            1
+        } else {
+            0
+        };
         let actor = Actor::new(source)?;
         actor.set_waker(move || wake());
         Ok(Self {
@@ -53,6 +88,15 @@ impl Annotation {
             geometry: Geometry::default(),
             text_editing: false,
             can_undo: false,
+            revision: 1,
+            saved_revision,
+            recovered_revision: 0,
+            checkpoint_pending: false,
+            recovery_path,
+            cursor: a::PointF::new(0.0, 0.0),
+            anchor: false,
+            image_size: (1, 1),
+            checkpoints: vec![],
         })
     }
     /// A point on an element showing the preview with `SurfaceFit::Fit`, in image pixels:
@@ -75,10 +119,87 @@ impl Annotation {
     pub fn take_accepted(&mut self) -> Option<Frame> {
         self.accepted.take()
     }
-    pub(crate) fn send(&mut self, command: Command) {
-        if let Err(e) = self.actor.send(command) {
-            self.message = format!("{e:#}");
+    pub fn set_recovery_path(&mut self, path: PathBuf) {
+        self.recovery_path = path;
+    }
+    pub fn mark_recovered(&mut self) {
+        self.saved_revision = 0;
+    }
+    pub fn dirty(&self) -> bool {
+        self.revision != self.saved_revision
+    }
+    /// Returns true only when the current editable revision is on disk.
+    /// Call again after poll has processed the checkpoint acknowledgement.
+    pub fn prepare_to_leave(&mut self) -> bool {
+        if !self.finish_placement() {
+            return false;
         }
+        if !self.dirty() || self.recovered_revision == self.revision {
+            return true;
+        }
+        if !self.checkpoint_pending {
+            self.checkpoint_pending = true;
+            self.checkpoint(self.recovery_path.clone(), true);
+            self.message = "Saving editable recovery before leaving. Retry close or quit when recovery is saved.".into();
+        }
+        false
+    }
+    fn save_editable(&mut self, path: PathBuf) {
+        self.checkpoint(path, false);
+    }
+    fn checkpoint(&mut self, path: PathBuf, recovery: bool) {
+        if !self.finish_placement() {
+            return;
+        }
+        let (reply, result) = mpsc::channel();
+        self.checkpoints
+            .push((self.revision, path.clone(), recovery, result));
+        self.send(Command::Checkpoint {
+            path,
+            recovery,
+            reply,
+        });
+    }
+    fn finish_placement(&mut self) -> bool {
+        if self.anchor {
+            if !self.queue(Command::Up(self.cursor, a::Modifiers::NONE)) {
+                return false;
+            }
+            self.anchor = false;
+        }
+        true
+    }
+    pub(crate) fn send(&mut self, command: Command) {
+        self.queue(command);
+    }
+    fn queue(&mut self, command: Command) -> bool {
+        let reset_anchor = matches!(&command, Command::Tool(..) | Command::Undo | Command::Redo);
+        // Conservatively retain every operation that can alter editable work, including
+        // commands queued ahead of the next actor preview. Selection/view changes are clean.
+        if !matches!(
+            &command,
+            Command::Viewport(..)
+                | Command::Zoom(..)
+                | Command::Pan(..)
+                | Command::Tool(..)
+                | Command::Label(..)
+                | Command::Project(..)
+                | Command::Checkpoint { .. }
+                | Command::CycleSelection(..)
+                | Command::Copy
+                | Command::ClearSelection
+        ) {
+            self.revision = self.revision.saturating_add(1);
+        }
+        if let Err(e) = self.actor.send(command) {
+            self.checkpoint_pending = false;
+            self.message = format!("{e:#}");
+            return false;
+        }
+        if reset_anchor {
+            self.anchor = false;
+        }
+        true
     }
     pub fn key(&mut self, event: &KeyEvent) -> bool {
         let mods = a::Modifiers {
@@ -92,11 +213,86 @@ impl Annotation {
             } else {
                 Command::Undo
             }),
-            Key::Delete | Key::Backspace => self.send(Command::Delete),
+            Key::Command('y') => self.send(Command::Redo),
+            Key::Left | Key::Right | Key::Up | Key::Down if !self.text_editing => {
+                if self.active == a::Tool::Select {
+                    let key = match event.key {
+                        Key::Left => a::Key::Left,
+                        Key::Right => a::Key::Right,
+                        Key::Up => a::Key::Up,
+                        _ => a::Key::Down,
+                    };
+                    self.send(Command::Key(key, mods));
+                } else {
+                    let step = if event.mods.shift { 10.0 } else { 1.0 };
+                    match event.key {
+                        Key::Left => self.cursor.x -= step,
+                        Key::Right => self.cursor.x += step,
+                        Key::Up => self.cursor.y -= step,
+                        _ => self.cursor.y += step,
+                    }
+                    self.cursor.x = self
+                        .cursor
+                        .x
+                        .clamp(0.0, self.image_size.0.saturating_sub(1) as f32);
+                    self.cursor.y = self
+                        .cursor
+                        .y
+                        .clamp(0.0, self.image_size.1.saturating_sub(1) as f32);
+                    if self.anchor {
+                        self.send(Command::Move(self.cursor, mods));
+                    }
+                    self.message = format!(
+                        "Placement X {:.0}, Y {:.0}. Enter sets {}.",
+                        self.cursor.x,
+                        self.cursor.y,
+                        if self.anchor { "end" } else { "start" }
+                    );
+                }
+            }
+            Key::Home if !self.text_editing => {
+                self.cursor = a::PointF::new(0.0, 0.0);
+            }
+            Key::Enter if self.active == a::Tool::Select || self.text_editing => {
+                self.send(Command::Key(a::Key::Enter, mods))
+            }
+            Key::Enter => {
+                if self.queue(if self.anchor {
+                    Command::Up(self.cursor, mods)
+                } else {
+                    Command::Down(self.cursor, mods)
+                }) {
+                    self.anchor = !self.anchor;
+                }
+            }
+            Key::Escape => {
+                self.anchor = false;
+                self.send(Command::Key(a::Key::Escape, mods));
+            }
+            Key::Left | Key::Right | Key::Up | Key::Down | Key::Home | Key::End
+                if self.text_editing =>
+            {
+                let key = match event.key {
+                    Key::Left => a::Key::Left,
+                    Key::Right => a::Key::Right,
+                    Key::Up => a::Key::Up,
+                    Key::Down => a::Key::Down,
+                    Key::Home => a::Key::Home,
+                    _ => a::Key::End,
+                };
+                self.send(Command::Key(key, mods));
+            }
+            Key::Delete | Key::Backspace => self.send(Command::Key(
+                if matches!(event.key, Key::Delete) {
+                    a::Key::Delete
+                } else {
+                    a::Key::Backspace
+                },
+                mods,
+            )),
             Key::Text(text) => self.send(Command::Text(text.clone())),
             _ => return false,
         }
-        let _ = mods;
         true
     }
     pub fn poll(&mut self) -> bool {
@@ -104,6 +300,7 @@ impl Annotation {
         if let Some(preview) = self.actor.take_preview() {
             changed = true;
             self.active = preview.active_tool;
+            self.image_size = preview.canvas;
             self.text_editing = preview.text_editing;
             self.can_undo = preview.can_undo;
             self.geometry = Geometry {
@@ -145,6 +342,48 @@ impl Annotation {
                 }
             }
         }
+        let mut pending = Vec::new();
+        for (revision, path, recovery, rx) in std::mem::take(&mut self.checkpoints) {
+            let result = match rx.try_recv() {
+                Ok(result) => result,
+                Err(mpsc::TryRecvError::Empty) => {
+                    pending.push((revision, path, recovery, rx));
+                    continue;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Err("Image worker stopped before saving".into())
+                }
+            };
+            changed = true;
+            if recovery {
+                self.checkpoint_pending = false;
+            }
+            match result {
+                Ok(()) if recovery => {
+                    self.recovered_revision = revision;
+                    self.message = format!(
+                        "Editable recovery saved at {}. Close or quit again to leave. Recovery retains original pixels.",
+                        path.display()
+                    );
+                }
+                Ok(()) => {
+                    self.saved_revision = revision;
+                    self.message = format!(
+                        "Editable project saved at {}. Original pixels are retained.",
+                        path.display()
+                    );
+                    if !self.dirty() {
+                        let _ = std::fs::remove_file(&self.recovery_path);
+                    }
+                }
+                Err(error) => {
+                    self.message = format!(
+                        "Editable save failed: {error}. Your work is still open. Retry Save editable or close to retry recovery."
+                    )
+                }
+            }
+        }
+        self.checkpoints = pending;
         for event in self.actor.events.try_iter() {
             changed = true;
             match event {
@@ -238,6 +477,11 @@ pub fn view(s: &AppState) -> El {
                 .truncate()
                 .min_w(0.0),
         )
+        .child(theme::small(if a.dirty() {
+            "Unsaved editable work"
+        } else {
+            "Editable saved"
+        }))
         .child(theme::spacer())
         .child(
             Btn::icon_only("annotation-undo", "Undo", &icons::UNDO)
@@ -272,7 +516,7 @@ pub fn view(s: &AppState) -> El {
                             if let Ok(Some(path)) = result
                                 && let Some(a) = &mut s.editor.annotation
                             {
-                                a.send(Command::Project(path));
+                                a.save_editable(path);
                             }
                         },
                     )
@@ -280,7 +524,7 @@ pub fn view(s: &AppState) -> El {
                 .build(),
         )
         .child(
-            Btn::new("annotation-save", "Save image…")
+            Btn::new("annotation-save", "Export PNG…")
                 .primary()
                 .on(|_, tx| {
                     tx.save_file(
@@ -308,13 +552,17 @@ pub fn view(s: &AppState) -> El {
         .center_y();
     for tool in a::Tool::ALL {
         let on = a.active == tool;
-        let mut b = Btn::icon_only(format!("annotation-{tool:?}"), tool_name(tool), tool_icon(tool))
-            .checked(on)
-            .on(move |s, _| {
-                if let Some(a) = &mut s.editor.annotation {
-                    a.send(Command::Tool(tool));
-                }
-            });
+        let mut b = Btn::icon_only(
+            format!("annotation-{tool:?}"),
+            tool_name(tool),
+            tool_icon(tool),
+        )
+        .checked(on)
+        .on(move |s, _| {
+            if let Some(a) = &mut s.editor.annotation {
+                a.send(Command::Tool(tool));
+            }
+        });
         if on {
             b = b.variant(theme::Variant::Neutral);
         }
@@ -346,6 +594,10 @@ pub fn view(s: &AppState) -> El {
         .child(label);
     let canvas = el()
         .key("annotation-canvas")
+        .role("group")
+        .label("Annotation canvas. Arrow keys position the active tool; Enter starts or finishes placement.")
+        .focusable(true)
+        .on_key(|s: &mut AppState, event, _| s.editor.annotation.as_mut().is_some_and(|a| a.key(event)))
         .grow(1.0)
         .min_h(100.0)
         .w_full()
@@ -365,6 +617,7 @@ pub fn view(s: &AppState) -> El {
         .on_drag(|s: &mut AppState, d, tx| {
             if let Some(a) = &mut s.editor.annotation {
                 let p = a.image_point(d.x, d.y, (d.w, d.h));
+                a.cursor = p;
                 let mods = tx.mods();
                 let m = a::Modifiers {
                     ctrl: mods.cmd,
@@ -376,7 +629,7 @@ pub fn view(s: &AppState) -> El {
                     rune::Phase::Move => Command::Move(p, m),
                     rune::Phase::Up => Command::Up(p, m),
                 };
-                a.send(command);
+                if a.queue(command) { a.anchor = !matches!(d.phase, rune::Phase::Up); }
             }
         });
     let mut page = col()
@@ -384,6 +637,13 @@ pub fn view(s: &AppState) -> El {
         .min_h(0.0)
         .child(bar)
         .child(dock)
+        .child(theme::small("Editable projects and recovery retain original pixels, including cropped or covered areas. Export PNG for flattened sharing; export does not save editable work.").px(24.0).pt(8.0))
+        .child(row().px(24.0).gap(8.0).center_y()
+            .child(Btn::new("annotation-select-next", "Select next annotation")
+                .on(send(|| Command::CycleSelection(false))).build())
+            .child(Btn::new("annotation-select-previous", "Select previous annotation")
+                .on(send(|| Command::CycleSelection(true))).build())
+            .child(theme::small("Tab to canvas. Arrows move selection or placement; Shift moves 10 px. Enter sets start/end; Home resets placement.")))
         .child(col().grow(1.0).min_h(0.0).px(24.0).pt(14.0).pb(18.0).child(canvas));
     if !a.message.is_empty() {
         page = page.child(theme::small(a.message.clone()).px(24.0).pb(14.0));
@@ -397,5 +657,68 @@ pub fn flush_save(s: &mut AppState) {
                 .map(|_| JobResult::Notice(format!("Saved {}", path.display())))
                 .map_err(|e| format!("{e:#}"))
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn settle_checkpoints(a: &mut Annotation) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !a.checkpoints.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Checkpoint worker did not reply"
+            );
+            a.poll();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    #[test]
+    fn leaving_requires_current_durable_editable_revision_and_exports_do_not_clean_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery.ssxe");
+        let frame = toolkit::effects::solid_frame(32, 24, [255; 4]);
+        let mut a = Annotation::with_recovery(
+            Source::Image(frame),
+            std::sync::Arc::new(|| {}),
+            recovery.clone(),
+        )
+        .unwrap();
+        assert!(a.dirty());
+        assert!(!a.prepare_to_leave());
+        settle_checkpoints(&mut a);
+        assert!(a.prepare_to_leave());
+        assert!(toolkit::annotation::project::load(&recovery).is_ok());
+        a.send(Command::Rotate);
+        assert!(
+            !a.prepare_to_leave(),
+            "An older recovery cannot cover a later edit"
+        );
+        settle_checkpoints(&mut a);
+        let project = dir.path().join("saved.ssxe");
+        a.save_editable(project.clone());
+        settle_checkpoints(&mut a);
+        assert!(!a.dirty());
+        a.send(Command::Accept);
+        assert!(
+            a.dirty(),
+            "Flattened export must not mark editable work saved"
+        );
+        a.save_editable(project.clone());
+        settle_checkpoints(&mut a);
+        assert!(
+            a.dirty(),
+            "A failed no-clobber save must not clean editable work"
+        );
+        assert!(toolkit::annotation::project::load(&project).is_ok());
+        // Failed recovery also leaves the dirty session open for retry or Save elsewhere.
+        let blocked = dir.path().join("blocked");
+        std::fs::write(&blocked, b"existing").unwrap();
+        a.set_recovery_path(blocked.join("recovery.ssxe"));
+        assert!(!a.prepare_to_leave());
+        settle_checkpoints(&mut a);
+        assert!(!a.prepare_to_leave());
+        assert!(a.dirty());
     }
 }

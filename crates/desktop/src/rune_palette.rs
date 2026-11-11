@@ -16,6 +16,7 @@ pub struct Palette {
 #[derive(Clone)]
 enum Target {
     Page(Page),
+    Trash,
     SaveReplay,
     ToggleReplay,
     ToggleRecord,
@@ -122,6 +123,13 @@ fn items(s: &State) -> Vec<Item> {
             target: Target::Page(page),
         });
     }
+    all.push(Item {
+        group: "Go to",
+        icon: &icons::TRASH,
+        title: "Trash recovery".into(),
+        hint: "Restore removed captures".into(),
+        target: Target::Trash,
+    });
     for tool in Tool::ALL {
         all.push(Item {
             group: "Tools",
@@ -174,7 +182,15 @@ fn capture_active(_: &State) -> bool {
 fn run(s: &mut State, tx: &mut Tx, target: Target) {
     s.palette = None;
     match target {
-        Target::Page(page) => s.go(page),
+        Target::Page(page) => {
+            s.trash_open = false;
+            s.go(page);
+        }
+        Target::Trash => {
+            s.go(Page::Library);
+            s.load_trash();
+            s.trash_open = true;
+        }
         Target::OpenFile => s.browse(tx),
         Target::Tool(tool) => crate::rune_tools::open_tool(s, tool),
         Target::Clip(path) => s.open(path),

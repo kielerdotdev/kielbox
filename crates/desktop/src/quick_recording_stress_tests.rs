@@ -109,14 +109,25 @@ fn failed_owned_aac_encoder_preserves_a_decodable_video_prefix() {
     let fps = Fps::from_f64(5.).unwrap();
     let pattern = SyntheticConfig::new(160, 90, fps);
     let spec = OutputSpec {
-        path: path.clone(), container: config.container,
-        video: VideoParams { size: pattern.size, fps },
-        audio: Some(AudioParams { sample_rate: 48_000, channels: 2 }),
-        video_settings: config.video, audio_settings: config.audio, gif: config.gif,
+        path: path.clone(),
+        container: config.container,
+        video: VideoParams {
+            size: pattern.size,
+            fps,
+        },
+        audio: Some(AudioParams {
+            sample_rate: 48_000,
+            channels: 2,
+        }),
+        video_settings: config.video,
+        audio_settings: config.audio,
+        gif: config.gif,
     };
     let mut encoder = ExternalEncoder::open(&spec).unwrap();
     for slot in 0..5 {
-        encoder.write_video(slot, &Arc::new(EncoderInput::Rgba(render(&pattern, slot)))).unwrap();
+        encoder
+            .write_video(slot, &Arc::new(EncoderInput::Rgba(render(&pattern, slot))))
+            .unwrap();
         encoder.write_audio(&vec![0.; 9600 * 2]).unwrap();
     }
     let child = encoder.audio.as_ref().unwrap().child.clone();
@@ -137,33 +148,70 @@ fn failed_owned_aac_encoder_preserves_a_decodable_video_prefix() {
 fn requested_audio_lost_at_finalization_is_reported_in_recording_warnings() {
     struct VideoOnlyAtFinish(Option<ExternalEncoder>);
     impl Encoder for VideoOnlyAtFinish {
-        fn description(&self) -> String { "injected final audio failure".into() }
-        fn input_kind(&self) -> InputKind { InputKind::Rgba8 }
-        fn has_audio(&self) -> bool { true }
-        fn write_video(&mut self, slot: u64, input: &Arc<EncoderInput>) -> recording_tools::error::Result<()> {
+        fn description(&self) -> String {
+            "injected final audio failure".into()
+        }
+        fn input_kind(&self) -> InputKind {
+            InputKind::Rgba8
+        }
+        fn has_audio(&self) -> bool {
+            true
+        }
+        fn write_video(
+            &mut self,
+            slot: u64,
+            input: &Arc<EncoderInput>,
+        ) -> recording_tools::error::Result<()> {
             self.0.as_mut().unwrap().write_video(slot, input)
         }
-        fn write_audio(&mut self, _: &[f32]) -> recording_tools::error::Result<()> { Ok(()) }
-        fn bytes_written(&self) -> u64 { self.0.as_ref().unwrap().bytes_written() }
-        fn finish(mut self: Box<Self>, end: Duration) -> recording_tools::error::Result<EncodeSummary> {
+        fn write_audio(&mut self, _: &[f32]) -> recording_tools::error::Result<()> {
+            Ok(())
+        }
+        fn bytes_written(&self) -> u64 {
+            self.0.as_ref().unwrap().bytes_written()
+        }
+        fn finish(
+            mut self: Box<Self>,
+            end: Duration,
+        ) -> recording_tools::error::Result<EncodeSummary> {
             Box::new(self.0.take().unwrap()).finish(end)
         }
         fn abort(self: Box<Self>) {}
     }
     let folder = tempfile::tempdir().unwrap();
     let config = RecordConfig::new(folder.path().join("reported-audio-loss.mp4"));
-    let source = SyntheticSource::new(SyntheticConfig::new(160, 90, config.fps)
-        .time(TimeMode::Virtual).max_frames(10));
-    let audio = SyntheticAudio::new(SyntheticAudioConfig::new(Signal::Silence, TimeMode::Virtual));
-    let session = RecordingSession::start_with(config, Box::new(source), vec![Box::new(audio)], Box::new(|spec| {
-        let mut video_only = spec.clone();
-        video_only.audio = None;
-        Ok(Box::new(VideoOnlyAtFinish(Some(ExternalEncoder::open(&video_only)?))) as Box<dyn Encoder>)
-    })).unwrap();
+    let source = SyntheticSource::new(
+        SyntheticConfig::new(160, 90, config.fps)
+            .time(TimeMode::Virtual)
+            .max_frames(10),
+    );
+    let audio = SyntheticAudio::new(SyntheticAudioConfig::new(
+        Signal::Silence,
+        TimeMode::Virtual,
+    ));
+    let session = RecordingSession::start_with(
+        config,
+        Box::new(source),
+        vec![Box::new(audio)],
+        Box::new(|spec| {
+            let mut video_only = spec.clone();
+            video_only.audio = None;
+            Ok(
+                Box::new(VideoOnlyAtFinish(Some(ExternalEncoder::open(&video_only)?)))
+                    as Box<dyn Encoder>,
+            )
+        }),
+    )
+    .unwrap();
     assert!(session.wait_finished(Duration::from_secs(20)).is_some());
     let recording = session.stop().unwrap();
     assert!(!recording.has_audio);
-    assert!(recording.warnings.iter().any(|warning| warning.contains("saved video without sound")));
+    assert!(
+        recording
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("saved video without sound"))
+    );
     decode_all(&recording.path);
 }
 
@@ -175,9 +223,15 @@ fn requested_audio_lost_at_finalization_is_reported_in_recording_warnings() {
 fn generated_stop_latency_eval() {
     use recording_tools::encode::{AudioParams, VideoParams};
     use recording_tools::source::synthetic::{read_counter, render};
-    let durations = std::env::var("RCR_STOP_EVAL_SECONDS").unwrap_or_else(|_| "1,10,60".into())
-        .split(',').map(|value| value.parse::<u64>().unwrap()).collect::<Vec<_>>();
-    let repeats = std::env::var("RCR_STOP_EVAL_REPEATS").unwrap_or_else(|_| "2".into()).parse::<usize>().unwrap();
+    let durations = std::env::var("RCR_STOP_EVAL_SECONDS")
+        .unwrap_or_else(|_| "1,10,60".into())
+        .split(',')
+        .map(|value| value.parse::<u64>().unwrap())
+        .collect::<Vec<_>>();
+    let repeats = std::env::var("RCR_STOP_EVAL_REPEATS")
+        .unwrap_or_else(|_| "2".into())
+        .parse::<usize>()
+        .unwrap();
     assert!(!durations.is_empty() && durations.iter().all(|seconds| (1..=600).contains(seconds)));
     assert!((1..=10).contains(&repeats));
     let fps = Fps::from_f64(5.).unwrap();
@@ -190,14 +244,24 @@ fn generated_stop_latency_eval() {
                 let path = folder.path().join("actual.mp4");
                 let config = RecordConfig::new(&path);
                 let spec = OutputSpec {
-                    path: path.clone(), container: config.container,
-                    video: VideoParams { size: pattern.size, fps },
-                    audio: audio_enabled.then_some(AudioParams { sample_rate: 48_000, channels: 2 }),
-                    video_settings: config.video, audio_settings: config.audio, gif: config.gif,
+                    path: path.clone(),
+                    container: config.container,
+                    video: VideoParams {
+                        size: pattern.size,
+                        fps,
+                    },
+                    audio: audio_enabled.then_some(AudioParams {
+                        sample_rate: 48_000,
+                        channels: 2,
+                    }),
+                    video_settings: config.video,
+                    audio_settings: config.audio,
+                    gif: config.gif,
                 };
                 let mut encoder = ExternalEncoder::open(&spec).unwrap();
                 let staging = encoder.directory.path().to_owned();
-                let mut legacy_pcm = audio_enabled.then(|| std::fs::File::create(folder.path().join("legacy.f32")).unwrap());
+                let mut legacy_pcm = audio_enabled
+                    .then(|| std::fs::File::create(folder.path().join("legacy.f32")).unwrap());
                 let frames = seconds * 5;
                 let mut audio_frame = 0_u64;
                 let feed_started = Instant::now();
@@ -205,13 +269,21 @@ fn generated_stop_latency_eval() {
                     let input = Arc::new(EncoderInput::Rgba(render(&pattern, slot)));
                     encoder.write_video(slot, &input).unwrap();
                     if audio_enabled {
-                        let samples = (0..9600).flat_map(|_| {
-                            let value = (std::f64::consts::TAU * 440. * audio_frame as f64 / 48_000.).sin() as f32 * 0.2;
-                            audio_frame += 1;
-                            [value, value]
-                        }).collect::<Vec<_>>();
+                        let samples = (0..9600)
+                            .flat_map(|_| {
+                                let value = (std::f64::consts::TAU * 440. * audio_frame as f64
+                                    / 48_000.)
+                                    .sin() as f32
+                                    * 0.2;
+                                audio_frame += 1;
+                                [value, value]
+                            })
+                            .collect::<Vec<_>>();
                         encoder.write_audio(&samples).unwrap();
-                        let bytes = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect::<Vec<_>>();
+                        let bytes = samples
+                            .iter()
+                            .flat_map(|sample| sample.to_le_bytes())
+                            .collect::<Vec<_>>();
                         legacy_pcm.as_mut().unwrap().write_all(&bytes).unwrap();
                     }
                 }
@@ -219,45 +291,118 @@ fn generated_stop_latency_eval() {
                 drop(legacy_pcm);
                 assert!(encoder.audio_bytes.capacity() <= 32 * 1024);
                 assert!(encoder.last_pixels.capacity() <= 160 * 90 * 4);
-                assert!(!staging.join("audio.f32").exists(), "Raw PCM must not accumulate during recording");
-                let children = [&encoder.video, &encoder.audio].into_iter()
-                    .filter_map(|process| process.as_ref().map(|process| process.child.clone())).collect::<Vec<_>>();
+                assert!(
+                    !staging.join("audio.f32").exists(),
+                    "Raw PCM must not accumulate during recording"
+                );
+                let children = [&encoder.video, &encoder.audio]
+                    .into_iter()
+                    .filter_map(|process| process.as_ref().map(|process| process.child.clone()))
+                    .collect::<Vec<_>>();
                 assert_eq!(children.len(), if audio_enabled { 2 } else { 1 });
                 let staging_bytes = encoder.bytes_written();
                 let started = Instant::now();
-                let summary = Box::new(encoder).finish(Duration::from_secs(seconds)).unwrap();
+                let summary = Box::new(encoder)
+                    .finish(Duration::from_secs(seconds))
+                    .unwrap();
                 let stop_ms = started.elapsed().as_secs_f64() * 1000.;
                 assert_eq!(summary.video_frames, frames);
                 assert!(!staging.exists(), "Encoder staging leaked after completion");
-                for child in children { assert!(child.lock().unwrap().try_wait().unwrap().is_some(), "FFmpeg child was not reaped"); }
+                for child in children {
+                    assert!(
+                        child.lock().unwrap().try_wait().unwrap().is_some(),
+                        "FFmpeg child was not reaped"
+                    );
+                }
 
                 // Conservative baseline: only the old full-clip AAC + final mux
                 // phase, excluding its video encoder drain and durability wait.
                 let legacy_aac_mux_ms = audio_enabled.then(|| {
                     let mut command = ffmpeg();
-                    command.arg("-i").arg(&path).args(["-f", "f32le", "-ar", "48000", "-ac", "2", "-i"])
+                    command
+                        .arg("-i")
+                        .arg(&path)
+                        .args(["-f", "f32le", "-ar", "48000", "-ac", "2", "-i"])
                         .arg(folder.path().join("legacy.f32"))
-                        .args(["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-threads", "1", "-af", "apad", "-t", &seconds.to_string(), "-movflags", "+faststart"])
-                        .arg(folder.path().join("legacy.mp4")).stdin(Stdio::null());
+                        .args([
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "1:a:0",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-b:a",
+                            "128k",
+                            "-threads",
+                            "1",
+                            "-af",
+                            "apad",
+                            "-t",
+                            &seconds.to_string(),
+                            "-movflags",
+                            "+faststart",
+                        ])
+                        .arg(folder.path().join("legacy.mp4"))
+                        .stdin(Stdio::null());
                     let started = Instant::now();
-                    Process::spawn(&mut command).unwrap().wait(Duration::from_secs(30)).unwrap();
+                    Process::spawn(&mut command)
+                        .unwrap()
+                        .wait(Duration::from_secs(30))
+                        .unwrap();
                     started.elapsed().as_secs_f64() * 1000.
                 });
                 let info = probe(&path);
                 let streams = info["streams"].as_array().unwrap();
-                let video = streams.iter().find(|stream| stream["codec_type"] == "video").unwrap();
-                assert_eq!(video["nb_frames"].as_str().unwrap().parse::<u64>().unwrap(), frames);
+                let video = streams
+                    .iter()
+                    .find(|stream| stream["codec_type"] == "video")
+                    .unwrap();
+                assert_eq!(
+                    video["nb_frames"].as_str().unwrap().parse::<u64>().unwrap(),
+                    frames
+                );
                 assert_eq!(video["r_frame_rate"], "5/1");
                 assert_eq!(video["codec_name"], "h264");
-                assert_eq!(streams.iter().filter(|stream| stream["codec_name"] == "aac").count(), usize::from(audio_enabled));
-                let duration = info["format"]["duration"].as_str().unwrap().parse::<f64>().unwrap();
-                assert!((duration - seconds as f64).abs() < 0.05, "Duration changed: {duration}");
-                let decoded = ffmpeg().args(["-threads", "1", "-i"]).arg(&path)
-                    .args(["-map", "0:v:0", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]).output().unwrap();
+                assert_eq!(
+                    streams
+                        .iter()
+                        .filter(|stream| stream["codec_name"] == "aac")
+                        .count(),
+                    usize::from(audio_enabled)
+                );
+                let duration = info["format"]["duration"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap();
+                assert!(
+                    (duration - seconds as f64).abs() < 0.05,
+                    "Duration changed: {duration}"
+                );
+                let decoded = ffmpeg()
+                    .args(["-threads", "1", "-i"])
+                    .arg(&path)
+                    .args([
+                        "-map", "0:v:0", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1",
+                    ])
+                    .output()
+                    .unwrap();
                 assert!(decoded.status.success());
                 assert_eq!(decoded.stdout.len(), frames as usize * 160 * 90);
-                for (slot, pixels) in decoded.stdout.as_chunks::<{ 160 * 90 }>().0.iter().enumerate() {
-                    assert_eq!(read_counter(160, 90, |x, y| pixels[y as usize * 160 + x as usize]), slot as u16, "Video frame lost or changed");
+                for (slot, pixels) in decoded
+                    .stdout
+                    .as_chunks::<{ 160 * 90 }>()
+                    .0
+                    .iter()
+                    .enumerate()
+                {
+                    assert_eq!(
+                        read_counter(160, 90, |x, y| pixels[y as usize * 160 + x as usize]),
+                        slot as u16,
+                        "Video frame lost or changed"
+                    );
                 }
                 decode_all(&path);
                 let row = serde_json::json!({"repeat": repeat, "seconds": seconds, "audio": audio_enabled,

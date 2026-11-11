@@ -34,6 +34,8 @@ pub struct Options {
     pub fps: u32,
     pub folder: PathBuf,
 }
+pub const MAX_DURATION_SECONDS: u64 = 600;
+
 pub enum Event {
     Started,
     Progress(StatsSnapshot, Vec<String>),
@@ -114,7 +116,7 @@ impl Worker {
         collect_events(&self.events, || self.finished())
     }
 }
-fn collect_events<E>(
+pub(crate) fn collect_events<E>(
     receiver: &mpsc::Receiver<E>,
     finished: impl FnOnce() -> bool,
 ) -> (Vec<E>, bool) {
@@ -157,7 +159,7 @@ fn run(
     cfg.fps = Fps::from_f64(f64::from(options.fps)).context("Invalid frame rate")?;
     cfg.pipeline.queue_budget_bytes = 48 * 1024 * 1024;
     cfg.pipeline.gap_policy = GapPolicy::Duplicate;
-    cfg.limits.max_duration = Some(Duration::from_secs(600));
+    cfg.limits.max_duration = Some(Duration::from_secs(MAX_DURATION_SECONDS));
     if abort.load(Ordering::Acquire) || stop.load(Ordering::Acquire) {
         let _ = events.try_send(Event::Cancelled);
         return Ok(());
@@ -195,7 +197,7 @@ fn run(
         let _ = events.try_send(Event::Progress(stats, session.warnings()));
         thread::sleep(Duration::from_millis(100));
     }
-    let _ = events.try_send(Event::Finishing);
+    let _ = events.send(Event::Finishing);
     if stop.load(Ordering::Acquire) && session.stats().encoded == 0 {
         session.abort();
         let _ = events.try_send(Event::Cancelled);
@@ -214,6 +216,9 @@ fn run(
         .persist_noclobber(&destination)
         .context("Could not publish the screencast")?;
     let mut warnings = recording.warnings;
+    if matches!(&recording.end_reason, EndReason::MaxDuration) {
+        warnings.push("Stopped at the 10-minute screencast limit.".into());
+    }
     if let EndReason::Failed(reason) = recording.end_reason {
         warnings.push(format!(
             "Capture stopped early: {reason}. The playable prefix was saved."
@@ -631,6 +636,19 @@ mod stress_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retirement_drains_terminal_events_arriving_after_first_poll() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Event::Started).unwrap();
+        let (events, retired) = collect_events(&rx, || {
+            tx.send(Event::Saved(PathBuf::from("owned.mp4"), vec![])).unwrap();
+            true
+        });
+        assert!(retired);
+        assert!(matches!(events.as_slice(), [Event::Started, Event::Saved(path, _)] if path == &PathBuf::from("owned.mp4")));
+        assert_eq!(MAX_DURATION_SECONDS, 600);
+    }
+
     fn tone_magnitude(samples: &[f64], hz: f64) -> f64 {
         if samples.is_empty() { return 0.; }
         let cosine = (std::f64::consts::TAU * hz / 48_000.).cos();

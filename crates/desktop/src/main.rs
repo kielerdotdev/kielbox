@@ -23,9 +23,9 @@ mod rune_gpu;
 static PENDING_UPDATE: std::sync::Mutex<Option<(updates::PreparedUpdate, std::path::PathBuf)>> =
     std::sync::Mutex::new(None);
 mod rune_palette;
+mod rune_shot;
 mod rune_theme;
 mod rune_thumbs;
-mod rune_shot;
 mod rune_tools;
 mod rune_ui;
 #[cfg(windows)]
@@ -165,10 +165,10 @@ fn main() {
         .titlebar(rune::Titlebar::new(rune_ui::TITLEBAR))
         .keep_running()
         .on_close(|s, tx| {
-        if !s.preferences.close_to_tray || !s.has_tray() {
-            tx.quit();
-        }
-    });
+            if !s.preferences.close_to_tray || !s.has_tray() {
+                s.request_quit(tx);
+            }
+        });
     let mut app = if headless {
         app.compositor(DesktopCompositor {
             logged: false,

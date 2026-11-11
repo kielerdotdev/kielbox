@@ -39,6 +39,8 @@ pub struct Options {
     pub older_than: Duration,
     /// Empty selects every supported kind.
     pub kinds: Vec<Kind>,
+    /// Permit permanent removal of ignored worktree contents, including local data.
+    pub allow_ignored_worktree_data: bool,
 }
 
 #[derive(Debug)]
@@ -60,6 +62,7 @@ pub struct Plan {
     candidates: Vec<Candidate>,
     roots: Vec<PathBuf>,
     cutoff: SystemTime,
+    allow_ignored_worktree_data: bool,
     pub skipped: Vec<Notice>,
     pub errors: Vec<Notice>,
 }
@@ -76,6 +79,8 @@ impl Plan {
 
 #[derive(Debug, Default)]
 pub struct Outcome {
+    /// Cancellation retains all completed removals and errors.
+    pub cancelled: bool,
     pub removed: Vec<Candidate>,
     pub errors: Vec<Notice>,
 }
@@ -171,7 +176,7 @@ fn worktree_admin(path: &Path) -> io::Result<PathBuf> {
     Ok(admin)
 }
 
-fn worktree_safe(path: &Path) -> io::Result<PathBuf> {
+fn worktree_safe(path: &Path, allow_ignored_worktree_data: bool) -> io::Result<PathBuf> {
     let admin = worktree_admin(path)?;
     if !git(
         path,
@@ -186,6 +191,24 @@ fn worktree_safe(path: &Path) -> io::Result<PathBuf> {
     .is_empty()
     {
         return Err(error("worktree has modified or untracked files"));
+    }
+    if !allow_ignored_worktree_data
+        && !git(
+            path,
+            &[
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+            ],
+        )?
+        .stdout
+        .is_empty()
+    {
+        return Err(error(
+            "worktree contains ignored data; review it before opting in with --allow-ignored-worktree-data",
+        ));
     }
     // No network fetch: local remote-tracking refs must already contain HEAD.
     // This also preserves detached commits and repositories without remotes.
@@ -265,6 +288,7 @@ fn validate(
     roots: &[PathBuf],
     cutoff: SystemTime,
     cancel: &CancelToken,
+    allow_ignored_worktree_data: bool,
 ) -> io::Result<u64> {
     check_cancel(cancel)?;
     let canonical = checked_path(path)?;
@@ -280,7 +304,7 @@ fn validate(
         return Err(error("target is no longer a recognized cleanup directory"));
     }
     if kind == Kind::Worktree {
-        let admin = worktree_safe(path)?;
+        let admin = worktree_safe(path, allow_ignored_worktree_data)?;
         // Reflog/HEAD/index changes indicate Git activity even if source mtimes are old.
         measure(&admin, cutoff, cancel)?;
     }
@@ -313,6 +337,7 @@ pub fn plan(options: &Options, cancel: &CancelToken) -> io::Result<Plan> {
         candidates: Vec::new(),
         roots,
         cutoff,
+        allow_ignored_worktree_data: options.allow_ignored_worktree_data,
         skipped: Vec::new(),
         errors: Vec::new(),
     };
@@ -347,8 +372,16 @@ pub fn plan(options: &Options, cancel: &CancelToken) -> io::Result<Plan> {
         }
         if let Some(kind) = classify(&path) {
             if options.kinds.is_empty() || options.kinds.contains(&kind) {
-                match validate(&path, kind, &result.roots, cutoff, cancel) {
+                match validate(
+                    &path,
+                    kind,
+                    &result.roots,
+                    cutoff,
+                    cancel,
+                    result.allow_ignored_worktree_data,
+                ) {
                     Ok(bytes) => result.candidates.push(Candidate { path, kind, bytes }),
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => return Err(e),
                     Err(e) => result.skipped.push(Notice {
                         path,
                         reason: e.to_string(),
@@ -388,6 +421,7 @@ pub fn plan(options: &Options, cancel: &CancelToken) -> io::Result<Plan> {
 
 /// Apply only a plan produced by this module. Recheck scope, type, age and Git
 /// state for every target. No force removal, fetch, branch deletion or pruning.
+/// Cancellation returns `Ok` with a partial ledger and `Outcome::cancelled` set.
 pub fn apply(
     plan: &Plan,
     cancel: &CancelToken,
@@ -395,7 +429,10 @@ pub fn apply(
 ) -> io::Result<Outcome> {
     let mut outcome = Outcome::default();
     for candidate in &plan.candidates {
-        check_cancel(cancel)?;
+        if cancel.is_cancelled() {
+            outcome.cancelled = true;
+            break;
+        }
         let result = (|| {
             let bytes = validate(
                 &candidate.path,
@@ -403,6 +440,7 @@ pub fn apply(
                 &plan.roots,
                 plan.cutoff,
                 cancel,
+                plan.allow_ignored_worktree_data,
             )?;
             check_cancel(cancel)?;
             if candidate.kind == Kind::Worktree {
@@ -436,11 +474,16 @@ pub fn apply(
                 });
                 removed(outcome.removed.last().unwrap());
             }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                outcome.cancelled = true;
+                break;
+            }
             Err(e) => outcome.errors.push(Notice {
                 path: candidate.path.clone(),
                 reason: e.to_string(),
             }),
         }
     }
+    outcome.cancelled |= cancel.is_cancelled();
     Ok(outcome)
 }

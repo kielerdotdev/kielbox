@@ -225,6 +225,7 @@ fn atomic_write(path: &Path, write: impl FnOnce(&mut tempfile::NamedTempFile) ->
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     write(&mut temp)?;
     temp.flush()?;
+    temp.as_file().sync_all()?;
     temp.persist(path)?;
     Ok(())
 }

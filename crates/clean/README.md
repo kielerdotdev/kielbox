@@ -47,8 +47,13 @@ reading or executing an old dependency does not refresh its modification time.
 Worktrees must be unlocked, have no modified/untracked files, have no submodules,
 and have HEAD reachable from existing local remote-tracking refs. This includes
 detached worktrees. Repositories without those refs and worktrees with unpublished
-commits are preserved. No fetch is performed. Ignored files, including ignored
-build output, are removed along with an eligible worktree. Git branches are kept.
+commits are preserved. No fetch is performed. Worktrees containing any ignored files, including ignored
+build output, are preserved by default. Review those files before using
+`--allow-ignored-worktree-data` to permit their permanent removal with the worktree.
+This flag can delete non-regenerable ignored settings, secrets and datasets, and
+must be supplied for both the preview and apply runs to see the same policy.
+The check runs again immediately before deletion. The opt-in does not bypass
+age, dirty/untracked, lock, submodule or remote-tracking checks. Git branches are kept.
 Removal uses `git worktree remove` without force, keeping Git registration correct.
 When worktree cleanup is selected, a preserved worktree is not searched for
 artifact cleanup. Selecting only artifact kinds allows inspecting its artifacts.
@@ -69,7 +74,8 @@ delete or Git operation finishes before cancellation takes effect.
 Exit codes: `0` success (including no eligible targets), `1` scan/deletion failure,
 `2` invalid arguments, `3` cancellation. Preserved targets appear with reasons and
 are not failures. `--json` reports planned targets, skipped targets, removed paths,
-and scan/removal errors separately.
+and scan/removal errors separately. Apply cancellation retains completed removals
+and errors, reports `cancelled: true` and `success: false`, and exits with code 3.
 
 ## Build
 

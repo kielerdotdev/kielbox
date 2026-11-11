@@ -82,8 +82,8 @@ impl Thumbs {
         }
     }
 
-    /// Queue every listed capture without a thumbnail, in list order (newest first), and
-    /// forget captures that left the list. Cheap when nothing changed.
+    /// Queue the visible page supplied by the Library, including filtered older captures,
+    /// and forget captures that left it. Admission is bounded by the caller's page size.
     pub fn sync(&mut self, files: &[PathBuf], wake: &rune::Waker) {
         if self.queue.is_none() {
             self.start(wake.clone());
@@ -91,10 +91,10 @@ impl Thumbs {
         let Some(queue) = &self.queue else {
             return;
         };
-        let listed: std::collections::HashSet<&PathBuf> = files.iter().take(500).collect();
+        let listed: std::collections::HashSet<&PathBuf> = files.iter().collect();
         self.map.retain(|path, _| listed.contains(path));
         let mut wanted = VecDeque::new();
-        for path in files.iter().take(500) {
+        for path in files.iter() {
             if !self.map.contains_key(path) {
                 let pixels = rune::Pixels::new();
                 self.map.insert(
@@ -108,9 +108,6 @@ impl Thumbs {
                 );
                 wanted.push_back((path.clone(), pixels));
             }
-        }
-        if wanted.is_empty() {
-            return;
         }
         let mut q = queue.0.lock().unwrap_or_else(|e| e.into_inner());
         q.paths.retain(|(p, _)| listed.contains(p));
@@ -308,5 +305,30 @@ fn prune(folder: &Path) {
         if std::fs::remove_file(path).is_ok() {
             total = total.saturating_sub(len);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn admission_uses_visible_matches_and_removes_stale_queue_entries() {
+        let queue = Arc::new((
+            Mutex::new(Queue {
+                paths: VecDeque::new(),
+                stop: false,
+            }),
+            Condvar::new(),
+        ));
+        let mut thumbs = Thumbs::default();
+        thumbs.queue = Some(queue.clone());
+        let wake: rune::Waker = Arc::new(|| {});
+        let old_match = PathBuf::from("recording-700.mp4");
+        thumbs.sync(std::slice::from_ref(&old_match), &wake);
+        assert!(thumbs.map.contains_key(&old_match));
+        assert_eq!(queue.0.lock().unwrap().paths.len(), 1);
+        thumbs.sync(&[], &wake);
+        assert!(thumbs.map.is_empty());
+        assert!(queue.0.lock().unwrap().paths.is_empty());
     }
 }

@@ -51,6 +51,9 @@ pub enum Command {
     Effect(effects::Effect),
     InsertImage(PathBuf),
     Project(PathBuf),
+    /// Ordered durable editable snapshot, acknowledged even when writing fails.
+    Checkpoint { path: PathBuf, recovery: bool, reply: mpsc::Sender<std::result::Result<(), String>> },
+    CycleSelection(bool),
     Copy,
     Accept,
     AcceptRegion(crate::types::Rect),
@@ -300,7 +303,7 @@ impl Actor {
                             for command in commands {
                                 if q.closed.load(Ordering::Acquire) { return Ok(()); }
                                 let keyboard = matches!(&command, Command::CanvasInput { .. });
-                                let emits_event = matches!(&command, Command::Project(..) | Command::Copy | Command::Accept | Command::AcceptRegion(..) | Command::ApplyLabel { .. });
+                                let emits_event = matches!(&command, Command::Project(..) | Command::Checkpoint { .. } | Command::Copy | Command::Accept | Command::AcceptRegion(..) | Command::ApplyLabel { .. });
                                 let sink = if keyboard { &batch_tx } else { &tx };
                                 if let Err(error) = apply_with_clipboard(&mut session, &mut view, command, sink, Some((&q, &tx))) {
                                     let _ = tx.send(Event::Error(format!("{error:#}")));
@@ -833,6 +836,32 @@ fn apply_with_clipboard(
             let frame = Frame::decode(&std::fs::read(path)?)?;
             session.insert_image(frame, None);
         }
+        Command::CycleSelection(backwards) => {
+            let ids: Vec<_> = session.document().objects().iter()
+                .filter(|o| o.visible && !o.locked).map(|o| o.id).collect();
+            if !ids.is_empty() {
+                let current = session.selection().first().and_then(|id| ids.iter().position(|i| i == id));
+                let next = current.map_or(if backwards { ids.len() - 1 } else { 0 }, |i|
+                    if backwards { (i + ids.len() - 1) % ids.len() } else { (i + 1) % ids.len() });
+                session.set_tool(a::Tool::Select);
+                session.select(&[ids[next]]);
+            }
+        }
+        Command::Checkpoint { path, recovery, reply } => {
+            let result = (|| -> Result<()> {
+                session.commit_text_edit();
+                let parent = path.parent().context("Project has no parent directory")?;
+                std::fs::create_dir_all(parent)?;
+                let text = session.document().to_json()?;
+                if recovery {
+                    crate::core::settings::atomic_write(&path, text.as_bytes())?;
+                } else {
+                    crate::utilities::save_new(&path, text.as_bytes())?;
+                }
+                Ok(())
+            })().map_err(|e| format!("{e:#}"));
+            let _ = reply.send(result);
+        }
         Command::Project(path) => {
             session.commit_text_edit();
             let parent = path.parent().context("Project has no parent directory")?;
@@ -864,6 +893,67 @@ fn apply_with_clipboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editable_checkpoint_acknowledges_failure_without_losing_document_or_clobbering_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("editable.ssxe");
+        let mut session = a::EditorSession::from_frame(effects::solid_frame(80, 60, [255; 4])).unwrap();
+        session.set_tool(a::Tool::Rectangle);
+        session.pointer_down(a::PointF::new(5., 5.), a::Modifiers::NONE, None);
+        session.pointer_move(a::PointF::new(30., 25.), a::Modifiers::NONE, None);
+        session.pointer_up(a::PointF::new(30., 25.), a::Modifiers::NONE);
+        let expected = session.document().clone();
+        let (events, _) = mpsc::channel();
+        let mut view = View::default();
+        let mut checkpoint = |session: &mut a::EditorSession, path: PathBuf, recovery| {
+            let (reply, result) = mpsc::channel();
+            apply(session, &mut view, Command::Checkpoint { path, recovery, reply }, &events).unwrap();
+            result.try_recv().unwrap()
+        };
+        checkpoint(&mut session, path.clone(), false).unwrap();
+        assert_eq!(a::project::load(&path).unwrap(), expected);
+        let bytes = std::fs::read(&path).unwrap();
+        session.delete_selection();
+        assert!(checkpoint(&mut session, path.clone(), false).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        session.undo();
+        assert_eq!(session.document(), &expected, "Failed save must retain the editable session and undo history");
+        // A file in place of the parent gives a deterministic storage failure on every OS.
+        let blocker = directory.path().join("blocked");
+        std::fs::write(&blocker, b"keep me").unwrap();
+        assert!(checkpoint(&mut session, blocker.join("recovery.ssxe"), true).is_err());
+        assert_eq!(session.document(), &expected);
+        let recovery = directory.path().join("recovery.ssxe");
+        checkpoint(&mut session, recovery.clone(), true).unwrap();
+        assert_eq!(a::project::load(&recovery).unwrap(), expected);
+    }
+
+    #[test]
+    fn keyboard_annotation_selection_cycles_and_arrow_nudge_is_undoable() {
+        let mut session = a::EditorSession::from_frame(effects::solid_frame(80, 60, [255; 4])).unwrap();
+        session.set_tool(a::Tool::Rectangle);
+        for x in [5., 40.] {
+            session.pointer_down(a::PointF::new(x, 5.), a::Modifiers::NONE, None);
+            session.pointer_move(a::PointF::new(x + 20., 25.), a::Modifiers::NONE, None);
+            session.pointer_up(a::PointF::new(x + 20., 25.), a::Modifiers::NONE);
+        }
+        let ids: Vec<_> = session.document().objects().iter().map(|o| o.id).collect();
+        session.clear_selection();
+        let (events, _) = mpsc::channel();
+        let mut view = View::default();
+        apply(&mut session, &mut view, Command::CycleSelection(false), &events).unwrap();
+        assert_eq!(session.selection(), &[ids[0]]);
+        apply(&mut session, &mut view, Command::CycleSelection(false), &events).unwrap();
+        assert_eq!(session.selection(), &[ids[1]]);
+        let before = session.document().clone();
+        apply(&mut session, &mut view, Command::Key(a::Key::Right, a::Modifiers::SHIFT), &events).unwrap();
+        assert_ne!(session.document(), &before);
+        session.undo();
+        assert_eq!(session.document(), &before);
+        apply(&mut session, &mut view, Command::CycleSelection(true), &events).unwrap();
+        assert_eq!(session.selection(), &[ids[0]]);
+    }
 
     #[test]
     fn preview_workspace_planner_bounds_8k_effects_without_changing_logical_zoom() {

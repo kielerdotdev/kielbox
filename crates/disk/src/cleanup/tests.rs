@@ -21,6 +21,7 @@ fn options(root: &Path) -> Options {
         roots: vec![root.to_owned()],
         older_than: Duration::from_secs(86400),
         kinds: vec![],
+        allow_ignored_worktree_data: false,
     }
 }
 
@@ -93,10 +94,7 @@ fn cancellation_never_deletes_and_bad_roots_fail() {
     let cancel = CancelToken::new();
     let plan = plan(&options(temp.path()), &cancel).unwrap();
     cancel.cancel();
-    assert_eq!(
-        apply(&plan, &cancel, |_| {}).unwrap_err().kind(),
-        io::ErrorKind::Interrupted
-    );
+    assert!(apply(&plan, &cancel, |_| {}).unwrap().cancelled);
     assert!(modules.exists());
     assert!(super::plan(&options(&temp.path().join("missing")), &CancelToken::new()).is_err());
 }
@@ -158,7 +156,7 @@ fn locked_dirty_and_unpushed_worktrees_are_preserved_even_after_preview() {
     fixture_git(&path, &["worktree", "unlock", "."]);
     fs::write(path.join("untracked"), "precious").unwrap();
     assert!(
-        worktree_safe(&path)
+        worktree_safe(&path, false)
             .unwrap_err()
             .to_string()
             .contains("untracked")
@@ -166,7 +164,7 @@ fn locked_dirty_and_unpushed_worktrees_are_preserved_even_after_preview() {
     fixture_git(&path, &["add", "."]);
     fixture_git(&path, &["commit", "-m", "unpublished work"]);
     assert!(
-        worktree_safe(&path)
+        worktree_safe(&path, false)
             .unwrap_err()
             .to_string()
             .contains("remote-tracking")
@@ -184,7 +182,8 @@ fn primary_repo_and_current_worktree_are_never_removal_targets() {
             Kind::Worktree,
             std::slice::from_ref(&cwd),
             SystemTime::now(),
-            &cancel
+            &cancel,
+            false
         )
         .unwrap_err()
         .to_string()
@@ -225,4 +224,64 @@ fn package_links_do_not_delete_external_content_and_link_roots_are_rejected() {
     let outcome = apply(&plan, &cancel, |_| {}).unwrap();
     assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
     assert!(outside.path().join("precious").exists());
+}
+
+#[test]
+fn cancellation_after_first_removal_retains_ledger_and_preserves_remaining_target() {
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["a", "b"] {
+        let root = temp.path().join(name);
+        fs::create_dir(&root).unwrap();
+        node(&root);
+    }
+    let cancel = CancelToken::new();
+    let plan = plan(&options(temp.path()), &cancel).unwrap();
+    assert_eq!(plan.candidates().len(), 2);
+    let outcome = apply(&plan, &cancel, |_| cancel.cancel()).unwrap();
+    assert!(outcome.cancelled);
+    assert!(outcome.errors.is_empty());
+    assert_eq!(outcome.removed.len(), 1);
+    assert_eq!(outcome.removed[0].path, plan.candidates()[0].path);
+    assert_eq!(outcome.removed[0].bytes, 7);
+    assert!(!plan.candidates()[0].path.exists());
+    assert!(plan.candidates()[1].path.exists());
+}
+
+#[test]
+fn ignored_worktree_data_requires_opt_in_and_is_rechecked_after_preview() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = worktree(temp.path());
+    let cancel = CancelToken::new();
+    let original = plan(&options(temp.path()), &cancel).unwrap();
+    // A repository-local exclude models ignored secrets/data without changing HEAD.
+    let common = git_path(&path, "--git-common-dir").unwrap();
+    fs::write(common.join("info/exclude"), "local-data\n").unwrap();
+    fs::write(path.join("local-data"), "irreplaceable local data").unwrap();
+    age(&path);
+    age(&worktree_admin(&path).unwrap());
+    let protected = plan(&options(temp.path()), &cancel).unwrap();
+    assert!(protected.candidates().is_empty());
+    assert!(
+        protected
+            .skipped
+            .iter()
+            .any(|n| n.reason.contains("ignored data"))
+    );
+    let outcome = apply(&original, &cancel, |_| {}).unwrap();
+    assert!(outcome.removed.is_empty());
+    assert!(outcome.errors[0].reason.contains("ignored data"));
+    assert!(path.join("local-data").exists());
+    let mut opted_in = options(temp.path());
+    opted_in.allow_ignored_worktree_data = true;
+    let approved = plan(&opted_in, &cancel).unwrap();
+    assert_eq!(approved.candidates().len(), 1, "{:?}", approved.skipped);
+    // Opt-in must still preserve dirty tracked content.
+    fs::write(path.join("source"), "modified").unwrap();
+    assert_eq!(apply(&approved, &cancel, |_| {}).unwrap().errors.len(), 1);
+    fixture_git(&path, &["checkout", "--", "source"]);
+    age(&path);
+    age(&worktree_admin(&path).unwrap());
+    let outcome = apply(&approved, &cancel, |_| {}).unwrap();
+    assert_eq!(outcome.removed.len(), 1, "{:?}", outcome.errors);
+    assert!(!path.exists());
 }

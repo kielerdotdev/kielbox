@@ -1,10 +1,10 @@
 //! Application state and Rune views. Media and filesystem jobs run on workers.
+use crate::rune_theme::{self as theme, Btn, icons};
 use crate::{
     library_scan::{LibraryScanner, ScanRequest},
     preferences::Preferences,
     recordings,
 };
-use crate::rune_theme::{self as theme, Btn, icons};
 use rune::{AppHandle, Color, Cx, El, Key, KeyEvent, TextEdit, Tx, col, el, row, text};
 use std::{
     collections::BTreeMap,
@@ -61,6 +61,12 @@ pub enum Page {
     Tools,
     Settings,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    Success,
+    Error,
+}
+
 pub enum JobResult {
     Notice(String),
     Trash(Vec<(PathBuf, PathBuf)>),
@@ -88,12 +94,19 @@ pub struct State {
     pub section: Page,
     /// Library filter: All, Replays, Recordings, Screenshots, Favorites.
     pub filter: usize,
+    pub library_page: usize,
+    pub trash_open: bool,
+    pub recovery: Vec<(PathBuf, PathBuf)>,
+    saved_preferences: Preferences,
     pub file_times: BTreeMap<PathBuf, SystemTime>,
     pub library_width: f32,
     pub settings_tab: usize,
     pub palette: Option<crate::rune_palette::Palette>,
     pub preferences: Preferences,
     pub notice: String,
+    notice_kind: NoticeKind,
+    notice_explicit: String,
+    notice_queue: std::collections::VecDeque<(NoticeKind, String)>,
     pub search: TextEdit,
     pub files: Vec<PathBuf>,
     scanner: Option<LibraryScanner>,
@@ -139,12 +152,19 @@ impl State {
             page: Page::Library,
             section: Page::Library,
             filter: 0,
+            library_page: 0,
+            trash_open: false,
+            recovery: vec![],
+            saved_preferences: preferences.clone(),
             file_times: BTreeMap::new(),
             library_width: 0.0,
             settings_tab: 0,
             palette: None,
             preferences,
             notice: String::new(),
+            notice_kind: NoticeKind::Error,
+            notice_explicit: String::new(),
+            notice_queue: Default::default(),
             search: TextEdit::new(""),
             files: vec![],
             scanner: None,
@@ -191,13 +211,88 @@ impl State {
             });
         }
     }
-    pub fn save_preferences(&mut self) {
-        if self.headless {
-            return;
+    pub fn save_preferences(&mut self) -> bool {
+        let headless = self.headless;
+        self.persist_preferences(|preferences| if headless { Ok(()) } else { preferences.save() })
+    }
+    fn persist_preferences(
+        &mut self,
+        save: impl FnOnce(&Preferences) -> anyhow::Result<()>,
+    ) -> bool {
+        if let Err(error) = save(&self.preferences) {
+            self.preferences = self.saved_preferences.clone();
+            self.notify(
+                NoticeKind::Error,
+                format!("Settings could not be saved; previous settings restored: {error:#}"),
+            );
+            return false;
         }
-        if let Err(e) = self.preferences.save() {
-            self.notice = format!("Settings could not be saved: {e:#}");
+        self.saved_preferences = self.preferences.clone();
+        true
+    }
+    pub fn load_trash(&mut self) {
+        match recordings::trash_recovery(&self.preferences.folder) {
+            Ok(recovery) => {
+                self.recovery = recovery.moves;
+                if !recovery.warnings.is_empty() {
+                    self.notify(
+                        NoticeKind::Error,
+                        format!(
+                            "Some Trash entries need manual recovery: {}",
+                            recovery.warnings.join("; ")
+                        ),
+                    );
+                }
+            }
+            Err(error) => self.notice = format!("Could not read Trash: {error:#}"),
         }
+    }
+    pub fn request_quit(&mut self, tx: &mut Tx) {
+        if !self.prepare_shutdown() {
+            let reason = self
+                .editor
+                .annotation
+                .as_ref()
+                .map(|a| a.message.as_str())
+                .filter(|message| !message.is_empty())
+                .unwrap_or(&self.editor.message);
+            self.notify(
+                NoticeKind::Error,
+                if reason.is_empty() {
+                    "Finish or Cancel capture, stop recording, and finish active jobs before quitting.".to_owned()
+                } else {
+                    reason.to_owned()
+                },
+            );
+            if let Some(handle) = &self.handle {
+                handle.open();
+            }
+        } else {
+            tx.quit();
+        }
+    }
+    pub fn prepare_shutdown(&mut self) -> bool {
+        if !self.editor.prepare_to_leave() {
+            return false;
+        }
+        let mut blocked =
+            !self.jobs.is_empty() || self.editor.playing() || crate::rune_shot::shutdown_blocked();
+        #[cfg(windows)]
+        {
+            blocked |= self.capture.status().0 != Status::Off;
+        }
+        !blocked
+    }
+    pub fn shutdown_blocked(&self) -> bool {
+        let mut blocked = !self.jobs.is_empty()
+            || self.editor.playing()
+            || self.editor.annotation.as_ref().is_some_and(|a| a.dirty())
+            || crate::rune_shot::shutdown_blocked();
+        #[cfg(windows)]
+        {
+            blocked |= self.capture.status().0 != Status::Off;
+        }
+        blocked
     }
     pub fn job(&mut self, work: impl FnOnce() -> Result<JobResult, String> + Send + 'static) {
         let (tx, rx) = mpsc::sync_channel(1);
@@ -230,6 +325,10 @@ impl State {
         self.section = Page::Tools;
     }
     pub fn open(&mut self, path: PathBuf) {
+        if !self.editor.prepare_to_leave() {
+            self.page = Page::Editor;
+            return;
+        }
         self.page = Page::Editor;
         self.editor.open(path, self.wake.clone());
     }
@@ -237,9 +336,33 @@ impl State {
     pub(crate) fn fixture_trash(&mut self) {
         self.removed = vec![(PathBuf::from("trashed.mkv"), PathBuf::from("trashed.mkv"))];
     }
+    /// Legacy producers write `notice` directly; those outcomes remain persistent
+    /// until explicitly dismissed. Only declared success outcomes auto-dismiss.
+    pub fn notify(&mut self, kind: NoticeKind, message: impl Into<String>) {
+        let message = message.into();
+        if !self.notice.is_empty() && self.notice != message {
+            self.notice_queue.push_back((kind, message));
+        } else {
+            self.notice = message.clone();
+            self.notice_explicit = message;
+            self.notice_kind = kind;
+        }
+    }
     pub fn dismiss_notice(&mut self) {
+        self.notice_seen.clear();
         self.notice.clear();
-        self.removed.clear();
+        if let Some((kind, message)) = self.notice_queue.pop_front() {
+            self.notice = message.clone();
+            self.notice_explicit = message;
+            self.notice_kind = kind;
+        }
+    }
+    fn notice_kind(&self) -> NoticeKind {
+        if self.notice == self.notice_explicit {
+            self.notice_kind
+        } else {
+            NoticeKind::Error
+        }
     }
     pub fn undo_trash(&mut self) {
         let mut moved = std::mem::take(&mut self.removed);
@@ -258,6 +381,19 @@ impl State {
     /// Success toasts leave by themselves; failures stay until dismissed.
     fn expire_notice(&mut self) -> bool {
         if self.notice != self.notice_seen {
+            if !self.notice_seen.is_empty()
+                && self.notice_kind == NoticeKind::Error
+                && !self
+                    .notice_queue
+                    .iter()
+                    .any(|(_, message)| message == &self.notice_seen)
+            {
+                self.notice_queue
+                    .push_front((NoticeKind::Error, self.notice_seen.clone()));
+            }
+            if self.notice != self.notice_explicit {
+                self.notice_kind = NoticeKind::Error;
+            }
             self.notice_seen = self.notice.clone();
             self.notice_since = (!self.notice.is_empty()).then(std::time::Instant::now);
             return false;
@@ -266,11 +402,10 @@ impl State {
             return false;
         };
         let keep = if self.removed.is_empty() { 5 } else { 10 };
-        if notice_failed(&self.notice) || since.elapsed() < Duration::from_secs(keep) {
+        if self.notice_kind() == NoticeKind::Error || since.elapsed() < Duration::from_secs(keep) {
             return false;
         }
         self.dismiss_notice();
-        self.notice_seen.clear();
         self.notice_since = None;
         true
     }
@@ -300,6 +435,12 @@ pub fn setup(s: &mut State, wake: rune::Waker) {
     if s.headless {
         return;
     }
+    #[cfg(windows)]
+    if crate::installation::current().is_some_and(|i| i.first_run) {
+        s.go(Page::Settings);
+        s.settings_tab = 3;
+        s.notice = "Welcome to Kielbox. Choose Use existing data to open an earlier workspace on your next launch, or keep the current data folder and start capturing.".into();
+    }
     s.scanner = Some(LibraryScanner::new());
     s.refresh();
     if let Some(notice) = crate::preferences::take_startup_notice() {
@@ -326,9 +467,12 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         if let Some(mut result) = scanner.poll() {
             s.file_times.append(&mut result.modified);
             if let Some(e) = result.apply(&mut s.files) {
-                s.notice = format!("Could not scan {}: {:?}", e.root.display(), e.kind);
+                s.notify(
+                    NoticeKind::Error,
+                    format!("Could not scan {}: {:?}", e.root.display(), e.kind),
+                );
             }
-            s.thumbs.sync(&s.files, &s.wake);
+
             changed = true;
         }
     }
@@ -347,15 +491,23 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     for result in completed {
         changed = true;
         match result {
-            Ok(JobResult::Notice(v)) => s.notice = v,
+            Ok(JobResult::Notice(v)) => s.notify(NoticeKind::Success, v),
             Ok(JobResult::Trash(moved)) => {
                 s.removed = moved;
-                s.notice = "Moved to capture trash.".into();
+                s.notify(NoticeKind::Success, "Moved to capture trash.");
                 s.refresh();
             }
             Ok(JobResult::Restored(remaining, message)) => {
                 s.removed = remaining;
-                s.notice = message;
+                s.load_trash();
+                s.notify(
+                    if s.removed.is_empty() {
+                        NoticeKind::Success
+                    } else {
+                        NoticeKind::Error
+                    },
+                    message,
+                );
                 s.refresh();
             }
             Ok(JobResult::Capture(path)) => {
@@ -364,13 +516,20 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
             Ok(JobResult::Saved) => {
                 s.refresh();
-                s.notice = "Screenshot saved to the library.".into();
+                s.notify(NoticeKind::Success, "Screenshot saved to the library.");
             }
             Ok(JobResult::Quiet) => {}
-            Err(e) => s.notice = e,
+            Err(e) => s.notify(NoticeKind::Error, e),
         }
     }
     changed |= s.editor.poll();
+    let visible: Vec<_> = library_matches(s)
+        .into_iter()
+        .skip(library_offset(s))
+        .take(LIBRARY_PAGE_SIZE)
+        .map(|(_, p)| p.clone())
+        .collect();
+    s.thumbs.sync(&visible, &s.wake);
     changed |= s.thumbs.poll();
     changed |= s.expire_notice();
     changed |= s.tools.poll();
@@ -378,12 +537,14 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     crate::rune_annotation::flush_save(s);
     #[cfg(windows)]
     {
-        changed |= s.capture.poll(&mut s.notice);
+        let mut capture_notices = Vec::new();
+        changed |= s.capture.poll(&mut capture_notices);
+        for (kind, message) in capture_notices {
+            s.notify(kind, message);
+        }
+        let update_safe = !s.shutdown_blocked();
         if let Some(updates) = &mut s.updates {
-            changed |= updates.poll(
-                std::time::Instant::now(),
-                !s.capture.active && !s.editor.playing(),
-            );
+            changed |= updates.poll(std::time::Instant::now(), update_safe);
         }
         let events: Vec<_> = s
             .hotkeys
@@ -405,7 +566,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                 Event::SaveReplay => s.capture.save_replay(&s.preferences, &mut s.notice),
                 Event::ToggleQuickRecord => s.capture.quick(&s.preferences, &mut s.notice),
                 Event::Screenshot(target) => crate::rune_tools::screenshot(s, target),
-                Event::Notice(v) => s.notice = v,
+                Event::Notice(v) => s.notify(NoticeKind::Error, v),
             }
         }
         let events: Vec<_> = s
@@ -416,7 +577,17 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
         for event in events {
             changed = true;
             match event.as_str() {
-                "quit" => tx.quit(),
+                "quit" => s.request_quit(tx),
+                "library" | "settings" => {
+                    s.go(if event == "library" {
+                        Page::Library
+                    } else {
+                        Page::Settings
+                    });
+                    if let Some(handle) = &s.handle {
+                        handle.open();
+                    }
+                }
                 "open" | "show" => {
                     if let Some(h) = &s.handle {
                         h.open();
@@ -442,6 +613,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
         if let Some(tray) = &mut s.tray {
+            tray.update_quick_state(s.capture.quick_tray_state(), &s.preferences.hotkeys[6]);
             let _ = tray.update(s.capture.tray_state(), &s.preferences.hotkeys);
         }
     }
@@ -515,25 +687,16 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
         // Floats over the page's bottom-right corner; it never takes layout space.
         card = card.child(notice(s).pin(None, None, Some(24.0), Some(16.0)));
     }
-    let mut root = col()
-        .w_full()
-        .h_full()
-        .fill(theme::c(theme::DEEP))
-        .child(
-            row()
-                .w_full()
+    let mut root = col().w_full().h_full().fill(theme::c(theme::DEEP)).child(
+        row().w_full().grow(1.0).min_h(0.0).child(rail(s)).child(
+            col()
                 .grow(1.0)
-                .min_h(0.0)
-                .child(rail(s))
-                .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .h_full()
-                        .child(titlebar(s, trailing))
-                        .child(card),
-                ),
-        );
+                .min_w(0.0)
+                .h_full()
+                .child(titlebar(s, trailing))
+                .child(card),
+        ),
+    );
     if let Some(palette) = crate::rune_palette::view(s) {
         root = root.child(palette);
     }
@@ -580,12 +743,11 @@ fn rail(s: &State) -> El {
         .gap(4.0)
         .items_center()
         .window_drag()
-        .child(
-            el().h(30.0)
-                .mb(10.0)
-                .center()
-                .child(theme::glyph(&icons::LOGO, 22.0, theme::c(theme::T1))),
-        );
+        .child(el().h(30.0).mb(10.0).center().child(theme::glyph(
+            &icons::LOGO,
+            22.0,
+            theme::c(theme::T1),
+        )));
     for (page, key, i, title) in [
         (Page::Library, "library", &icons::LIBRARY, "Library"),
         (Page::Capture, "capture", &icons::CAPTURE, "Capture"),
@@ -793,15 +955,8 @@ fn titlebar(s: &State, trailing: f32) -> El {
     bar
 }
 
-fn notice_failed(notice: &str) -> bool {
-    let lower = notice.to_lowercase();
-    ["could not", "error", "failed", "unavailable", "unexpected", "incomplete"]
-        .iter()
-        .any(|w| lower.contains(w))
-}
-
 fn notice(s: &State) -> El {
-    let failed = notice_failed(&s.notice);
+    let failed = s.notice_kind() == NoticeKind::Error;
     let mut toast = theme::floating(
         row()
             .key("notice")
@@ -815,7 +970,11 @@ fn notice(s: &State) -> El {
             .center_y(),
     )
     .child(theme::glyph(
-        if failed { &icons::WARNING } else { &icons::CHECK },
+        if failed {
+            &icons::WARNING
+        } else {
+            &icons::CHECK
+        },
         16.0,
         theme::c(if failed { theme::REC_T } else { theme::ACCENT }),
     ))
@@ -879,16 +1038,44 @@ fn shown(s: &State, path: &std::path::Path) -> bool {
     }
 }
 
+const LIBRARY_PAGE_SIZE: usize = 100;
+fn library_matches(s: &State) -> Vec<(usize, &PathBuf)> {
+    let query = s.search.text.to_lowercase();
+    s.files
+        .iter()
+        .enumerate()
+        .filter(|(_, path)| {
+            shown(s, path)
+                && (query.is_empty()
+                    || clip_title(s, path).to_lowercase().contains(&query)
+                    || path.to_string_lossy().to_lowercase().contains(&query))
+        })
+        .collect()
+}
+fn library_offset(s: &State) -> usize {
+    s.library_page
+        .min(library_matches(s).len().saturating_sub(1) / LIBRARY_PAGE_SIZE)
+        * LIBRARY_PAGE_SIZE
+}
 fn library(s: &State) -> El {
+    if s.trash_open {
+        return trash_view(s);
+    }
     let header = row()
         .w_full()
         .gap(28.0)
         .center_y()
         .flex_wrap()
         .child(theme::h1("Library"))
-        .child(theme::chips("library-filter", &FILTERS, s.filter, |s, i| {
-            s.filter = i
-        }))
+        .child(theme::chips(
+            "library-filter",
+            &FILTERS,
+            s.filter,
+            |s, i| {
+                s.filter = i;
+                s.library_page = 0;
+            },
+        ))
         .child(theme::spacer())
         .child(
             row()
@@ -916,28 +1103,21 @@ fn library(s: &State) -> El {
                         .build(),
                 ),
         );
-    let query = s.search.text.to_lowercase();
+    let matches = library_matches(s);
+    let total = matches.len();
+    let offset = library_offset(s);
     let now = recordings::local_time(SystemTime::now());
     let yesterday = recordings::local_time(SystemTime::now() - Duration::from_secs(86_400));
     let columns = (((s.library_width + 16.0) / (280.0 + 16.0)).floor() as usize).max(1);
     let mut groups: Vec<(String, Vec<El>)> = Vec::new();
     let mut count = 0;
-    for (i, path) in s.files.iter().enumerate() {
-        if count == 500 {
-            break;
-        }
-        if !shown(s, path) {
-            continue;
-        }
+    for (i, path) in matches.into_iter().skip(offset).take(LIBRARY_PAGE_SIZE) {
         let title = clip_title(s, path);
-        if !query.is_empty()
-            && !title.to_lowercase().contains(&query)
-            && !path.to_string_lossy().to_lowercase().contains(&query)
-        {
-            continue;
-        }
         count += 1;
-        let when = s.file_times.get(path).and_then(|t| recordings::local_time(*t));
+        let when = s
+            .file_times
+            .get(path)
+            .and_then(|t| recordings::local_time(*t));
         let group = match when {
             Some(t) if Some(t.date()) == now.map(|n| n.date()) => "Today".to_string(),
             Some(t) if Some(t.date()) == yesterday.map(|n| n.date()) => "Yesterday".to_string(),
@@ -989,7 +1169,41 @@ fn library(s: &State) -> El {
     if count == 0 {
         body = body.child(empty_library(s));
     }
-    page().child(header).child(scroll(body))
+    page()
+        .child(header)
+        .child(
+            row()
+                .gap(12.0)
+                .child(theme::small(format!(
+                    "{}–{} of {total} matches",
+                    if total == 0 { 0 } else { offset + 1 },
+                    offset + count
+                )))
+                .child(
+                    Btn::new("library-previous", "Previous")
+                        .disabled(offset == 0)
+                        .on(|s, _| {
+                            s.library_page = library_offset(s) / LIBRARY_PAGE_SIZE;
+                            s.library_page = s.library_page.saturating_sub(1);
+                        })
+                        .build(),
+                )
+                .child(
+                    Btn::new("library-next", "Next")
+                        .disabled(offset + count >= total)
+                        .on(|s, _| s.library_page = library_offset(s) / LIBRARY_PAGE_SIZE + 1)
+                        .build(),
+                )
+                .child(
+                    Btn::new("library-trash", "Trash")
+                        .on(|s, _| {
+                            s.load_trash();
+                            s.trash_open = true;
+                        })
+                        .build(),
+                ),
+        )
+        .child(scroll(body))
 }
 
 struct TextStyleBold;
@@ -1099,6 +1313,11 @@ fn clip_card(s: &State, i: usize, path: &std::path::Path, title: String, stamp: 
                         .h(24.0)
                         .on(move |s, _| {
                             let path = remove.clone();
+                            // Close/checkpoint the selected document before moving its recovery.
+                            if s.editor.path.as_ref() == Some(&path) && !s.editor.close() {
+                                s.page = Page::Editor;
+                                return;
+                            }
                             let root = s.preferences.folder.clone();
                             s.job(move || {
                                 recordings::trash(&[path], &root)
@@ -1227,7 +1446,9 @@ fn settings_capture(s: &State) -> El {
             .gap(7.0)
             .center_y()
             .child(theme::dot(7.0, theme::c(theme::ACCENT)))
-            .child(theme::small("Capture running: changes apply the next time it starts"))
+            .child(theme::small(
+                "Capture running: changes apply the next time it starts",
+            ))
     });
     let seg = |key: &str, name: &str, options: Vec<(String, bool)>, f: fn(&mut State, usize)| {
         theme::segmented(key, name, options, move |s, i| {
@@ -1264,10 +1485,7 @@ fn settings_capture(s: &State) -> El {
             seg(
                 "fps",
                 "Frame rate",
-                rates
-                    .iter()
-                    .map(|r| (r.to_string(), p.fps == *r))
-                    .collect(),
+                rates.iter().map(|r| (r.to_string(), p.fps == *r)).collect(),
                 |s, i| s.preferences.fps = [30, 60, 120][i],
             ),
             false,
@@ -1341,11 +1559,29 @@ fn pref_switch(
     flip: fn(&mut crate::preferences::Preferences),
 ) -> El {
     theme::switch(key, title, on, move |s, _| {
+        if matches!(key, "system-audio" | "microphone" | "clean-mic") && recorder_busy(s) {
+            s.notify(
+                NoticeKind::Error,
+                "Stop capture before changing audio settings.",
+            );
+            return;
+        }
         flip(&mut s.preferences);
         s.save_preferences();
     })
 }
 
+fn recorder_busy(s: &State) -> bool {
+    #[cfg(windows)]
+    {
+        s.capture.status().0 != Status::Off
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = s;
+        false
+    }
+}
 fn settings_audio(s: &State) -> El {
     let p = &s.preferences;
     col()
@@ -1356,7 +1592,8 @@ fn settings_audio(s: &State) -> El {
             Some("Saved as its own track"),
             pref_switch("system-audio", "Desktop audio", p.system_audio, |p| {
                 p.system_audio = !p.system_audio
-            }),
+            })
+            .disabled(recorder_busy(s)),
             false,
         ))
         .child(theme::setting(
@@ -1364,7 +1601,8 @@ fn settings_audio(s: &State) -> El {
             Some("Saved as its own track"),
             pref_switch("microphone", "Microphone", p.microphone, |p| {
                 p.microphone = !p.microphone
-            }),
+            })
+            .disabled(recorder_busy(s)),
             false,
         ))
         .child(theme::setting(
@@ -1375,9 +1613,67 @@ fn settings_audio(s: &State) -> El {
                 "Clean up microphone",
                 p.clean_microphone,
                 |p| p.clean_microphone = !p.clean_microphone,
-            ),
+            )
+            .disabled(recorder_busy(s)),
             true,
         ))
+}
+
+fn shortcut_status(s: &State, i: usize) -> Option<String> {
+    if s.hotkey_fields[i].text != s.preferences.hotkeys[i] {
+        return Some("Not applied".into());
+    }
+    #[cfg(windows)]
+    {
+        return Some(
+            s.hotkeys
+                .as_ref()
+                .and_then(|h| h.statuses.get(i))
+                .map(|v| v.detail.clone())
+                .unwrap_or_else(|| "Global shortcuts unavailable".into()),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        Some("Global shortcuts require Windows".into())
+    }
+}
+fn trash_view(s: &State) -> El {
+    let mut body = col().gap(12.0).child(theme::small(format!(
+        "{} recoverable files. Existing files are never replaced.",
+        s.recovery.len()
+    )));
+    for (i, (source, _)) in s.recovery.iter().enumerate() {
+        body = body.child(
+            row()
+                .gap(12.0)
+                .child(theme::small(source.display().to_string()).grow(1.0))
+                .child(
+                    Btn::new(format!("restore-{i}"), "Restore")
+                        .on(move |s, _| {
+                            let Some(pair) = s.recovery.get(i).cloned() else {
+                                return;
+                            };
+                            s.job(move || {
+                                let mut moves = vec![pair];
+                                recordings::restore(&mut moves).map_err(|e| {
+                                    format!("Restore failed; file remains in Trash: {e:#}")
+                                })?;
+                                Ok(JobResult::Restored(moves, "Restored capture.".into()))
+                            });
+                        })
+                        .build(),
+                ),
+        );
+    }
+    page()
+        .child(heading("Trash"))
+        .child(
+            Btn::new("trash-back", "Back to Library")
+                .on(|s, _| s.trash_open = false)
+                .build(),
+        )
+        .child(scroll(body))
 }
 
 fn settings_shortcuts(s: &State) -> El {
@@ -1393,14 +1689,23 @@ fn settings_shortcuts(s: &State) -> El {
             }
         })
         .build();
-    let mut section = col().w_full().child(settings_header("Shortcuts", Some(restore)));
+    let mut section = col()
+        .w_full()
+        .child(settings_header("Shortcuts", Some(restore)));
     for (i, edit) in s.hotkey_fields.iter().enumerate() {
         section = section.child(theme::setting(
             SHORTCUTS.get(i).copied().unwrap_or("Shortcut"),
-            None,
-            theme::field(&format!("hotkey-{i}"), "Not set", edit, move |s| {
-                &mut s.hotkey_fields[i]
-            })
+            shortcut_status(s, i).as_deref(),
+            theme::field_shell(
+                None,
+                theme::input(
+                    &format!("hotkey-{i}"),
+                    SHORTCUTS.get(i).copied().unwrap_or("Shortcut"),
+                    edit,
+                    move |s| &mut s.hotkey_fields[i],
+                )
+                .placeholder("Not set", theme::c(theme::T3)),
+            )
             .w(180.0),
             false,
         ));
@@ -1420,16 +1725,57 @@ fn settings_shortcuts(s: &State) -> El {
                         }
                         s.hotkeys.take();
                         match crate::hotkeys::Hotkeys::start_with(&bindings) {
-                            Ok(keys) => s.hotkeys = Some(keys),
+                            Ok(keys) => {
+                                let failures: Vec<_> = keys
+                                    .statuses
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, status)| {
+                                        !status.registered && status.detail != "Disabled"
+                                    })
+                                    .map(|(i, status)| {
+                                        format!("{}: {}", SHORTCUTS[i], status.detail)
+                                    })
+                                    .collect();
+                                if !failures.is_empty() {
+                                    drop(keys);
+                                    s.hotkeys =
+                                        crate::hotkeys::Hotkeys::start_with(&s.preferences.hotkeys)
+                                            .ok();
+                                    s.notify(
+                                        NoticeKind::Error,
+                                        format!(
+                                            "Shortcuts were not applied. {}",
+                                            failures.join("; ")
+                                        ),
+                                    );
+                                    return;
+                                }
+                                s.hotkeys = Some(keys);
+                            }
                             Err(e) => {
-                                s.notice = e.to_string();
+                                s.hotkeys =
+                                    crate::hotkeys::Hotkeys::start_with(&s.preferences.hotkeys)
+                                        .ok();
+                                s.notify(
+                                    NoticeKind::Error,
+                                    format!("Shortcuts were not changed: {e}"),
+                                );
                                 return;
                             }
                         }
                     }
                     s.preferences.hotkeys = bindings;
-                    s.save_preferences();
-                    s.notice = "Shortcuts applied.".into();
+                    if s.save_preferences() {
+                        s.notify(NoticeKind::Success, "Shortcuts applied.");
+                    } else {
+                        #[cfg(windows)]
+                        {
+                            s.hotkeys.take();
+                            s.hotkeys =
+                                crate::hotkeys::Hotkeys::start_with(&s.preferences.hotkeys).ok();
+                        }
+                    }
                 })
                 .build(),
         ),
@@ -1437,7 +1783,7 @@ fn settings_shortcuts(s: &State) -> El {
 }
 
 fn settings_storage(s: &State) -> El {
-    col()
+    let mut content = col()
         .w_full()
         .child(settings_header("Storage", None))
         .child(theme::setting(
@@ -1450,9 +1796,10 @@ fn settings_storage(s: &State) -> El {
                         |s: &mut State, result, _| match result {
                             Ok(Some(path)) => {
                                 s.preferences.folder = path.clone();
-                                recordings::set_root(path);
-                                s.save_preferences();
-                                s.refresh();
+                                if s.save_preferences() {
+                                    recordings::set_root(path);
+                                    s.refresh();
+                                }
                             }
                             Err(e) => s.notice = e.to_string(),
                             _ => {}
@@ -1470,7 +1817,28 @@ fn settings_storage(s: &State) -> El {
                 .on(|s, _| s.go_disk())
                 .build(),
             true,
-        ))
+        ));
+    #[cfg(windows)]
+    if let Some(installation) = crate::installation::current() {
+        content = content.child(theme::setting("Data workspace", Some(&installation.working_directory.display().to_string()),
+            Btn::new("use-existing-data", "Use existing data…")
+                .disabled(installation.configuration_path.is_none())
+                .on(|_, tx| tx.open_folder(rune::FileDialogOptions::default(), |s: &mut State, result, _| {
+                    match result {
+                        Ok(Some(path)) => {
+                            if let Some(installation) = crate::installation::current() {
+                                match installation.remember_working_directory(&path) {
+                                    Ok(path) => s.notify(NoticeKind::Success, format!("Data workspace selected: {}. Quit safely and reopen Kielbox to activate it. Existing files stay in place.", path.display())),
+                                    Err(error) => s.notify(NoticeKind::Error, error),
+                                }
+                            }
+                        }
+                        Err(error) => s.notify(NoticeKind::Error, error.to_string()),
+                        _ => {},
+                    }
+                })).build(), true));
+    }
+    content
 }
 
 fn settings_app(s: &State) -> El {
@@ -1529,9 +1897,9 @@ fn settings_app(s: &State) -> El {
                             .primary()
                             .disabled(!updates.ready())
                             .on(|s, tx| {
-                                if s.capture.active || s.editor.playing() || !s.jobs.is_empty() {
+                                if !s.prepare_shutdown() {
                                     s.notice =
-                                        "Finish recording and active jobs before updating.".into();
+                                        "Finish or Cancel capture, stop recording, and finish active jobs before updating.".into();
                                     return;
                                 }
                                 if let Some(update) =
@@ -1610,7 +1978,10 @@ mod rune_tests {
             assert!(rt.state.page == page, "{key} did not open its page");
         }
         click(&mut rt, "nav-status");
-        assert!(rt.state.page == Page::Capture, "The capture light opens Capture");
+        assert!(
+            rt.state.page == Page::Capture,
+            "The capture light opens Capture"
+        );
         assert!(
             rt.state.scanner.is_none(),
             "Headless UI must not scan personal captures"
@@ -1672,5 +2043,52 @@ mod rune_tests {
         let before = rt.state.preferences.microphone;
         click(&mut rt, "microphone");
         assert_ne!(rt.state.preferences.microphone, before);
+    }
+    #[test]
+    fn library_paging_reaches_filtered_old_files_and_clamps_page() {
+        let mut state = State::with_headless(true);
+        state.files = (0..701)
+            .map(|i| PathBuf::from(format!("recording-{i}.mp4")))
+            .collect();
+        state.library_page = 6;
+        assert_eq!(library_offset(&state), 600);
+        state.search = TextEdit::new("recording-700");
+        assert_eq!(library_matches(&state).len(), 1);
+        assert_eq!(library_offset(&state), 0);
+        assert_eq!(
+            library_matches(&state)[0].1,
+            &PathBuf::from("recording-700.mp4")
+        );
+    }
+    #[test]
+    fn notices_use_explicit_outcomes_and_retain_queued_errors() {
+        let mut state = State::with_headless(true);
+        state.notify(
+            NoticeKind::Error,
+            "Permission denied. Choose another folder.",
+        );
+        state.notify(NoticeKind::Success, "Saved");
+        assert!(state.notice_kind() == NoticeKind::Error);
+        assert_eq!(state.notice_queue.len(), 1);
+        state.dismiss_notice();
+        assert_eq!(state.notice, "Saved");
+        assert!(state.notice_kind() == NoticeKind::Success);
+        state.notice = "Disk is full".into();
+        assert!(state.notice_kind() == NoticeKind::Error);
+    }
+    #[test]
+    fn failed_preference_write_rolls_back_live_snapshot_and_retains_error() {
+        let mut state = State::with_headless(true);
+        let folder = state.preferences.folder.clone();
+        let microphone = state.preferences.microphone;
+        state.preferences.folder = PathBuf::from("another-folder");
+        state.preferences.microphone = !microphone;
+        assert!(!state.persist_preferences(|_| anyhow::bail!("Disk full")));
+        assert_eq!(state.preferences.folder, folder);
+        assert_eq!(state.preferences.microphone, microphone);
+        assert!(state.notice_kind() == NoticeKind::Error);
+        state.notify(NoticeKind::Success, "Unrelated task finished");
+        assert!(state.notice.contains("Disk full"));
+        assert_eq!(state.notice_queue.len(), 1);
     }
 }

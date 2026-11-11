@@ -107,8 +107,7 @@ impl Drop for SaveWorker {
 }
 impl State {
     pub fn open(&mut self, path: PathBuf, wake: rune::Waker) {
-        if self.editor.is_some() && self.save_revision != self.saved_revision {
-            self.message="Wait for edits to finish saving before opening another clip. If saving failed, use Retry save.".into();
+        if !self.prepare_to_leave() {
             return;
         }
         self.stop();
@@ -127,7 +126,11 @@ impl State {
             .spawn(move || {
                 let result = (|| -> anyhow::Result<Opened> {
                     let loaded = if recordings::is_image(&path) {
-                        let source = if path.extension().is_some_and(|e| e == "ssxe") {
+                        let recovery = image_recovery_path(&path);
+                        let recovered = recovery.exists();
+                        let source = if recovered {
+                            toolkit::image_editor::Source::Project(toolkit::annotation::project::load(&recovery)?)
+                        } else if path.extension().is_some_and(|e| e == "ssxe") {
                             toolkit::image_editor::Source::Project(
                                 toolkit::annotation::project::load(&path)?,
                             )
@@ -136,10 +139,10 @@ impl State {
                                 image::open(&path)?.into_rgba8(),
                             ))
                         };
-                        Loaded::Image(crate::rune_annotation::Annotation::new(
-                            source,
-                            wake.clone(),
-                        )?)
+                        let mut annotation = crate::rune_annotation::Annotation::new(source, wake.clone())?;
+                        annotation.set_recovery_path(recovery);
+                        if recovered { annotation.mark_recovered(); annotation.message = "Restored editable recovery. Original pixels are retained; export PNG for flattened sharing.".into(); }
+                        Loaded::Image(annotation)
                     } else {
                         let saved = recordings::edit_path_for_open(&path);
                         let mut editor = if saved.exists() {
@@ -382,7 +385,10 @@ impl State {
             Key::Backspace | Key::Delete => self.delete(),
             Key::Left => self.seek(self.position.saturating_sub(1)),
             Key::Right => self.seek(self.position + 1),
-            Key::Command('z') => self.undo(false),
+            Key::Command('z') => self.undo(event.mods.shift),
+            Key::Command('y') => self.undo(true),
+            Key::Home => self.seek(0),
+            Key::End => self.seek(u64::MAX),
             _ => return false,
         }
         true
@@ -502,12 +508,10 @@ impl State {
             if let Some(result) = scrub.frame() {
                 changed = true;
                 match result {
-                    Ok(f) => {
-                        match self.pixels(f.width, f.height, f.bgra, true) {
-                            Ok(()) => self.frames += 1,
-                            Err(e) => self.message = e,
-                        }
-                    }
+                    Ok(f) => match self.pixels(f.width, f.height, f.bgra, true) {
+                        Ok(()) => self.frames += 1,
+                        Err(e) => self.message = e,
+                    },
                     Err(e) => self.message = e,
                 }
             }
@@ -548,14 +552,28 @@ impl Drop for State {
     }
 }
 impl State {
-    /// Close the open clip. Refused while edits are unsaved or an export runs.
-    pub fn close(&mut self) -> bool {
+    /// Shared gate for close, replacement and application quit. On false keep the
+    /// window/editor alive, poll normally, and show editor/annotation messages.
+    /// Image checkpoints are asynchronous; the user can retry after acknowledgement.
+    pub fn prepare_to_leave(&mut self) -> bool {
+        if let Some(a) = &mut self.annotation {
+            return a.prepare_to_leave();
+        }
         if self.export.is_some() {
             self.message = "Cancel the export before closing this clip.".into();
             return false;
         }
         if self.editor.is_some() && self.save_revision != self.saved_revision {
-            self.message = "Wait for edits to finish saving before closing. If saving failed, use Retry save.".into();
+            self.message =
+                "Wait for edits to finish saving before closing. If saving failed, use Retry save."
+                    .into();
+            return false;
+        }
+        true
+    }
+    /// Close the open clip only after its editable work is durable.
+    pub fn close(&mut self) -> bool {
+        if !self.prepare_to_leave() {
             return false;
         }
         self.stop();
@@ -570,6 +588,8 @@ impl State {
         true
     }
 }
+
+use crate::recordings::image_recovery_path;
 
 fn clock(seconds: f64) -> String {
     let s = seconds.max(0.0);
@@ -590,7 +610,7 @@ fn tick(length: f64, step: u32) -> String {
 }
 
 /// A trim grip straddling a piece edge at `x`: drag it to move that edge.
-fn trim_grip(id: core::Id, left: bool, x: f32) -> El {
+fn trim_grip(id: core::Id, left: bool, x: f32, value: i64, min: i64, max: i64) -> El {
     const W: f32 = 14.0;
     el().key(if left {
         "trim-grip-start"
@@ -598,7 +618,31 @@ fn trim_grip(id: core::Id, left: bool, x: f32) -> El {
         "trim-grip-end"
     })
     .role("slider")
-    .label(if left { "Trim start" } else { "Trim end" })
+    .label(if left {
+        "Trim start. Left and right adjust one frame."
+    } else {
+        "Trim end. Left and right adjust one frame."
+    })
+    .focusable(true)
+    .range_value(value as f64, min as f64, max as f64)
+    .on_key(move |s: &mut AppState, event, _| {
+        let step = if event.mods.shift { 10 } else { 1 };
+        let delta = match event.key {
+            Key::Left => -step,
+            Key::Right => step,
+            _ => return false,
+        };
+        if let Some(piece) = s
+            .editor
+            .editor
+            .as_ref()
+            .and_then(|e| core::pieces(&e.project).into_iter().find(|p| p.id == id))
+        {
+            let at = if left { piece.start } else { piece.end() } as i64;
+            s.editor.trim(id, left, at + delta);
+        }
+        true
+    })
     .w(W)
     .h(STRIP_H)
     .absolute(x - W / 2.0, 0.0)
@@ -723,17 +767,15 @@ pub fn view(s: &AppState) -> El {
             );
     }
     if e.export.is_some() {
-        bar = bar
-            .child(theme::small("Exporting…"))
-            .child(
-                Btn::new("cancel-export", "Cancel export")
-                    .on(|s, _| {
-                        if let Some((p, _)) = &s.editor.export {
-                            p.cancel.store(true, Ordering::Release);
-                        }
-                    })
-                    .build(),
-            );
+        bar = bar.child(theme::small("Exporting…")).child(
+            Btn::new("cancel-export", "Cancel export")
+                .on(|s, _| {
+                    if let Some((p, _)) = &s.editor.export {
+                        p.cancel.store(true, Ordering::Release);
+                    }
+                })
+                .build(),
+        );
     } else {
         bar = bar.child(
             Btn::new("editor-export", "Export")
@@ -756,12 +798,7 @@ pub fn view(s: &AppState) -> El {
                 .build(),
         );
     }
-    let mut main = col()
-        .grow(1.0)
-        .min_h(0.0)
-        .px(24.0)
-        .pb(18.0)
-        .gap(14.0);
+    let mut main = col().grow(1.0).min_h(0.0).px(24.0).pb(18.0).gap(14.0);
     let mut preview = el()
         .key("media-preview")
         .grow(1.0)
@@ -845,8 +882,33 @@ pub fn view(s: &AppState) -> El {
         let mut strip = el()
             .key("seek")
             .role("slider")
-            .label("Seek")
-            .range_value(position as f64, 0.0, duration as f64)
+            .label("Seek. Arrow keys move one frame; Home and End jump to the ends.")
+            .focusable(true)
+            .on_key(|s: &mut AppState, event, _| {
+                match event.key {
+                    Key::Left => {
+                        s.editor
+                            .seek(s.editor.position.saturating_sub(if event.mods.shift {
+                                10
+                            } else {
+                                1
+                            }))
+                    }
+                    Key::Right => {
+                        s.editor
+                            .seek(s.editor.position.saturating_add(if event.mods.shift {
+                                10
+                            } else {
+                                1
+                            }))
+                    }
+                    Key::Home => s.editor.seek(0),
+                    Key::End => s.editor.seek(u64::MAX),
+                    _ => return false,
+                }
+                true
+            })
+            .range_value(position as f64, 0.0, duration.saturating_sub(1) as f64)
             .w_full()
             .h(STRIP_H)
             .radius(6.0)
@@ -873,6 +935,17 @@ pub fn view(s: &AppState) -> El {
             let segment = col()
                 .key(format!("piece-{id}"))
                 .role("button")
+                .focusable(true)
+                .on_key(move |s: &mut AppState, event, _| {
+                    if matches!(&event.key, Key::Enter)
+                        || matches!(&event.key, Key::Text(t) if t == " ")
+                    {
+                        s.editor.selected = Some(id);
+                        s.editor.seek(at);
+                        return true;
+                    }
+                    false
+                })
                 .label(format!(
                     "Piece {}, {:.1} s",
                     i + 1,
@@ -935,10 +1008,25 @@ pub fn view(s: &AppState) -> El {
                 .radius(6.0)
                 .border(2.0, c(theme::T1))
                 .a11y_hidden();
+            let (min, max) = e.trim_limits(piece.id).unwrap_or((start, end));
             strip = strip
                 .child(frame)
-                .child(trim_grip(piece.id, true, x_of(shown_start)))
-                .child(trim_grip(piece.id, false, x_of(shown_end)));
+                .child(trim_grip(
+                    piece.id,
+                    true,
+                    x_of(shown_start),
+                    shown_start,
+                    min,
+                    end - 1,
+                ))
+                .child(trim_grip(
+                    piece.id,
+                    false,
+                    x_of(shown_end),
+                    shown_end,
+                    start + 1,
+                    max,
+                ));
         }
         main = main.child(strip);
         let mut ticks = row().w_full().justify_between();
@@ -1084,6 +1172,28 @@ mod rune_tests {
         assert_eq!(core::pieces(&s.editor.as_ref().unwrap().project).len(), 1);
         assert_eq!(s.editor.as_ref().unwrap().project.duration(), duration);
     }
+    #[test]
+    fn modifier_aware_redo_restores_the_split_and_unsaved_video_blocks_leaving() {
+        let mut s = editor();
+        s.position = s.editor.as_ref().unwrap().project.duration() / 2;
+        s.split();
+        s.undo(false);
+        assert!(s.key(&KeyEvent {
+            key: Key::Command('z'),
+            mods: rune::Mods {
+                cmd: true,
+                shift: true,
+                ..Default::default()
+            }
+        }));
+        assert_eq!(core::pieces(&s.editor.as_ref().unwrap().project).len(), 2);
+        assert!(!s.prepare_to_leave());
+        assert!(!s.close());
+        assert_eq!(core::pieces(&s.editor.as_ref().unwrap().project).len(), 2);
+        s.saved_revision = s.save_revision;
+        assert!(s.prepare_to_leave());
+    }
+
     fn spans(s: &State) -> Vec<(u64, u64)> {
         core::pieces(&s.editor.as_ref().unwrap().project)
             .iter()

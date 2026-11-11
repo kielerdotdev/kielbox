@@ -15,7 +15,7 @@ pub struct Tray {
     fullscreen: MenuItem,
     quick_record: MenuItem,
     quick_label: String,
-    quick_recording: bool,
+    quick_state: QuickState,
     presentation: Presentation,
     pub events: mpsc::Receiver<String>,
 }
@@ -30,6 +30,33 @@ pub struct TrayState {
     pub replay_seconds: u64,
 }
 
+/// Quick capture stays separate from native replay/recording actions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QuickState {
+    #[default]
+    Idle,
+    Starting,
+    Recording,
+    Paused,
+    Finishing,
+    Failed,
+}
+impl QuickState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Idle => "Ready to record",
+            Self::Starting => "Starting screencast…",
+            Self::Recording => "Screencast recording",
+            Self::Paused => "Screencast paused",
+            Self::Finishing => "Finishing screencast…",
+            Self::Failed => "Screencast failed. Try again.",
+        }
+    }
+    pub fn can_pause(self) -> bool {
+        matches!(self, Self::Recording | Self::Paused)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
     Off,
@@ -41,11 +68,17 @@ pub(crate) enum Mode {
 impl TrayState {
     /// Starting describes worker intent until the first encoded frame arrives.
     pub(crate) fn mode(self) -> Mode {
-        if !self.active { Mode::Off }
-        else if self.stopping { Mode::Stopping }
-        else if !self.replay_ready { Mode::Starting }
-        else if self.recording { Mode::Recording }
-        else { Mode::Replay }
+        if !self.active {
+            Mode::Off
+        } else if self.stopping {
+            Mode::Stopping
+        } else if !self.replay_ready {
+            Mode::Starting
+        } else if self.recording {
+            Mode::Recording
+        } else {
+            Mode::Replay
+        }
     }
 }
 
@@ -73,11 +106,18 @@ fn shortcut(label: &str, hotkey: &str) -> String {
 }
 
 impl Presentation {
-    fn with_screencast(mut self, recording: bool) -> Self {
-        if recording {
-            self.mode = Mode::Recording;
-            self.status = format!("Screencast recording · {}", self.status);
+    fn with_screencast(mut self, state: QuickState) -> Self {
+        let mode = match state {
+            QuickState::Starting => Mode::Starting,
+            QuickState::Recording => Mode::Recording,
+            QuickState::Paused | QuickState::Finishing => Mode::Stopping,
+            QuickState::Idle | QuickState::Failed => return self,
+        };
+        // A native recording must retain its red indicator while quick capture pauses/saves.
+        if self.mode != Mode::Recording {
+            self.mode = mode;
         }
+        self.status = format!("{} · {}", state.label(), self.status);
         self
     }
     fn new(state: TrayState, hotkeys: &[String; 7]) -> Self {
@@ -201,20 +241,45 @@ impl Tray {
             fullscreen,
             quick_record,
             quick_label: String::new(),
-            quick_recording: false,
+            quick_state: QuickState::Idle,
             presentation,
             events,
         })
     }
 
     /// Safe to call each UI poll: identical visible state performs no native work.
+    pub fn update_quick_state(&mut self, state: QuickState, hotkey: &str) {
+        self.quick_state = state;
+        let label = shortcut(
+            match state {
+                QuickState::Starting => "Cancel starting screencast",
+                QuickState::Recording | QuickState::Paused => "Stop screencast",
+                QuickState::Finishing => "Finishing screencast…",
+                QuickState::Idle | QuickState::Failed => "Record screencast…",
+            },
+            hotkey,
+        );
+        self.quick_record
+            .set_enabled(state != QuickState::Finishing);
+        if self.quick_label != label {
+            self.quick_record.set_text(&label);
+            self.quick_label = label;
+        }
+    }
     pub fn update_quick_recorder(&mut self, recording: bool, busy: bool, hotkey: &str) {
-        self.quick_recording = recording;
-        let label = shortcut(if recording { "Stop video recording" } else if busy { "Show recording controls…" } else { "Record video…" }, hotkey);
-        if self.quick_label != label { self.quick_record.set_text(&label); self.quick_label = label; }
+        self.update_quick_state(
+            if recording {
+                QuickState::Recording
+            } else if busy {
+                QuickState::Finishing
+            } else {
+                QuickState::Idle
+            },
+            hotkey,
+        );
     }
     pub fn update(&mut self, state: TrayState, hotkeys: &[String; 7]) -> anyhow::Result<()> {
-        let next = Presentation::new(state, hotkeys).with_screencast(self.quick_recording);
+        let next = Presentation::new(state, hotkeys).with_screencast(self.quick_state);
         let previous = &self.presentation;
         if *previous == next {
             return Ok(());
@@ -296,16 +361,52 @@ mod tests {
     }
     #[test]
     fn screencast_indicator_is_visible_without_changing_game_capture_actions() {
-        for state in [TrayState::default(), TrayState { active: true, replay_ready: true, replay_seconds: 300, ..Default::default() }] {
+        for state in [
+            TrayState::default(),
+            TrayState {
+                active: true,
+                replay_ready: true,
+                replay_seconds: 300,
+                ..Default::default()
+            },
+        ] {
             let ordinary = labels(state);
-            let recording = labels(state).with_screencast(true);
+            let recording = labels(state).with_screencast(QuickState::Recording);
             assert_eq!(recording.mode, Mode::Recording);
             assert!(recording.status.starts_with("Screencast recording"));
             assert_eq!(recording.replay_enabled, ordinary.replay_enabled);
             assert_eq!(recording.record, ordinary.record);
             assert_eq!(recording.toggle_enabled, ordinary.toggle_enabled);
-            assert_eq!(labels(state).with_screencast(false), ordinary);
+            assert_eq!(labels(state).with_screencast(QuickState::Idle), ordinary);
         }
+    }
+
+    #[test]
+    fn quick_phases_keep_native_actions_and_truthful_indicator() {
+        for (phase, mode) in [
+            (QuickState::Starting, Mode::Starting),
+            (QuickState::Recording, Mode::Recording),
+            (QuickState::Paused, Mode::Stopping),
+            (QuickState::Finishing, Mode::Stopping),
+        ] {
+            let off = labels(TrayState::default());
+            let shown = labels(TrayState::default()).with_screencast(phase);
+            assert_eq!(shown.mode, mode);
+            assert!(shown.status.starts_with(phase.label()));
+            assert_eq!(shown.record, off.record);
+            assert_eq!(shown.replay_enabled, off.replay_enabled);
+            let native = labels(TrayState {
+                active: true,
+                recording: true,
+                replay_ready: true,
+                ..Default::default()
+            })
+            .with_screencast(phase);
+            assert_eq!(native.mode, Mode::Recording);
+        }
+        assert!(!QuickState::Starting.can_pause());
+        assert!(QuickState::Recording.can_pause() && QuickState::Paused.can_pause());
+        assert!(!QuickState::Finishing.can_pause());
     }
 
     #[test]
@@ -331,7 +432,11 @@ mod tests {
         });
         assert_eq!(starting.mode, Mode::Starting);
         assert!(!starting.replay_enabled);
-        let starting_recording = labels(TrayState { active: true, recording: true, ..Default::default() });
+        let starting_recording = labels(TrayState {
+            active: true,
+            recording: true,
+            ..Default::default()
+        });
         assert_eq!(starting_recording.mode, Mode::Starting);
         assert_eq!(starting_recording.status, "Starting recording…");
         assert_eq!(starting_recording.record, "Cancel starting recording");
@@ -371,10 +476,22 @@ mod tests {
             for stopping in [false, true] {
                 for recording in [false, true] {
                     for replay_ready in [false, true] {
-                        let state = TrayState { active, stopping, recording, replay_ready, replay_seconds: 0 };
+                        let state = TrayState {
+                            active,
+                            stopping,
+                            recording,
+                            replay_ready,
+                            replay_seconds: 0,
+                        };
                         let shown = labels(state);
-                        assert_eq!(shown.mode == Mode::Recording, active && !stopping && recording && replay_ready);
-                        assert_eq!(shown.mode == Mode::Starting, active && !stopping && !replay_ready);
+                        assert_eq!(
+                            shown.mode == Mode::Recording,
+                            active && !stopping && recording && replay_ready
+                        );
+                        assert_eq!(
+                            shown.mode == Mode::Starting,
+                            active && !stopping && !replay_ready
+                        );
                         assert_eq!(shown.mode == Mode::Stopping, active && stopping);
                         assert_eq!(shown.replay_enabled, active && !stopping && replay_ready);
                         assert_eq!(shown.record_enabled, !active || !stopping);
