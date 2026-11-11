@@ -1,5 +1,4 @@
 //! Native tray commands feed the existing UI loop; capture stays on its worker.
-use std::sync::mpsc;
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
@@ -17,7 +16,6 @@ pub struct Tray {
     quick_label: String,
     quick_state: QuickState,
     presentation: Presentation,
-    pub events: mpsc::Receiver<String>,
 }
 
 /// Owned, inexpensive snapshot: callers never lend pipeline state to the tray.
@@ -172,7 +170,8 @@ impl Presentation {
 }
 
 impl Tray {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(features: &crate::features::Features) -> anyhow::Result<Self> {
+        use crate::features::Feature;
         let menu = Menu::new();
         let presentation = Presentation::new(
             TrayState::default(),
@@ -191,13 +190,14 @@ impl Tray {
         menu.append(&MenuItem::with_id("settings", "Settings", true, None))?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&status)?;
-        menu.append(&toggle_replay)?;
-        menu.append(&replay)?;
-        menu.append(&record)?;
+        if features.allows(Feature::Recording) {
+            menu.append(&toggle_replay)?;
+            menu.append(&replay)?;
+            menu.append(&record)?;
+        }
         menu.append(&PredefinedMenuItem::separator())?;
-        menu.append(&region)?;
-        menu.append(&fullscreen)?;
-        menu.append(&quick_record)?;
+        if features.allows(Feature::Screenshots) { menu.append(&region)?; menu.append(&fullscreen)?; }
+        if features.allows(Feature::Screencasts) { menu.append(&quick_record)?; }
         menu.append(&PredefinedMenuItem::separator())?;
         let tools = Submenu::new("Tools", true);
         for (id, label) in [
@@ -220,17 +220,13 @@ impl Tray {
                 None,
             ))?;
         }
-        menu.append(&tools)?;
+        if features.allows(Feature::Utilities) { menu.append(&tools)?; }
         menu.append(&MenuItem::with_id("quit", "Quit Kielbox", true, None))?;
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip(format!("Kielbox — {}", presentation.status))
             .with_icon(state_icon(presentation.mode)?)
             .build()?;
-        let (tx, events) = mpsc::channel();
-        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-            let _ = tx.send(event.id.0);
-        }));
         Ok(Self {
             icon,
             status,
@@ -243,8 +239,13 @@ impl Tray {
             quick_label: String::new(),
             quick_state: QuickState::Idle,
             presentation,
-            events,
         })
+    }
+
+    /// Use the library queue: its custom handler can only be installed once and
+    /// would retain the first tray's sender after a feature-driven rebuild.
+    pub fn events(&self) -> Vec<String> {
+        MenuEvent::receiver().try_iter().map(|event| event.id.0).collect()
     }
 
     /// Safe to call each UI poll: identical visible state performs no native work.

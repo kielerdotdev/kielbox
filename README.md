@@ -17,6 +17,17 @@ This is early software. Game recording requires an NVIDIA GPU with AV1 encoding.
 Editing, exports, and quick screencasts require FFmpeg and FFprobe on `PATH`.
 Screenshots and native recording work without them.
 
+Choose the tools you use in **Settings → Features**. Screenshots, image editing,
+video editing, storage analysis, utilities, native recording with replay, and
+screencasts can be enabled independently. You can edit ShadowPlay videos while
+Kielbox recording is disabled. Disabling a feature releases its global shortcuts
+and keeps its saved settings and your files. Finish the affected tool's active work before disabling it.
+
+For troubleshooting, `KIELBOX_DISABLE_FEATURES=recording,screencasts` blocks those
+features for the process regardless of saved choices. Restart after changing the
+environment. See [feature boundaries and kill switches](docs/feature-architecture.md)
+for supported IDs, lifecycle rules, and the separate CLI scope.
+
 ## Download
 
 Download [Kielbox-Setup.exe](https://github.com/kielerdotdev/kielbox/releases/download/preview/Kielbox-Setup.exe)

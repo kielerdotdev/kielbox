@@ -84,6 +84,7 @@ impl CapturePriority {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    pub features: crate::features::Features,
     #[cfg(windows)]
     pub updates: crate::updates::Settings,
     pub height: u32,
@@ -137,6 +138,7 @@ fn deserialize_hotkeys<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Res
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            features: Default::default(),
             #[cfg(windows)]
             updates: crate::updates::Settings::default(),
             height: 1440,
@@ -372,6 +374,14 @@ where
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_settings_enable_features_and_unknown_feature_ids_survive() {
+        let legacy: Preferences = serde_json::from_str("{}").unwrap();
+        assert!(crate::features::Feature::ALL.into_iter().all(|f| legacy.features.selected(f)));
+        let saved: Preferences = serde_json::from_str(r#"{"features":{"disabled":["recording","future_tool"]}}"#).unwrap();
+        assert!(!saved.features.selected(crate::features::Feature::Recording));
+        assert!(serde_json::to_string(&saved).unwrap().contains("future_tool"));
+    }
     #[test]
     fn legacy_shortcuts_keep_customizations_when_quick_recorder_is_added() {
         let legacy = ["Ctrl+Alt+F1", "", "Ctrl+F3", "Ctrl+PrintScreen", "Shift+PrintScreen", "Alt+PrintScreen"];

@@ -25,6 +25,7 @@ pub struct State {
     pub editor: Option<Editor>,
     pub path: Option<PathBuf>,
     loading: Option<mpsc::Receiver<Result<Opened, String>>>,
+    opening_image: Option<bool>,
     scrub: Option<ScrubSession>,
     playback: Option<PlaybackSession>,
     surface: NativeSurface,
@@ -112,6 +113,7 @@ impl State {
         }
         self.stop();
         let (tx, rx) = mpsc::sync_channel(1);
+        self.opening_image = Some(recordings::is_image(&path));
         self.loading = Some(rx);
         self.message = "Opening…".into();
         // A prior save worker drains its final pending project even after this observer is dropped.
@@ -166,6 +168,7 @@ impl State {
             })
         {
             self.loading = None;
+            self.opening_image = None;
             self.message = e.to_string();
         }
     }
@@ -450,6 +453,7 @@ impl State {
             match rx.try_recv() {
                 Ok(result) => {
                     self.loading = None;
+                    self.opening_image = None;
                     changed = true;
                     match result {
                         Ok(Opened { path, loaded }) => {
@@ -475,6 +479,7 @@ impl State {
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.loading = None;
+                    self.opening_image = None;
                     self.message = "Media worker stopped unexpectedly.".into();
                     changed = true;
                 }
@@ -552,6 +557,19 @@ impl Drop for State {
     }
 }
 impl State {
+    pub fn owns_feature(&self, feature: crate::features::Feature) -> bool {
+        let image = self.path.as_deref().map(recordings::is_image).or(self.opening_image);
+        match feature {
+            crate::features::Feature::ImageEditing => image == Some(true),
+            crate::features::Feature::VideoEditing => image == Some(false),
+            _ => false,
+        }
+    }
+    pub fn feature_change_blocked(&self) -> bool {
+        self.loading.is_some() || self.export.is_some() || self.playing()
+            || self.save_revision != self.saved_revision
+            || self.annotation.as_ref().is_some_and(|a| a.dirty())
+    }
     /// Shared gate for close, replacement and application quit. On false keep the
     /// window/editor alive, poll normally, and show editor/annotation messages.
     /// Image checkpoints are asynchronous; the user can retry after acknowledgement.
@@ -578,6 +596,7 @@ impl State {
         }
         self.stop();
         self.loading = None;
+        self.opening_image = None;
         self.editor = None;
         self.scrub = None;
         self.save = None;
@@ -1192,6 +1211,46 @@ mod rune_tests {
         assert_eq!(core::pieces(&s.editor.as_ref().unwrap().project).len(), 2);
         s.saved_revision = s.save_revision;
         assert!(s.prepare_to_leave());
+    }
+
+    #[test]
+    fn feature_changes_only_wait_for_the_editor_that_owns_the_work() {
+        use crate::features::Feature;
+        let mut app = crate::rune_ui::State::with_headless(true);
+        let (_sender, receiver) = mpsc::sync_channel(1);
+        app.editor.loading = Some(receiver);
+        app.editor.opening_image = Some(false);
+        app.page = crate::rune_ui::Page::Editor;
+        app.set_feature(Feature::StorageAnalysis, false);
+        app.set_feature(Feature::ImageEditing, false);
+        assert!(!app.allows(Feature::StorageAnalysis));
+        assert!(!app.allows(Feature::ImageEditing));
+        assert!(app.page == crate::rune_ui::Page::Editor);
+        app.set_feature(Feature::VideoEditing, false);
+        assert!(app.allows(Feature::VideoEditing));
+        app.editor.loading = None;
+        app.editor.opening_image = None;
+        app.editor.path = Some(PathBuf::from("shadowplay.mp4"));
+        app.editor.save_revision = 1;
+        app.set_feature(Feature::VideoEditing, false);
+        assert!(app.allows(Feature::VideoEditing));
+        app.editor.saved_revision = 1;
+        app.set_feature(Feature::VideoEditing, false);
+        assert!(!app.allows(Feature::VideoEditing));
+        assert!(app.editor.path.is_none());
+    }
+
+    #[test]
+    fn feature_disable_waits_for_loading_and_unsaved_work() {
+        let mut s = State::default();
+        let (_sender, receiver) = mpsc::sync_channel(1);
+        s.loading = Some(receiver);
+        assert!(s.feature_change_blocked());
+        s.loading = None;
+        s.save_revision = 1;
+        assert!(s.feature_change_blocked());
+        s.saved_revision = 1;
+        assert!(!s.feature_change_blocked());
     }
 
     fn spans(s: &State) -> Vec<(u64, u64)> {

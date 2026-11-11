@@ -1,4 +1,5 @@
 //! Ctrl K: one search across pages, capture actions, tools and clips.
+use crate::features::Feature;
 use crate::{
     recordings,
     rune_theme::{self as theme, c, icons},
@@ -161,6 +162,15 @@ fn items(s: &State) -> Vec<Item> {
             target: Target::Clip(path.clone()),
         });
     }
+    all.retain(|item| match &item.target {
+        Target::Page(page) => s.page_available(*page),
+        Target::SaveReplay | Target::ToggleReplay | Target::ToggleRecord => s.allows(Feature::Recording),
+        Target::Screenshot(_) => s.allows(Feature::Screenshots),
+        Target::Tool(_) => s.allows(Feature::Utilities),
+        Target::OpenFile => s.page_available(Page::Editor),
+        Target::Clip(path) => s.allows(if recordings::is_image(path) { Feature::ImageEditing } else { Feature::VideoEditing }),
+        Target::Trash => true,
+    });
     if query.is_empty() {
         all.retain(|i| i.group != "Tools");
         return all;
@@ -369,4 +379,25 @@ pub fn view(s: &State) -> Option<El> {
 
 fn results_empty(s: &State) -> bool {
     items(s).is_empty()
+}
+
+#[cfg(test)]
+mod feature_tests {
+    use super::*;
+    #[test]
+    fn palette_follows_features_and_keeps_imported_video_without_recording() {
+        let mut state = State::with_headless(true);
+        state.preferences.features.set(Feature::Recording, false);
+        state.preferences.features.set(Feature::Screencasts, false);
+        state.files.push(PathBuf::from("shadowplay.mp4"));
+        let available = items(&state);
+        assert!(available.iter().any(|i| matches!(i.target, Target::Clip(_))));
+        assert!(available.iter().any(|i| matches!(i.target, Target::Screenshot(_))));
+        assert!(!available.iter().any(|i| matches!(i.target, Target::SaveReplay | Target::ToggleReplay | Target::ToggleRecord)));
+        state.preferences.features.set(Feature::VideoEditing, false);
+        assert!(!items(&state).iter().any(|i| matches!(i.target, Target::Clip(_))));
+        for f in Feature::ALL { state.preferences.features.set(f, false); }
+        assert!(items(&state).iter().all(|i| matches!(i.target,
+            Target::Page(Page::Library | Page::Settings) | Target::Trash)));
+    }
 }

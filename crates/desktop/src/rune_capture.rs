@@ -1,5 +1,6 @@
 //! Native capture/replay ownership, independent of the view tree.
 use crate::tray::QuickState;
+use crate::features::Feature;
 use crate::{
     preferences::Preferences,
     quick_recording,
@@ -92,6 +93,10 @@ impl State {
         wake: rune::Waker,
         notice: &mut String,
     ) {
+        if !prefs.features.allows(Feature::Recording) {
+            *notice = "Recording and instant replay are disabled. See Settings > Features.".into();
+            return;
+        }
         if self.active {
             self.stop.store(true, Ordering::Release);
             self.stopping = true;
@@ -178,6 +183,7 @@ impl State {
         }
     }
     pub fn save_replay(&mut self, prefs: &Preferences, notice: &mut String) {
+        if !prefs.features.allows(Feature::Recording) { *notice = "Instant replay is disabled.".into(); return; }
         if !self.active || self.stopping {
             *notice = "Start instant replay before saving a clip.".into();
             return;
@@ -193,6 +199,7 @@ impl State {
         }
     }
     pub fn quick(&mut self, prefs: &Preferences, notice: &mut String) {
+        if !prefs.features.allows(Feature::Screencasts) { *notice = "Screencasts are disabled.".into(); return; }
         if let Some(worker) = &self.quick {
             worker.stop();
             self.quick_state = QuickState::Finishing;
@@ -460,6 +467,13 @@ impl Drop for State {
     }
 }
 impl State {
+    pub fn feature_change_blocked(&self, feature: Feature) -> bool {
+        match feature {
+            Feature::Recording => self.worker.is_some() || self.source_events.is_some() || !self.pending.is_empty(),
+            Feature::Screencasts => self.quick.is_some(),
+            _ => false,
+        }
+    }
     /// What the rail light and title bar show, and the time beside it.
     pub fn status(&self) -> (ui::Status, String) {
         if self.stopping || !self.pending.is_empty() || self.quick_state == QuickState::Finishing {
@@ -594,7 +608,7 @@ pub fn view(s: &AppState) -> rune::El {
         .child(theme::small("Applies to the next recording or instant replay session. Stop capture to change sources. Unavailable saved devices fail explicitly; they are never replaced by name.").wrap().w_full().min_w(0.0))
         .child(theme::small(format!("Display: {}", display)))
         .child(Btn::new("refresh-capture-sources", if c.source_events.is_some() { "Loading devices…" } else { "Refresh devices" })
-            .disabled(c.source_events.is_some()).on(|s, _| s.capture.refresh_sources(&mut s.notice)).build())
+            .disabled(c.source_events.is_some()).on(|s, _| if s.require(Feature::Recording) { s.capture.refresh_sources(&mut s.notice) }).build())
         .child(Btn::new("capture-primary", "Use Windows primary display").disabled(source_locked)
             .checked(p.display.is_none()).on(|s, _| { s.preferences.display = None; s.save_preferences(); }).build());
     for (index, (choice, label)) in c.source_choices.iter().enumerate() {
@@ -688,7 +702,7 @@ pub fn view(s: &AppState) -> rune::El {
             );
         }
     }
-    left = left.child(sources);
+    if s.allows(Feature::Recording) { left = left.child(sources); }
     if c.active {
         left = left.child(theme::small(format!(
             "{} encoded frames · {} dropped",
@@ -911,17 +925,19 @@ pub fn view(s: &AppState) -> rune::El {
         .child(theme::small("Quick audio uses Windows default playback and microphone endpoints when enabled above. Native device selections do not apply.").wrap().w_full().min_w(0.0))
         .child(theme::small(c.quick_warnings.join("; ")));
     let _ = status;
-    let right = rune::col()
+    let mut right = rune::col()
         .w(340.0)
         .gap(24.0)
-        .pt(48.0)
-        .child(replay)
-        .child(theme::hr())
-        .child(record)
-        .child(theme::hr())
-        .child(screenshots)
-        .child(theme::hr())
-        .child(quick);
+        .pt(48.0);
+    if s.allows(Feature::Recording) { right = right.child(replay).child(theme::hr()).child(record); }
+    if s.allows(Feature::Screenshots) { right = right.child(screenshots); }
+    if s.allows(Feature::Screencasts) { right = right.child(quick); }
+    if !s.allows(Feature::Recording) {
+        left = rune::col().grow(1.0).gap(12.0)
+            .child(theme::h1("Capture"))
+            .child(theme::small("Choose a screenshot or screencast action. Audio options are in Settings > Audio."))
+            .child(theme::small("Native recording and instant replay are disabled. You can keep using another recorder."));
+    }
     ui::scroll(
         row()
             .w_full()
@@ -938,6 +954,23 @@ pub fn view(s: &AppState) -> rune::El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_recorders_do_not_start_workers() {
+        let mut prefs = Preferences::default();
+        prefs.features.set(Feature::Recording, false);
+        prefs.features.set(Feature::Screencasts, false);
+        let mut state = State::default();
+        let mut notice = String::new();
+        state.toggle(false, &prefs, Arc::new(|| {}), &mut notice);
+        state.toggle(true, &prefs, Arc::new(|| {}), &mut notice);
+        state.quick(&prefs, &mut notice);
+        state.save_replay(&prefs, &mut notice);
+        assert!(state.worker.is_none());
+        assert!(state.quick.is_none());
+        assert!(!state.active);
+        assert!(notice.contains("disabled"));
+    }
 
     #[test]
     fn poll_preserves_error_and_later_success_as_distinct_typed_outcomes() {

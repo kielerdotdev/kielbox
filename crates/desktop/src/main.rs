@@ -1,5 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod diagnostics_io;
+mod features;
 #[cfg(windows)]
 mod hotkeys;
 #[cfg(windows)]

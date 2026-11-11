@@ -1,3 +1,4 @@
+use crate::features::Feature;
 use crate::{
     rune_theme::{self as theme, Btn, c, icons},
     rune_ui::{self as ui, JobResult, State as AppState},
@@ -532,6 +533,7 @@ const GROUPS: [(&str, &[Option<util::Tool>]); 5] = [
 ];
 
 pub fn open_tool(s: &mut AppState, tool: util::Tool) {
+    if !s.require(Feature::Utilities) { return; }
     if s.tools.tool != tool || !s.tools.open {
         s.tools.reset(tool);
     }
@@ -540,6 +542,7 @@ pub fn open_tool(s: &mut AppState, tool: util::Tool) {
     s.page = ui::Page::Tools;
 }
 impl State {
+    pub fn busy(&self) -> bool { self.job.is_some() }
     pub fn open_tool(&self) -> Option<util::Tool> {
         self.open.then_some(self.tool)
     }
@@ -564,6 +567,7 @@ pub fn view(s: &AppState) -> El {
             .child(theme::section_label(group).px(10.0).pb(6.0));
         let mut any = false;
         for tool in tools {
+            if !s.allows(if tool.is_some() { Feature::Utilities } else { Feature::StorageAnalysis }) { continue; }
             let (key, i, title) = match tool {
                 Some(t) => (format!("tools-{t:?}"), tool_icon(*t), tool_title(*t)),
                 None => (
@@ -644,11 +648,12 @@ fn back(key: &str, title: &str, action: impl Fn(&mut AppState, &mut rune::Tx) + 
 
 /// Routes the reviewed screenshot overlay back to the originating utility, never the editor.
 fn capture_utility(s: &mut AppState) {
+    if !s.require(Feature::Utilities) { return; }
     #[cfg(windows)]
     if let Some(overlay) = s.shot.clone() {
         let ticket = s.tools.capture_ticket();
         let folder = s.preferences.folder.clone();
-        s.job(move || {
+        s.feature_job(Feature::Utilities, move || {
             let capturer = toolkit::services::ScreenCapturer::detect(None, toolkit::services::LastRegionStore::none());
             let frame = capturer.with(|source| source.capture_desktop(&Default::default())).map_err(|e| e.to_string())?;
             let frame = crate::rune_shot::monitor_under_pointer().and_then(|r| frame.crop_desktop(r).ok()).unwrap_or(frame);
@@ -1072,7 +1077,7 @@ fn tool_page(s: &AppState) -> El {
             Btn::new("utility-run", "Run")
                 .primary()
                 .disabled(t.job.is_some())
-                .on(|s, _| s.tools.run(s.wake.clone()))
+                .on(|s, _| { if s.require(Feature::Utilities) { s.tools.run(s.wake.clone()); } })
                 .build(),
         )
         .child(
@@ -1119,7 +1124,7 @@ fn tool_page(s: &AppState) -> El {
             .on(move |s, _| {
                 let image = image.clone();
                 let text = text.clone();
-                s.job(move || {
+                s.feature_job(Feature::Utilities, move || {
                     use toolkit::core::workflow::Clipboard;
                     let clipboard = toolkit::services::SystemClipboard::new(Default::default());
                     if let Some(frame) = image {
@@ -1226,7 +1231,7 @@ pub fn disk_view(s: &AppState) -> El {
         tx.open_folder(
             Default::default(),
             |s: &mut AppState, result, _| match result {
-                Ok(Some(path)) => s.disk.start(path, s.wake.clone()),
+                Ok(Some(path)) => { if s.require(Feature::StorageAnalysis) { s.disk.start(path, s.wake.clone()); } },
                 Err(e) => s.notice = e.to_string(),
                 _ => {}
             },
@@ -1529,11 +1534,12 @@ pub fn disk_view(s: &AppState) -> El {
 
 #[cfg(windows)]
 pub fn screenshot(s: &mut AppState, target: toolkit::core::workflow::CaptureTarget) {
+    if !s.require(Feature::Screenshots) { return; }
     use toolkit::core::workflow::CaptureTarget;
     let folder = s.preferences.folder.clone();
     #[cfg(windows)]
     let overlay = s.shot.clone();
-    s.job(move || {
+    s.feature_job(Feature::Screenshots, move || {
         let capturer = toolkit::services::ScreenCapturer::detect(
             None,
             toolkit::services::LastRegionStore::none(),
