@@ -64,7 +64,7 @@ Final release hashes:
 - desktop.exe: `65ffa09a28fed689ab2b7ab19c30c3b346b18e0d17ea8848d29f5d84e8cf863c`
 - clean.exe: `8456ba0c1e9d379fae8d6ee1acdd470350907d50961ad7056323c668a34a54a0`
 
-Durable local logs, source manifest and final capture render are under
+The original source manifest is retained in git at `a52bff7`; the final capture render is under
 [validation-evidence](validation-evidence/). Initial full artifacts also remain
 in `/tmp/kielbox-validation/`. Whitespace and documentation links passed. The
 Impeccable mechanical detector returned no findings for the changed Rune views;

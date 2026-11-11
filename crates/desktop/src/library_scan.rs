@@ -1,4 +1,4 @@
-//! Latest-request-wins filesystem scanning. No OS filesystem call runs on GPUI.
+//! Latest-request-wins filesystem scanning. No OS filesystem call runs on UI.
 use crate::recordings;
 use std::{
     collections::{BTreeMap, BTreeSet},

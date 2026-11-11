@@ -1,5 +1,9 @@
 # QA implementation and acceptance tracker
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 Updated 11 November 2026. Baseline `d96346b2ee44cf44b9ffeb5881c6a44d2cbcb6c7`.
 The user authorized implementation after the read-only audit. This tracker is an
 implementation ledger, not a new audit or release certificate.
@@ -95,7 +99,7 @@ Before release, integration owner reviews final source and agent notes, fills
 actual owner/file/test references for every row, records remote results against
 one identified integrated snapshot, then reconciles current docs. In particular,
 replace dated baseline limitations only when new controls and behavior have
-source evidence; keep unexecuted native checks open. Historical GPUI guide and
+source evidence; keep unexecuted native checks open. Historical retired UI guide and
 migration proof counts remain labelled historical. Do not use a clean `git diff`
 or generated scene as evidence of native acceptance.
 
@@ -132,7 +136,7 @@ fixes does not establish competitor parity or require inventing absent modules.
 | Category | Current scope / decision | Owner / acceptance if pursued |
 | --- | --- | --- |
 | Absent modules | Configured upload/share, clipboard history manager, duplicate finder, bulk renamer, system monitor, OS-wide search, screen sampler/ruler/magnifier are absent from the inspected Rune product path. | Product decides scope; implementation and native evidence needed before listing as current features. Clipboard viewer and internal palette are narrower existing tools. |
-| Migration capabilities | Quick window/region targets, watch/share/fullscreen windows, richer annotation styles, last-region recall, rich disk views and full diagnostics UI remain scoped parity decisions. | Respective module owner; do not infer completion from retained GPUI files or backend branches. Installed Storage onboarding is implemented; full diagnostics UI is not. |
+| Migration capabilities | Quick window/region targets, watch/share/fullscreen windows, richer annotation styles, last-region recall, rich disk views and full diagnostics UI remain scoped parity decisions. | Respective module owner; do not infer completion from retained retired UI files or backend branches. Installed Storage onboarding is implemented; full diagnostics UI is not. |
 | Strategic opportunities | Task-first onboarding; one dependable local capture workspace; merge QR/image workflows; advanced placement for diagnostic tiles; reviewed destination sharing and size presets. | Product prioritization after safety gates, with explicit acceptance criteria. No new framework or cloud service is needed to close the current defects. |
 | Cleanup policy risk | Ignored worktree data is now protected by default with explicit opt-in. Concurrent mutation remains a documented risk. | Product/safety owner decides narrower opt-in/quarantine policy; native disposable-fixture safety matrix remains required regardless of F16 ledger fix. |
 | Release positioning | Experimental preview versus daily-use replacement, lead persona, secure-redaction promise, Copy retention and duration/hardware support need explicit policy. | Product owner; broad replacement/readiness claims remain unsupported by current evidence. |

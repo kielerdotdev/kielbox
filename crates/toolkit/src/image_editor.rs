@@ -1,4 +1,4 @@
-//! The SSX annotation session and renderer live on a worker, never the GPUI event thread.
+//! The SSX annotation session and renderer live on a worker, never the UI event thread.
 use crate::{annotation as a, effects, types::Frame};
 use anyhow::{Context, Result, bail};
 use std::{

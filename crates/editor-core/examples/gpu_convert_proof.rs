@@ -142,7 +142,7 @@ mod proof {
                     && desc.CPUAccessFlags == 0
                     && desc.BindFlags & D3D11_BIND_SHADER_RESOURCE.0 as u32 != 0
                     && desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX.0 as u32 != 0,
-                "shared output is incompatible with the GPUI source contract"
+                "shared output is incompatible with the UI source contract"
             );
             desc.Usage = D3D11_USAGE_STAGING;
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;

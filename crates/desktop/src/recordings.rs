@@ -71,7 +71,7 @@ pub fn is_supported(path: &Path) -> bool {
             )
         })
 }
-// Synchronous compatibility API; GPUI uses LibraryScanner instead.
+// Synchronous compatibility API; UI uses LibraryScanner instead.
 #[allow(dead_code)]
 pub fn list() -> Vec<PathBuf> {
     list_in(root())
@@ -697,7 +697,7 @@ fn copy_file_with(
     write(owner, &payload)
 }
 
-/// Worker-only: copy an owned source using the HWND captured from its GPUI window.
+/// Worker-only: copy an owned source using the HWND captured from its UI window.
 #[cfg(windows)]
 pub(crate) fn copy_file_owned(path: &Path, owner: isize) -> anyhow::Result<()> {
     copy_file_with(path, owner, write_file_clipboard)

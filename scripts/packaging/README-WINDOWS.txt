@@ -38,9 +38,8 @@ their provider. Do not copy arbitrary codec DLLs next to rcr.exe.
 PACKAGE AND LICENSES
 package-manifest.json records each payload SHA256, size, build kind, source
 revision and whether the source tree was dirty. SHA256SUMS.txt also hashes the
-manifest. These hashes do not authenticate an unsigned publisher. Development
-packages require the original source checkout for debug GPUI shaders. Normal
-release builds embed their shaders and still need clean-folder validation.
+manifest. These hashes do not authenticate an unsigned publisher. Rune packages embed their shader metadata and do not require the original
+source checkout at runtime. Builds still need clean-folder validation.
 The desktop is GPL-3.0-or-later; original core code is Apache-2.0. License texts,
 model/font/binding notices and Cargo.lock are included. THIRD_PARTY.md provides
 component provenance. No FFmpeg runtime is redistributed by this packager.

@@ -609,7 +609,7 @@ impl PreparedUpdate {
         &self.asset.version
     }
 
-    /// Call at main's final exit boundary, after every GPUI entity and worker
+    /// Call at main's final exit boundary, after every UI entity and worker
     /// owner has retired. This module never calls process::exit from the live
     /// UI. The installer waits for this parent to exit and aborts on a timeout;
     /// it never forcibly closes a running capture or helper.

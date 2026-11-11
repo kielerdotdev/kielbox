@@ -80,7 +80,7 @@ struct Frame {
 
 // AVCodecContext prefix through get_format (libavcodec 61). FF_API_TICKS_PER_FRAME
 // is enabled in this ABI. The callback selects CUDA surfaces; preroll frames stay
-// on the GPU and only the requested frame is transferred for GPUI's BGRA atlas.
+// on the GPU and only the requested frame is transferred for UI's BGRA atlas.
 #[repr(C)]
 struct CodecContext {
     class: Opaque,

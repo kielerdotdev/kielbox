@@ -12,16 +12,6 @@ Windows preview frames cross from the existing D3D11 producer to Rune's D3D12
 renderer through named shared GPU textures and release fences in
 `crates/desktop/src/rune_gpu.rs`.
 
-## Historical GPUI source (not linked into the desktop)
-
-`vendor/gpui-0.2.2` is the published GPUI 0.2.2 crate from the Zed project, licensed under Apache-2.0. Its license is retained as `vendor/gpui-0.2.2/LICENSE-APACHE`.
-
-Local changes added a Windows D3D11 shared-texture surface source, scene/window plumbing, keyed-mutex synchronization and cached SRV import in the DirectX renderer. This historical reference is no longer a Cargo dependency or patch. Remaining GPUI view files are uncompiled reference material while feature parity is completed; see `docs/RUNE_MIGRATION.md`.
-
-`crates/desktop/src/text_input.rs` is adapted from this crate's `examples/input.rs`, retaining the GPUI text input, IME, selection and clipboard approach under Apache-2.0. RCR-specific changes expose an editable value and use the application's styling.
-
-Upstream: https://github.com/zed-industries/zed/tree/main/crates/gpui
-
 ## NVENC bindings
 
 `crates/nvenc-sys` contains the Windows NVENC 12.1 generated bindings, GUID definitions and API-version constants distributed with `nvidia-video-codec-sdk` version 0.4.0 by Viliam Vadocz. That crate's MIT license is retained in `crates/nvenc-sys/LICENSE`. The original downloaded crate is in the ignored `.downloads` development directory; it is not needed to build.
@@ -65,7 +55,7 @@ There is no vendored SSX workspace or external SSX application dependency.
 Original notices are preserved in source and `LICENSE-GPL-3.0`.
 
 See [screenshot source provenance](docs/SCREENSHOT-PROVENANCE.md) for the migration
-and retained compatibility identifiers. RCR's GPUI interface uses these native
+and retained compatibility identifiers. Kielbox's Rune interface uses these native
 libraries; the optional standalone tools are separate workspace packages.
 
 ## Utility libraries and references

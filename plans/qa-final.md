@@ -1,12 +1,16 @@
 # Kielbox UX and QA report
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 Audit date: 11 November 2026. Source version 0.1.0, commit `d96346b2ee44cf44b9ffeb5881c6a44d2cbcb6c7`. No installed binary/build hash was tested. Six GPT-6.1 Sol researchers contributed; the synthesis owner re-read the principal finding paths. Source code was not changed.
 
 ## Evidence and product context
 
 This is a source-supported release-readiness audit with limited remote execution, **not completed hands-on Windows acceptance**. All UI reproduction steps below are proposed acceptance scenarios, not actions observed on a running app. “Actual” describes inspected code. No participant hesitations, task times, ease ratings, FPS, accessibility compliance or competitor timing results were invented.
 
-Kielbox is Windows-only preview software. macOS/Linux are planned. Positioning in README is capture, clips and disk tools in one app. Primary inferred users are creators, support staff, gamers with supported NVIDIA hardware and developers. Intended audience priority remains a product-owner question. The desktop uses Rune; obsolete GPUI screens do not count as shipped functionality. An unsigned per-user installer is documented; source/portable builds also exist. Tray, global shortcuts and active recording/replay workers can continue after window close. Actual installed process/service/driver inventory was not measured. No mandatory account gate was identified in current Rune paths; external-service requirements are unverified. Game recording requires NVIDIA AV1; editing/export/screencast require FFmpeg/FFprobe. Migration gaps are explicit in `docs/RUNE_MIGRATION.md`.
+Kielbox is Windows-only preview software. macOS/Linux are planned. Positioning in README is capture, clips and disk tools in one app. Primary inferred users are creators, support staff, gamers with supported NVIDIA hardware and developers. Intended audience priority remains a product-owner question. The desktop uses Rune; obsolete retired UI screens do not count as shipped functionality. An unsigned per-user installer is documented; source/portable builds also exist. Tray, global shortcuts and active recording/replay workers can continue after window close. Actual installed process/service/driver inventory was not measured. No mandatory account gate was identified in current Rune paths; external-service requirements are unverified. Game recording requires NVIDIA AV1; editing/export/screencast require FFmpeg/FFprobe. Migration gaps are explicit in `docs/RUNE_MIGRATION.md`.
 
 Methods used: source-based heuristic evaluation, cognitive walkthrough of controls and state transitions, cross-tool call tracing, official-documentation competitive comparison, and remote Linux fixture tests. Task-based Windows walkthroughs, persona studies, native stress tests and matched competitor runs could not be completed. Personas below use the supplied Gabe, Chloe, Sam, Ada, Pete, Nina and Alex definitions.
 
@@ -284,7 +288,7 @@ No network monitor, actual upload, external account/token configuration, clipboa
 
 No 1/4/8-hour resource, battery, thermal, leak or boot benchmark occurred. Cold test-build timing is not startup latency. No end-user task time, hesitation, success rate or ease score was measured. Consequently the full requested live-testing methodology remains incomplete; this report is not release certification.
 
-Corrections made during synthesis: library search can find files beyond the 500 rendered matches; trash files are not deleted when Undo expires; disk UI does not delete; clipboard viewer is not a manager; keyboard Start here/End here trimming alternatives exist, so only slider/piece interaction remains disputed; saved editable originals do not prove flattened-export reversibility; current library filters and monitor-under-pointer region capture exist despite stale migration wording. Generic absence of old GPUI parity is not automatically a bug.
+Corrections made during synthesis: library search can find files beyond the 500 rendered matches; trash files are not deleted when Undo expires; disk UI does not delete; clipboard viewer is not a manager; keyboard Start here/End here trimming alternatives exist, so only slider/piece interaction remains disputed; saved editable originals do not prove flattened-export reversibility; current library filters and monitor-under-pointer region capture exist despite stale migration wording. Generic absence of old retired UI parity is not automatically a bug.
 
 ### Supporting evidence files
 

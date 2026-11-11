@@ -1688,7 +1688,6 @@ dependencies = [
  "image",
  "media-core",
  "media-io",
- "raw-window-handle",
  "recording-tools",
  "reqwest",
  "rune",
@@ -1705,7 +1704,6 @@ dependencies = [
  "tokio",
  "toolkit",
  "tray-icon",
- "unicode-segmentation",
  "windows 0.61.3",
  "windows-capture",
 ]

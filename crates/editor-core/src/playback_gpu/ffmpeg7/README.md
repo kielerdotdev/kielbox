@@ -43,9 +43,9 @@ It never decodes video to CPU memory, starts capture/audio, writes a source,
 uses preferences, or opens the application. Deadlines are checked by the host
 and FFmpeg; they cannot forcibly interrupt a hung OS filesystem/driver call.
 
-Default device creation follows GPUI's current default D3D11 hardware adapter
+Default device creation follows desktop UI's current default D3D11 hardware adapter
 selection. Pass both `--adapter-low <u32> --adapter-high <i32>` to require an
-observed GPUI adapter LUID instead. The report includes the actual adapter,
+observed desktop UI adapter LUID instead. The report includes the actual adapter,
 texture extent/array slice, visible crop, PTS/time base/rate and unmodified
 color/SAR metadata. Hardware decoding never falls back to CPU. The first short
 context cancels with a typed reason, is destroyed, and the source is reopened
@@ -59,7 +59,7 @@ uses at most three outstanding tickets, and exercises shared-output key 1→0
 consumption without reading pixels. Fatal shutdown closes the decoder before
 releasing any incomplete frame references, preventing decoder-pool reuse.
 
-This proves neither source RGB accuracy nor GPUI playback cadence. No decoded
+This proves neither source RGB accuracy nor desktop UI playback cadence. No decoded
 pixel readback is performed here; the separate synthetic converter color proof
 and any later source-to-output color proof have distinct validation scope.
 
@@ -115,7 +115,7 @@ its interval is not copied as a universal tuning value. The selected first-poll
 policy was compared with the explicit no-kick baseline using the isolated
 same-device and separate-device/private-copy proof. These results do not establish
 a driver-internal cause or a general playback performance guarantee. Separate-device copying more closely
-models GPU presentation but does not prove GPUI draw/display cadence or RGB accuracy.
+models GPU presentation but does not prove desktop UI draw/display cadence or RGB accuracy.
 
 `SharedOutput.published_frame` is a shared atomic frame identity, initially zero.
 Tracked publication assigns a nonzero ID under producer key 0 before releasing

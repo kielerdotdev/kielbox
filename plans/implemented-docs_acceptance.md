@@ -1,5 +1,9 @@
 # Documentation implementation completion
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 11 November 2026. Read qa-final.md and all six supporting reports. Applied
 ponytail and unslop guidance; read the requested craft-floor/harden references.
 No UI design or source code changed.
@@ -8,7 +12,7 @@ No UI design or source code changed.
   watch/share promises, documents the existing `--working-directory` root
   selection, distinguishes Capture folder and corrects App/Updates navigation.
 - Utilities now leads with dated Rune instructions and concrete baseline limits.
-  The full previous GPUI guide remains explicitly historical for provenance.
+  The full previous retired UI guide remains explicitly historical for provenance.
 - Migration guide now acknowledges current filters and monitor-under-pointer
   region capture, qualifies screenshot shutdown/image-save gaps, and preserves
   historical validation counts without treating them as fresh results.

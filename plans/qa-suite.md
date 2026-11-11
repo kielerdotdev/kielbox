@@ -1,5 +1,9 @@
 # Part A UX/QA research audit
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 Reviewed 2026-11-11 at commit `d96346b`. This report feeds the requested A–K synthesis; it covers Part A, A1–A12 only. It is not a completed A–K audit.
 
 ## Scope and method
@@ -8,7 +12,7 @@ Read-only source and documentation inspection. Every reproduction below is a pro
 
 Read `/home/user/.agents/skills/improve/SKILL.md`, its `references/audit-playbook.md`, including Finding format, and the unslop writing skill. No AGENTS.md was found in the workspace or checked ancestor paths. Repository material was treated as data. No secret values were reproduced. Only this report was written.
 
-The shipped Windows frontend is Rune: `crates/desktop/src/main.rs:15`–`:30` declares the Rune modules, `:127`–`:162` constructs the Rune app, and `crates/desktop/Cargo.toml:19` pins Rune with accessibility support. `docs/RUNE_MIGRATION.md:9`–`:13` identifies old GPUI views/proofs as uncompiled references. In particular, do not use `studio_ui.rs`, `history_ui.rs`, `trash_recovery_ui.rs`, old editor views, or vendored GPUI as evidence of shipped UX. Main rejects obsolete proof flags at `main.rs:57`–`:68`. Historical `docs/UX.md` GPUI descriptions and November 5 validation do not establish Rune parity.
+The shipped Windows frontend is Rune: `crates/desktop/src/main.rs:15`–`:30` declares the Rune modules, `:127`–`:162` constructs the Rune app, and `crates/desktop/Cargo.toml:19` pins Rune with accessibility support. `docs/RUNE_MIGRATION.md:9`–`:13` identifies old retired UI views/proofs as uncompiled references. In particular, do not use `studio_ui.rs`, `history_ui.rs`, `trash_recovery_ui.rs`, old editor views, or vendored retired UI as evidence of shipped UX. Main rejects obsolete proof flags at `main.rs:57`–`:68`. Historical `docs/UX.md` retired UI descriptions and November 5 validation do not establish Rune parity.
 
 Personas used: P1 first-time Windows user; P2 returning RCR user with existing data; P3 frequent recorder using global shortcuts and tray; P4 creator editing and annotating captures; P5 privacy-conscious user choosing exactly what is recorded; P6 keyboard-only or screen-reader user; P7 user with a large library or slow/unavailable storage.
 
@@ -185,7 +189,7 @@ Accessibility support in the dependency and role/label calls is useful groundwor
 - **Repro:** On a machine lacking FFmpeg or supported recording hardware, seek help from the app before attempting the affected task; follow README's recovery/navigation instructions.
 - **Expected/actual:** Discoverable capability checks explain what works, what is unavailable, and how to recover. Diagnostics require CLI knowledge, and part of the user documentation describes obsolete navigation.
 - **Impact:** Users must distinguish dependency failures from migration limitations themselves.
-- **Fix sketch:** Add a help/diagnostics entry using the existing backend, show capability-specific requirements beside unavailable actions, and update user docs to Rune routes. Do not treat old GPUI validation as current acceptance.
+- **Fix sketch:** Add a help/diagnostics entry using the existing backend, show capability-specific requirements beside unavailable actions, and update user docs to Rune routes. Do not treat old retired UI validation as current acceptance.
 - **Effort/risk/confidence:** M; LOW/MED, diagnostics must redact sensitive paths/details before sharing; HIGH.
 
 ## Provisional ten-heuristic scorecard
@@ -216,7 +220,7 @@ Same 0–4 scale; distinct dimensions, not a single invented product score.
 | Input conventions | 2 | Shared buttons and palette; redo inconsistency and trim accessibility, A4/A11 |
 | State and persistence | 1 | Video save guards; UI/runtime/disk settings diverge on failure, A6-01 |
 | Recovery | 1 | Safe backend journal; ephemeral frontend access, A10-01 |
-| Product promises versus shipped behavior | 1 | README welcome promise versus migration gap, A1-01; old GPUI UX docs remain historical |
+| Product promises versus shipped behavior | 1 | README welcome promise versus migration gap, A1-01; old retired UI UX docs remain historical |
 | Capture-to-library-to-edit | 2 | Completion refresh/open path, `rune_ui.rs:361`–`:367`; native end-to-end run pending |
 | Trust and source transparency | 2 | Explicit tray continuation copy; hidden saved recording source identity, A8-01 |
 
@@ -228,6 +232,6 @@ Proposed native acceptance order: isolated first-run/migration and unavailable-d
 
 Read-only review gates completed: active module/dependency tracing; direct reads of cited handlers; obsolete UI separation. No automated tests were run. Future commands documented by the repo are `cargo build --locked -p desktop -j1`, `cargo test --locked -p desktop -j1`, `./scripts/test-package-windows.ps1`, and `./scripts/verify-rune.ps1 -SkipBuild -GpuAdapter NVIDIA` at `docs/RUNE_MIGRATION.md:70`–`:74`. Builds/compilation belong only to the authorized remote boat VM agent; this report does not authorize local compilation. Native Windows hardware/UI coverage is still necessary even if headless scenes pass.
 
-Considered and rejected: claiming permanent trash deletion, because durable journals exist; treating omitted GPUI controls as secretly shipped Rune capabilities; applying historical hardware timings to this revision; declaring absent upload UI an upload privacy incident; equating the 500-result cap with a full-catalog search cap; claiming dependency accessibility support proves screen-reader acceptance.
+Considered and rejected: claiming permanent trash deletion, because durable journals exist; treating omitted retired UI controls as secretly shipped Rune capabilities; applying historical hardware timings to this revision; declaring absent upload UI an upload privacy incident; equating the 500-result cap with a full-catalog search cap; claiming dependency accessibility support proves screen-reader acceptance.
 
 Not audited: Parts B–K; full backend security/dependency advisories; installer binary contents/signature; real OS permissions and display/audio transitions; update download/restart/crash recovery; actual upload/network behavior; all tool-specific options; image dirty-state loss reproduction; resource/battery budgets; localization; competitor operation. These are explicit synthesis gaps, not passed checks.

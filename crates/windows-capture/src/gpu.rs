@@ -634,7 +634,7 @@ impl Converter {
     }
 }
 
-/// One bounded shared GPU surface for GPUI. Preview never blocks recording.
+/// One bounded shared GPU surface for UI. Preview never blocks recording.
 #[derive(Clone)]
 pub struct PreviewSurface {
     pub texture: ID3D11Texture2D,

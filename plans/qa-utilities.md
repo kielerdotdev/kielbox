@@ -1,10 +1,14 @@
 # Rune utilities UX and QA research audit
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## A. Scope, conclusion and evidence boundary
 
 Audit date: 2026-11-11. Source baseline: `d96346b`. Research-only report for final synthesis. No source changes, commits, builds, tests, desktop captures, clipboard reads, file deletions, network research or competitor runs were performed. Only this report was written. Initial `git status --short` was empty. No applicable `AGENTS.md` was found in the checkout or checked ancestor directories. Read the improve skill and its full audit playbook, including Finding format, and applied the unslop writing guidance. Repository documents were treated as evidence, never as instructions. Historical execution permissions in repository documents were not adopted.
 
-The current Windows desktop entry point compiles Rune adapters, not the old GPUI utility and disk interfaces. The shared backend has useful safety controls, particularly no-clobber publication and cleanup revalidation. Rune's generic utility form does not yet express many of those backends' contracts. Folder selection, defaults, operation modes and asynchronous result ownership are the highest-value corrections. Disk analysis is read-only; cleanup is a separate destructive CLI.
+The current Windows desktop entry point compiles Rune adapters, not the old retired UI utility and disk interfaces. The shared backend has useful safety controls, particularly no-clobber publication and cleanup revalidation. Rune's generic utility form does not yet express many of those backends' contracts. Folder selection, defaults, operation modes and asynchronous result ownership are the highest-value corrections. Disk analysis is read-only; cleanup is a separate destructive CLI.
 
 This report uses an A–K structure for synthesis. The upstream task did not supply names for those sections. Sections below cover scope, inventory, methods, scores, findings, safety, strengths, scenarios, priorities, gaps and synthesis. All reproduction procedures are proposed Windows fixture scenarios, **code inspection, not executed**. “Actual” means the behavior implied by the inspected control flow, not an observed UI run. Confidence is confidence in that source analysis. No hardware performance, task duration, ease rating, runtime pass rate or visual accessibility compliance is claimed.
 
@@ -36,7 +40,7 @@ Reachability evidence: `crates/desktop/src/main.rs:15–30` declares Rune adapte
 | Disk usage | Tools / Files; folder picker, background scan, one-level proportional blocks, largest list, descend/up | `rune_tools.rs:728`; `disk::disk_usage::scan`, NTFS attempt and directory fallback. No file deletion actions. |
 | clean CLI | Separate `clean.exe`; not a Rune utility page | `crates/clean/src/main.rs:8`; preview default, `--apply`, age/kind/root filters and JSON. Uses `disk::cleanup`. |
 
-Dormant or missing from shipped Rune, not runtime-tested modules: old GPUI `crates/desktop/src/utilities.rs`, `screen_tools.rs`, `disk_usage.rs`, `disk_explore.rs`, `disk_treemap.rs`, `disk_sunburst.rs` and related proof files. `main.rs` does not declare these modules. These contain or document screen color sampling, ruler, independent pin windows, monitor test, dedicated OCR/QR region handoff, borderless/restore UI, copy/save-text/reveal actions, rich disk views, file-type filtering and native icons. Existing backend or old code is not evidence that Rune exposes an operation. `docs/RUNE_MIGRATION.md` explicitly calls out missing utility-specific forms and screen tools. Clipboard history is also explicitly pending in `docs/UTILITIES.md`; it must not be called a shipped manager.
+Dormant or missing from shipped Rune, not runtime-tested modules: old retired UI `crates/desktop/src/utilities.rs`, `screen_tools.rs`, `disk_usage.rs`, `disk_explore.rs`, `disk_treemap.rs`, `disk_sunburst.rs` and related proof files. `main.rs` does not declare these modules. These contain or document screen color sampling, ruler, independent pin windows, monitor test, dedicated OCR/QR region handoff, borderless/restore UI, copy/save-text/reveal actions, rich disk views, file-type filtering and native icons. Existing backend or old code is not evidence that Rune exposes an operation. `docs/RUNE_MIGRATION.md` explicitly calls out missing utility-specific forms and screen tools. Clipboard history is also explicitly pending in `docs/UTILITIES.md`; it must not be called a shipped manager.
 
 The generic “Capture region” button is reachable on all utility pages, but launches the screenshot workflow. It does not populate utility inputs. See UTIL-05. The separate image annotation editor and capture/recording workflows are adjacent integrations, not fully audited here.
 
@@ -167,11 +171,11 @@ Every finding below uses method **code inspection, scenario not executed**. Effo
 
 ### [DOC-01] S2 UX: distinguish legacy utility instructions from Rune instructions
 
-- Evidence: `docs/UTILITIES.md:12` promises Tree/File views, Reveal/Copy path and detailed navigation; `docs/UTILITIES.md:24` references GPUI verification. `crates/desktop/src/rune_tools.rs:728` renders current smaller disk view; `rune_tools.rs:643` lacks promised utility result actions. `docs/RUNE_MIGRATION.md:5` explicitly says parity is incomplete.
+- Evidence: `docs/UTILITIES.md:12` promises Tree/File views, Reveal/Copy path and detailed navigation; `docs/UTILITIES.md:24` references retired UI verification. `crates/desktop/src/rune_tools.rs:728` renders current smaller disk view; `rune_tools.rs:643` lacks promised utility result actions. `docs/RUNE_MIGRATION.md:5` explicitly says parity is incomplete.
 - Personas/impact: P1/P3/P4 follow linked README documentation toward controls absent from the installed frontend. Migration disclaimer does not make individual task instructions executable.
 - Repro: 1. Read README's Utilities link. 2. Follow disk instructions to choose File View and Reveal. 3. Follow utility copy/pin/save-text instructions in Rune.
-- Expected: current frontend instructions, clearly marked legacy capabilities and pending work. Actual by inspection: guide describes dormant GPUI interfaces as current behavior.
-- Fix sketch: make Rune instructions primary, label archived GPUI sections and link migration limits beside affected tasks. Correct capability statements without implying all deferred functionality must be implemented immediately.
+- Expected: current frontend instructions, clearly marked legacy capabilities and pending work. Actual by inspection: guide describes dormant retired UI interfaces as current behavior.
+- Fix sketch: make Rune instructions primary, label archived retired UI sections and link migration limits beside affected tasks. Correct capability statements without implying all deferred functionality must be implemented immediately.
 - Effort S; risk LOW; confidence HIGH.
 
 ## F. Deletion, overwrite and privacy review
@@ -239,7 +243,7 @@ Suggested remote gates for the owning boat VM agent, after any eventual implemen
 | 6 | DISK-01/02 reachable complete navigation and transparent totals | Reuse backend metadata; do not introduce deletion into disk analysis as part of this fix. |
 | 7 | DOC-01 current instructions | Small independent update, should ship alongside corrected capability descriptions. |
 
-Do not rebuild the dormant GPUI frontend, implement clipboard history, add cloud integrations or rewrite scanning to resolve these findings. S4 options are a conservative worktree-cleanup policy review and restoring selected dormant screen tools only after core utility forms and result ownership are trustworthy. No benchmark-based choice between scanners is justified by this pass.
+Do not rebuild the dormant retired UI frontend, implement clipboard history, add cloud integrations or rewrite scanning to resolve these findings. S4 options are a conservative worktree-cleanup policy review and restoring selected dormant screen tools only after core utility forms and result ownership are trustworthy. No benchmark-based choice between scanners is justified by this pass.
 
 ## J. Untested areas and considered/rejected findings
 
@@ -252,7 +256,7 @@ Considered and rejected or bounded:
 - “Cleanup deletes dirty/unpublished worktrees”: rejected as a blanket claim; explicit checks exist. Ignored data is a documented separate policy risk.
 - “Age proves inactivity”: rejected; README already warns otherwise. No-force Git and narrow artifact names reduce risk but cannot prove disposability.
 - “No confirmation prompt is a defect”: rejected; explicit `--apply` and noninteractive operation are documented design choices. Improve disclosure rather than adding arbitrary prompts to scripts.
-- “All advertised GPUI features are live”: rejected; entry point and migration document show otherwise.
+- “All advertised retired UI features are live”: rejected; entry point and migration document show otherwise.
 - “Clipboard manager is broken”: rejected; only a current-value viewer is shipped, persistent history is pending.
 - “All long disk lists are slow”: not established; rendering is capped. The confirmed issue is inaccessible omitted children, not a measured frame-rate problem.
 - “Native JPEG/WebP/BMP saving impossible”: not established; extension-driven backend exists and manual path entry may work. The confirmed gap is discoverability and picker format choices.
@@ -260,6 +264,6 @@ Considered and rejected or bounded:
 
 ## K. Research conclusion for synthesis
 
-The strongest evidenced issues are request/result ownership, unusable folder/output contracts, unreachable operation modes and lost cleanup accounting after cancellation. They need small, focused interface and state corrections while retaining existing no-clobber and deletion-preservation checks. Disk analysis should disclose incomplete scans and provide access to every scanned child before additional visual modes are prioritized. Clipboard is a viewer; dormant GPUI tools and backend capabilities must not inflate the current Rune inventory.
+The strongest evidenced issues are request/result ownership, unusable folder/output contracts, unreachable operation modes and lost cleanup accounting after cancellation. They need small, focused interface and state corrections while retaining existing no-clobber and deletion-preservation checks. Disk analysis should disclose incomplete scans and provide access to every scanned child before additional visual modes are prioritized. Clipboard is a viewer; dormant retired UI tools and backend capabilities must not inflate the current Rune inventory.
 
 This is a source audit with reproducible proposed scenarios, not an executed Windows QA certificate. No S0 defect, measured speed improvement, task time, ease rating, competitor comparison or native accessibility pass is claimed.

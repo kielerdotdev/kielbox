@@ -1,10 +1,10 @@
 # Rune desktop migration
 
 The default `desktop` binary now uses Rune, pinned to revision
-`a9da7e3ebf5a8ab9bf19c3015032674b6e042df2`. GPUI is absent from its Cargo
-dependency graph, and the workspace no longer patches or builds the vendored
-GPUI crate. This is a working replacement frontend, **not complete feature
-parity with the previous desktop**.
+`a9da7e3ebf5a8ab9bf19c3015032674b6e042df2`. The previous framework, vendored
+renderer, uncompiled views and obsolete UI proof scripts have been removed.
+Rune is the only desktop frontend. Feature parity with the previous desktop
+remains incomplete.
 
 This inventory includes the 11 November 2026 audit fixes on baseline `d96346b`.
 Boat cross-build/Wine validation passed; native hardware gates remain open in
@@ -12,9 +12,9 @@ Boat cross-build/Wine validation passed; native hardware gates remain open in
 
 The native media, recording, annotation, disk, settings, installation and update
 backends retain their existing formats. The new entry point is `src/main.rs`;
-views and adapters are in `crates/desktop/src/rune_*.rs`. Older unreferenced GPUI
-view/proof files and the vendor directory remain as migration references. They
-are not compiled or linked. Git retains the previous implementation.
+views and adapters are in `crates/desktop/src/rune_*.rs`. Git history retains
+the previous implementation; no legacy frontend sources or vendor directory
+remain in the checkout.
 
 ## Current Rune implementation
 
@@ -30,7 +30,7 @@ are not compiled or linked. Git retains the previous implementation.
 | Disk | Existing cancellable directory/NTFS scanner, progress, directory navigation and size bars |
 | Utilities | 17 task-specific forms, capture handoff, result-bound copy/save/reveal and format selection |
 | Settings | Capture folder, resolution/FPS, audio flags, replay microphone cleanup, tray behavior, shortcuts and updates |
-| Packaging | Application-owned DPI manifest, Rune/font licenses, embedded shader metadata; no GPUI FXC build step |
+| Packaging | Application-owned DPI manifest, Rune/font licenses, embedded shader metadata; no separate FXC build step |
 
 Workers own media/filesystem operations. Screenshot failures retain their
 session; Copy is clipboard-only. Image close/replacement/quit waits for an editable
@@ -56,7 +56,7 @@ owned through shutdown. Native lifecycle acceptance is still required.
 - Full setup diagnostics UI. Installed first run now opens Storage guidance and
   Use existing data selects an existing root for the next launch. Portable builds
   retain `--working-directory`. Capture folder is a separate setting.
-- The old GPUI native UI proofs need Rune equivalents. Unsupported old proof flags
+- Native UI interaction proofs still need broader Rune coverage. Unsupported old proof flags
   must not be interpreted as successful Rune tests.
 
 ## GPU ownership

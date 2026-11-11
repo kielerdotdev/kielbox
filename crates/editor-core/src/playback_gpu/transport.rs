@@ -152,7 +152,7 @@ fn wait(shared: &Shared, duration: Duration) {
 /// A release notification is only a reason to retry normal zero-timeout keyed
 /// mutex acquisition. No GPU/context lock is held here. The epoch was sampled
 /// before acquisition, preventing a release between Busy and this wait being
-/// lost. A finite timeout preserves cancellation and non-GPUI consumers.
+/// lost. A finite timeout preserves cancellation and non-UI consumers.
 fn wait_for_consumer(epoch: &std::sync::atomic::AtomicU64, observed: u64) -> bool {
     wait_for_consumer_timeout(epoch, observed, 1);
     epoch.load(Ordering::Acquire) != observed

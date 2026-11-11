@@ -1,4 +1,4 @@
-//! Native tray commands feed the existing GPUI loop; capture stays on its worker.
+//! Native tray commands feed the existing UI loop; capture stays on its worker.
 use std::sync::mpsc;
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,

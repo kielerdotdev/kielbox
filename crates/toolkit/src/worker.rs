@@ -1,4 +1,4 @@
-//! One cancellable workflow worker; interactive steps rendezvous with the GPUI thread.
+//! One cancellable workflow worker; interactive steps rendezvous with the UI thread.
 use crate::{core, services, types};
 use anyhow::{Context, Result, bail};
 use core::{

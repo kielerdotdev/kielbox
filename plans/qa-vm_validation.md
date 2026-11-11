@@ -1,5 +1,9 @@
 # Boat VM validation research
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## A. Scope and verdict
 
 Research date: 2026-11-11. Source commit: `d96346b2ee44cf44b9ffeb5881c6a44d2cbcb6c7`. This report feeds the senior UX/QA audit. It covers Boat discovery, remote test feasibility, verification boundaries and two Library scenarios from source inspection. It is not full native Windows acceptance. No source changes, commits, other report writes, or subagents were made. Local work was limited to reading, searches, source archive streaming and writing this report. All Rust compilation occurred on Boat.
@@ -84,7 +88,7 @@ It printed the clean CLI usage, preview-by-default behavior, `--apply` deletion 
 
 ## E. Native and emulated validation boundary
 
-README.md:6 declares Windows-only support; README.md:14 requires NVIDIA AV1 hardware for game recording. The shipped entry point imports Rune adapters at `crates/desktop/src/main.rs:15` and `crates/desktop/src/main.rs:30`. Rune is pinned at `crates/desktop/Cargo.toml:19`. Older unreferenced GPUI code is explicitly historical, `docs/RUNE_MIGRATION.md:3` and `docs/RUNE_MIGRATION.md:11`.
+README.md:6 declares Windows-only support; README.md:14 requires NVIDIA AV1 hardware for game recording. The shipped entry point imports Rune adapters at `crates/desktop/src/main.rs:15` and `crates/desktop/src/main.rs:30`. Rune is pinned at `crates/desktop/Cargo.toml:19`. Older unreferenced retired UI code is explicitly historical, `docs/RUNE_MIGRATION.md:3` and `docs/RUNE_MIGRATION.md:11`.
 
 The repository supplies a Linux cross-build/Wine path, `scripts/ci/build-windows-cross.sh:6`, with setup, Windows tests, build, smoke and static render stages. This was inspected but not executed. Provisioning a complete Wine/SDK pipeline was outside the bounded scoped-test pass. It would still not establish native capture, hardware GPU preview, installer experience or physical input latency. `docs/RUNE_MIGRATION.md:77` states those limits.
 
@@ -126,7 +130,7 @@ Severity scale: S0 data loss/privacy risk, S1 major, S2 friction, S3 polish, S4 
 
 ## H. Strengths supported by evidence
 
-`crates/desktop/src/main.rs:57` rejects obsolete GPUI proof switches with exit code 2, reducing false positive acceptance. `scripts/verify-rune.ps1:15` records scene PNGs and element trees, while line 27 checks generated GPU completion and line 46 verifies checkerboard pixel colors. `docs/RUNE_MIGRATION.md:83` states that fixtures isolate personal data and do not exercise actual capture. These boundaries are explicit and useful.
+`crates/desktop/src/main.rs:57` rejects obsolete retired UI proof switches with exit code 2, reducing false positive acceptance. `scripts/verify-rune.ps1:15` records scene PNGs and element trees, while line 27 checks generated GPU completion and line 46 verifies checkerboard pixel colors. `docs/RUNE_MIGRATION.md:83` states that fixtures isolate personal data and do not exercise actual capture. These boundaries are explicit and useful.
 
 Cleanup has safety-focused fixture coverage. `crates/disk/src/cleanup/tests.rs:36` asserts planning does not remove files and apply preserves unrecognized/source files; line 55 checks changes after preview are preserved; line 90 covers cancellation. `crates/clean/src/main.rs:12` documents preview as default and warns that apply permanently deletes eligible directories. Runtime results are limited to the remote ledger above.
 
@@ -140,7 +144,7 @@ The native CI workflow uses Windows 2025 and tests disk/clean at `.github/workfl
 
 No broad UI quality verdict is supported by this pass. Accessibility, visual hierarchy at actual DPI, timing, hover/focus feedback, live audio/video behavior, multi-monitor capture, HDR, recovery, upload destinations, update signing, privacy behavior and competitors were not validated. Existing tests were inspected selectively, not audited for total coverage. No dependency security audit was run. No raw credentials were examined.
 
-The known migration backlog is not automatically a bug list. GPUI-only UX statements in older documentation must be traced into Rune before inclusion. The Library cap is an acknowledged product limitation; the thumbnail queue mismatch is a separate implementation inconsistency. Neither implies data loss. Test command wall time includes setup and is not user-task timing or a benchmark.
+The known migration backlog is not automatically a bug list. retired UI-only UX statements in older documentation must be traced into Rune before inclusion. The Library cap is an acknowledged product limitation; the thumbnail queue mismatch is a separate implementation inconsistency. Neither implies data loss. Test command wall time includes setup and is not user-task timing or a benchmark.
 
 ## K. Handoff and cleanup
 

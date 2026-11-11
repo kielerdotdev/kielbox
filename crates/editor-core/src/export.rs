@@ -837,7 +837,7 @@ fn prepare_audio(
     Ok(overrides)
 }
 
-/// Blocks its worker, never the GPUI thread. Partial output is never published.
+/// Blocks its worker, never the UI thread. Partial output is never published.
 pub fn export(
     project: &Project,
     options: &ExportOptions,

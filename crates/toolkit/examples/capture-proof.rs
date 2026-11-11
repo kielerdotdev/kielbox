@@ -1,4 +1,4 @@
-//! Exercise the exact screenshot service used by GPUI without copying to the clipboard.
+//! Exercise the exact screenshot service used by UI without copying to the clipboard.
 use toolkit::{
     core::{
         settings::{Paths, Settings},

@@ -63,7 +63,7 @@ fn main() {
             )
     }) {
         eprintln!(
-            "This GPUI proof has not been ported. Use scripts/verify-rune.ps1 for Rune validation."
+            "This retired desktop proof is unsupported. Use scripts/verify-rune.ps1 for Rune validation."
         );
         std::process::exit(2);
     }

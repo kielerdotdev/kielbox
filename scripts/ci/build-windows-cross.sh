@@ -114,7 +114,7 @@ fi
 if want smoke; then
   exe="target/$TARGET/release/desktop.exe"
   [ -f "$exe" ] || { echo "Build first: $exe is missing" >&2; exit 1; }
-  # The GPUI-era proof flags must be refused, not mistaken for success.
+  # The Retired desktop proof flags must be refused, not mistaken for success.
   set +e
   "$wine_bin" "$exe" --proof-seconds 1 >/dev/null 2>&1
   code=$?

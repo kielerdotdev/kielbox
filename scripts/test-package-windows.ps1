@@ -70,47 +70,4 @@ Assert-PackageTest ($rcrTestArchiveManifest.corresponding_source_included -and (
 $rcrTestArchiveManifest.version_label = 'manifest changed without updating checksums'
 $rcrTestArchiveManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $rcrTestArchiveManifestPath -Encoding UTF8
 Expect-PackageFailure { & (Join-Path $rcrTestWithArchive 'Verify-package.ps1') } 'Checksum mismatch: package-manifest.json'
-. (Join-Path $PSScriptRoot 'packaging/Find-fxc.ps1')
-$rcrTestSdk = Join-Path $rcrTestRoot 'fixture SDK/bin'
-foreach ($rcrTestVersion in @('10.0.9999.0', '10.0.10000.0', '10.0.20000.0')) {
-    [IO.Directory]::CreateDirectory((Join-Path $rcrTestSdk "$rcrTestVersion/x64")) | Out-Null
-}
-foreach ($rcrTestVersion in @('10.0.9999.0', '10.0.10000.0')) {
-    [IO.File]::WriteAllText((Join-Path $rcrTestSdk "$rcrTestVersion/x64/fxc.exe"), 'not executable; discovery fixture only')
-}
-$rcrTestCompiler = Find-RcrFxcCompiler -SdkBinRoots @($rcrTestSdk)
-Assert-PackageTest ($rcrTestCompiler -eq (Join-Path $rcrTestSdk '10.0.10000.0/x64/fxc.exe')) 'SDK discovery did not choose newest available numeric version.'
-$rcrTestCompilerDirectory = Join-Path $rcrTestRoot 'fixture PATH'
-[IO.Directory]::CreateDirectory($rcrTestCompilerDirectory) | Out-Null
-$rcrTestPathCompiler = Join-Path $rcrTestCompilerDirectory 'fxc.exe'
-[IO.File]::WriteAllText($rcrTestPathCompiler, 'not executable; discovery fixture only')
-Assert-PackageTest ((Find-RcrFxcCompiler -PathDirectories @($rcrTestCompilerDirectory) -SdkBinRoots @($rcrTestSdk)) -eq $rcrTestPathCompiler) 'PATH compiler did not take priority over SDK discovery.'
-Assert-PackageTest ((Find-RcrFxcCompiler -ExplicitPath $rcrTestCompiler -PathDirectories @($rcrTestCompilerDirectory)) -eq $rcrTestCompiler) 'Explicit compiler override was not preserved.'
-Expect-PackageFailure { Find-RcrFxcCompiler -ExplicitPath (Join-Path $rcrTestRoot 'missing-fxc.exe') -PathDirectories @($rcrTestCompilerDirectory) } 'no fallback'
-Expect-PackageFailure { Find-RcrFxcCompiler } 'Release build was not started'
-$rcrTestPreviousFxc = [Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')
-try {
-    foreach ($rcrTestPriorFxc in @($null, '', 'previous explicit compiler')) {
-        if ($null -eq $rcrTestPriorFxc) {
-            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', [NullString]::Value, 'Process')
-        } else {
-            [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPriorFxc, 'Process')
-        }
-        # .NET Framework treats an empty value as absent; modern .NET preserves
-        # empty values. In both cases restoration must preserve the actual state.
-        $rcrTestExpectedFxc = [Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process')
-        Invoke-RcrWithFxc -Compiler $rcrTestCompiler -Build {
-            Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -eq $rcrTestCompiler) 'Build did not receive selected compiler.'
-        }
-        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -ceq $rcrTestExpectedFxc) 'Successful build failed to restore process environment.'
-        Expect-PackageFailure { Invoke-RcrWithFxc -Compiler $rcrTestCompiler -Build { throw 'injected build failure; no Cargo execution' } } 'injected build failure'
-        Assert-PackageTest ([Environment]::GetEnvironmentVariable('GPUI_FXC_PATH', 'Process') -ceq $rcrTestExpectedFxc) 'Failed build failed to restore process environment.'
-    }
-} finally {
-    if ($null -eq $rcrTestPreviousFxc) {
-        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', [NullString]::Value, 'Process')
-    } else {
-        [Environment]::SetEnvironmentVariable('GPUI_FXC_PATH', $rcrTestPreviousFxc, 'Process')
-    }
-}
 Write-Output "PASS: $rcrTestCount packaging assertions. Owned fixtures preserved at $rcrTestRoot"

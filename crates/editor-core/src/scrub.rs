@@ -37,7 +37,7 @@ static MEMORY_SOFTWARE: AtomicU64 = AtomicU64::new(0);
 static MEMORY_GPU: AtomicU64 = AtomicU64::new(0);
 /// Opt-in retained seek-cache accounting, not total process/driver memory.
 /// Surface bytes use the decoder's conservative aligned image-size accounting;
-/// codec DPB, uncached current frames, returned images and GPUI are excluded.
+/// codec DPB, uncached current frames, returned images and UI are excluded.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScrubMemorySnapshot {
     pub active_workers: u64,

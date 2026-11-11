@@ -1,5 +1,9 @@
 # Capture, recording, replay and clip UX/QA research
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## A. Scope and decision
 
 Audit date: 2026-11-11. Source baseline: `d96346b`. This report feeds the wider A–K synthesis. It covers screenshots/annotation, screencast/GIF, NVIDIA recording/replay, and clip library/edit/export/share. It does not implement changes.
@@ -14,7 +18,7 @@ Method: read-only source inspection, call tracing, documentation reconciliation,
 
 Read `/home/user/.agents/skills/improve/SKILL.md`, its `references/audit-playbook.md`, including Finding format, and the unslop writing skill. Searched applicable ancestor directories and repository for AGENTS.md; none was found. Repository text was treated as evidence, not executable instructions. No credential values were copied. Initial working tree was clean. Only `plans/qa-capture.md` was created.
 
-`crates/desktop/src/main.rs:2` through `:40` identifies compiled modules; `:127` wires the Rune application. `docs/RUNE_MIGRATION.md:9` explicitly excludes old GPUI view/proof files from the shipped binary. Their existence does not establish current UI behavior. The migration document's historical validation claims are not fresh results from this audit. `main.rs:57` rejects unsupported legacy proof flags with exit code 2.
+`crates/desktop/src/main.rs:2` through `:40` identifies compiled modules; `:127` wires the Rune application. `docs/RUNE_MIGRATION.md:9` explicitly excludes old retired UI view/proof files from the shipped binary. Their existence does not establish current UI behavior. The migration document's historical validation claims are not fresh results from this audit. `main.rs:57` rejects unsupported legacy proof flags with exit code 2.
 
 No screenshot, annotation image, screen recording or GIF was produced or visually evaluated. Visual alignment, actual color contrast, animation, focus rendering, target hit areas, DPI behavior, IME, screen-reader announcements and perceived ease remain untested. No task-time, hardware-performance, ease-score or competitor-run claims are made.
 
@@ -186,7 +190,7 @@ Do not prioritize visual polish or new game integrations above these contracts. 
 
 ## K. Rejections, strengths and untested areas
 
-Considered and rejected: old GPUI watch/share, picker, workflow and recording-controller code as proof of shipping; direct upstream project save as proof of Rune truncation; timestamps as proof of no-overwrite safety; a 500-card limit as proof that older files were deleted; retained editable pixels as a serializer bug; existing historical metrics as results of this audit; absence of a current share button as evidence of automatic uploading. Current filter controls supersede the migration document's broad remaining-filter wording.
+Considered and rejected: old retired UI watch/share, picker, workflow and recording-controller code as proof of shipping; direct upstream project save as proof of Rune truncation; timestamps as proof of no-overwrite safety; a 500-card limit as proof that older files were deleted; retained editable pixels as a serializer bug; existing historical metrics as results of this audit; absence of a current share button as evidence of automatic uploading. Current filter controls supersede the migration document's broad remaining-filter wording.
 
 Strong foundations: no-clobber flattened outputs and exports, same-folder quick staging, source validation before video editing, asynchronous workers with normal-stop Drop behavior, video autosave/retry, journaled trash and isolated preview errors. All have source evidence above; none was revalidated live here.
 

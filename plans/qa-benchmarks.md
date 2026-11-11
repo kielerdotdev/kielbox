@@ -1,5 +1,9 @@
 # Kielbox research and UX/QA benchmark contribution
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## A. Scope and evidence contract
 
 Research date: 2026-11-11. Code baseline: `d96346b`. This is the research contribution to the requested A–K audit, not a claim that native acceptance testing has passed. Only this report was written. No compilation, installations, heavy tests, competitor execution, or remote VM execution occurred. Repository files were treated as data. No AGENTS.md was found in the checkout or checked ancestor directories. The improve skill and its `references/audit-playbook.md`, including Finding format, were read.
@@ -10,7 +14,7 @@ Severity: S0 data loss/privacy risk; S1 major blocked workflow; S2 friction; S3 
 
 ## B. Shipped portfolio and personas
 
-`crates/desktop/src/main.rs:15` and `docs/RUNE_MIGRATION.md:3` identify Rune as current. Old GPUI files and proof scripts are not evidence that a control ships. Windows is the only supported platform, `README.md:6`.
+`crates/desktop/src/main.rs:15` and `docs/RUNE_MIGRATION.md:3` identify Rune as current. Old retired UI files and proof scripts are not evidence that a control ships. Windows is the only supported platform, `README.md:6`.
 
 | Persona | Job | Reachable Rune capability | Boundary |
 | --- | --- | --- | --- |
@@ -160,10 +164,10 @@ Do not infer live capture or accessibility acceptance from generated Rune scenes
 
 Not audited exhaustively: updater authenticity/recovery, installer migration behavior, clean CLI deletion policy, upload credential storage, full media parser/export safety, annotation redaction irreversibility, native capture/GPU/driver reliability, HDR/color accuracy, mixed DPI, IME, screen-reader output, memory/CPU/GPU use, crash recovery and all external destination policies. No S0 is established by this research pass. That is not clearance of these areas.
 
-Rejected: calling retained GPUI screens shipped; treating all documented parity gaps as bugs; claiming the disk analyzer deletes files; claiming library items beyond 500 cannot be found by search; asserting equal allocated and logical disk totals; using NVIDIA vendor compression or scan-speed advertising as measured findings; presenting old test counts as fresh execution. Screenshot monitor-under-pointer behavior is implemented in `crates/desktop/src/rune_tools.rs:974` despite the broader pending wording in migration docs, so it is not reported missing.
+Rejected: calling retained retired UI screens shipped; treating all documented parity gaps as bugs; claiming the disk analyzer deletes files; claiming library items beyond 500 cannot be found by search; asserting equal allocated and logical disk totals; using NVIDIA vendor compression or scan-speed advertising as measured findings; presenting old test counts as fresh execution. Screenshot monitor-under-pointer behavior is implemented in `crates/desktop/src/rune_tools.rs:974` despite the broader pending wording in migration docs, so it is not reported missing.
 
 ## K. Handoff and verification boundaries
 
 This report contains seven concrete findings and three portfolio opportunities. Exact native outcomes require the acceptance work above. No source edits, commits, secret values, local Rust compilation, competitor runs or timed benchmark claims were made.
 
-For later implementation, the repository documents `cargo build --locked -p desktop -j1`, `cargo test --locked -p desktop -j1`, `./scripts/test-package-windows.ps1`, and `./scripts/verify-rune.ps1 -SkipBuild -GpuAdapter NVIDIA` in `docs/RUNE_MIGRATION.md:70`. They are proposed gates for the authorized remote Windows agent, not commands executed here. Add targeted Rune interaction coverage for each repaired contract before broadening checks. Historical old-GPUI verification flags are not accepted Rune evidence.
+For later implementation, the repository documents `cargo build --locked -p desktop -j1`, `cargo test --locked -p desktop -j1`, `./scripts/test-package-windows.ps1`, and `./scripts/verify-rune.ps1 -SkipBuild -GpuAdapter NVIDIA` in `docs/RUNE_MIGRATION.md:70`. They are proposed gates for the authorized remote Windows agent, not commands executed here. Add targeted Rune interaction coverage for each repaired contract before broadening checks. Historical old-retired UI verification flags are not accepted Rune evidence.

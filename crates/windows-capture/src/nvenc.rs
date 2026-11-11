@@ -39,7 +39,7 @@ struct Slot {
 }
 
 /// Intentionally !Send + !Sync: a session and its immediate D3D11 context live
-/// on one worker. The only shared resource with GPUI has a keyed mutex.
+/// on one worker. The only shared resource with UI has a keyed mutex.
 pub struct Nvenc {
     _library: Library,
     api: NV_ENCODE_API_FUNCTION_LIST,

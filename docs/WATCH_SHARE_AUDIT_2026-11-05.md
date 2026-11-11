@@ -1,5 +1,9 @@
 # Local MP4 preparation from Clip show — 2026-11-05
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 This work adds an explicit local-file preparation path to the watch session. It does not create a remote watch party, upload footage, or copy a file automatically.
 
 ## Behavior and ownership
@@ -34,17 +38,17 @@ The desktop suite passed **253 tests, 8 ignored**, including the share/controlle
 
 ## Fullscreen inspection
 
-GPUI's Windows fullscreen implementation was inspected. Its inner transition changes style/bounds with `SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER`. The public API deliberately defers fullscreen for a hidden window until it is shown. Therefore an exclusively hidden-host proof cannot verify actual native fullscreen geometry or restoration. The initial transition-based hidden proof timed out; treating its pending request as a completed native transition would be incorrect. That proof remains hidden, and no vendored GPUI change was made to force it. A separate explicitly owned shown-host evaluation now establishes native geometry, as detailed below.
+retired UI's Windows fullscreen implementation was inspected. Its inner transition changes style/bounds with `SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER`. The public API deliberately defers fullscreen for a hidden window until it is shown. Therefore an exclusively hidden-host proof cannot verify actual native fullscreen geometry or restoration. The initial transition-based hidden proof timed out; treating its pending request as a completed native transition would be incorrect. That proof remains hidden, and no vendored retired UI change was made to force it. A separate explicitly owned shown-host evaluation now establishes native geometry, as detailed below.
 
 Fullscreen is an explicit viewer control and F11 action. Escape first leaves fullscreen and a later windowed Escape returns to editing. Pending native transitions are coalesced so rapid repeated Escape cannot enqueue a second toggle and accidentally re-enter fullscreen. Explicit Library/editor exits restore windowed mode. Hiding through another route now waits for pending entry acknowledgment, requests one exit, and waits for exit acknowledgment within a three-second deadline; it clears pending controller state only after restoration. A timeout retains ownership and reports an error. This replaces a one-shot 10 ms assumption that could miss entry or leave a pending controller stranded. Restoration is canceled if the user returns to watching before the exit request.
 
-The revised `--smoke-editor-keyboard` fixture checks the exclusively owned host is invisible and is not the foreground HWND before enabling a private platform-suppression flag. It paints the actual Clip show key context, dispatches real GPUI F11 events, and verifies the production controller receives a pending fullscreen request. Repeated F11/Escape must respect the pending guard. Native bounds, project/Undo/Redo, and monitor volume/mute remain unchanged. Fixture state is cleared on success or assertion failure. No actual platform fullscreen request is queued, avoiding deferred placement changes to the hidden host. No OS input or visible user window is involved.
+The revised `--smoke-editor-keyboard` fixture checks the exclusively owned host is invisible and is not the foreground HWND before enabling a private platform-suppression flag. It paints the actual Clip show key context, dispatches real retired UI F11 events, and verifies the production controller receives a pending fullscreen request. Repeated F11/Escape must respect the pending guard. Native bounds, project/Undo/Redo, and monitor volume/mute remain unchanged. Fixture state is cleared on success or assertion failure. No actual platform fullscreen request is queued, avoiding deferred placement changes to the hidden host. No OS input or visible user window is involved.
 
 Pure controller regressions passed for simulated acknowledgment, repeated requests, Escape priority, windowed fallthrough, and delayed entry/exit restoration without duplicate toggles. The hidden keyboard/controller proof **passed in 7,777 ms**; evidence is `.downloads/plan-continuation/editor-keyboard-controller-final.log`. This checkpoint establishes controller behavior and hidden F11 dispatch, not native fullscreen transitions.
 
 ## Actual nonactivating native fullscreen evaluation
 
-The separate `--smoke-editor-native-fullscreen --open <generated fixture>` evaluation **passed**, with total keyboard/native-fixture elapsed time **8,547 ms**. Evidence: `.downloads/plan-continuation/editor-native-fullscreen-position-fixed.log`. It uses Silent playback, GPUI-internal key dispatch, and a shown background host protected by `WS_EX_NOACTIVATE`, nonactivating placement at the bottom of the Z-order, an activation observer latch, and PID/unique-HWND-property ownership checks. No GPUI activation API, OS input, desktop readback, clipboard action, or other application's controls are used.
+The separate `--smoke-editor-native-fullscreen --open <generated fixture>` evaluation **passed**, with total keyboard/native-fixture elapsed time **8,547 ms**. Evidence: `.downloads/plan-continuation/editor-native-fullscreen-position-fixed.log`. It uses Silent playback, retired UI-internal key dispatch, and a shown background host protected by `WS_EX_NOACTIVATE`, nonactivating placement at the bottom of the Z-order, an activation observer latch, and PID/unique-HWND-property ownership checks. No retired UI activation API, OS input, desktop readback, clipboard action, or other application's controls are used.
 
 | Native transition | Observed elapsed time |
 | --- | --- |
@@ -56,7 +60,7 @@ The separate `--smoke-editor-native-fullscreen --open <generated fixture>` evalu
 | Sidebar-hide restoration | 31 ms |
 | Immediate hide during pending entry | 309 ms, including a deliberate 300 ms stability wait |
 
-These are single-run transition observations, not a latency distribution. All strict native RECT, logical-bounds, style, monitor-coverage, history, volume, and ownership checks passed. The result reports `activation_observed:false`, `os_input_sent:false`, and `platform_toggle_suppressed:false`. Earlier shown-host attempts exposed a fixture initialization issue: a never-shown GPUI host cached its outer origin; restored visible windows reported client origin. Actual RECT/styles already matched. Explicit nonactivating initial movement establishes the correct baseline; no restoration comparison was weakened.
+These are single-run transition observations, not a latency distribution. All strict native RECT, logical-bounds, style, monitor-coverage, history, volume, and ownership checks passed. The result reports `activation_observed:false`, `os_input_sent:false`, and `platform_toggle_suppressed:false`. Earlier shown-host attempts exposed a fixture initialization issue: a never-shown retired UI host cached its outer origin; restored visible windows reported client origin. Actual RECT/styles already matched. Explicit nonactivating initial movement establishes the correct baseline; no restoration comparison was weakened.
 
 This closes the **owned nonactivating background native geometry/restoration** gate. The host can remain occluded behind existing applications. It does not establish manual foreground fullscreen experience, physical keyboard/mouse delivery, monitor scanout, every DPI/display arrangement, or general cross-machine portability. The original hidden failures and their narrower successful controller proof remain historical evidence, not native passes.
 

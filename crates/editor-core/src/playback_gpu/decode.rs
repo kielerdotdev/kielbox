@@ -200,7 +200,7 @@ pub fn create_device(
                     break;
                 }
             }
-            Some(found.context("Requested GPUI adapter LUID was not found")?)
+            Some(found.context("Requested UI adapter LUID was not found")?)
         } else {
             None
         };

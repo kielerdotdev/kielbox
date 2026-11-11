@@ -90,4 +90,4 @@ Passing layout checks proves consistency with the parsed headers and Rust
 target; it does not prove decoder behavior. Review the artifacts before any
 production integration. The next proof should be a bounded standalone D3D11VA
 decoder using an owned SDR AV1 color fixture, with GPU conversion and proof-only
-readback diagnostics. Playback/audio/GPUI integration remains separate.
+readback diagnostics. Playback/audio/desktop UI integration remains separate.

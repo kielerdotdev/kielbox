@@ -1,8 +1,12 @@
 # Editor, Library, and clip viewing audit — 2026-11-05
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## Scope and result
 
-This audit builds on the existing preview-first Clip show, filtered Library watch queue, native software preview, Silent hidden evaluation, and audio EOF fixes already in the working tree. It preserves existing edits and addresses the issues below. Editor proofs use owned generated media and GPUI-internal input, including a separately authorized shown nonactivating host for native fullscreen. No live screen/audio capture, OS keyboard/mouse input, other-application controls, or external uploads are used by these editor proofs.
+This audit builds on the existing preview-first Clip show, filtered Library watch queue, native software preview, Silent hidden evaluation, and audio EOF fixes already in the working tree. It preserves existing edits and addresses the issues below. Editor proofs use owned generated media and retired UI-internal input, including a separately authorized shown nonactivating host for native fullscreen. No live screen/audio capture, OS keyboard/mouse input, other-application controls, or external uploads are used by these editor proofs.
 
 All four changes are implemented. The central desktop suite passed 228 tests (8 ignored), the hidden native keyboard proof passed on a generated AAC fixture in 11.1 seconds, and the deterministic Library benchmark passed all four cases. Verification and remaining cold-query limitations are recorded below. This batch makes no new measured playback-latency claim.
 

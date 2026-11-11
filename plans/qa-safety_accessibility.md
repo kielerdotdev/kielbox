@@ -1,5 +1,9 @@
 # Rune safety and accessibility audit
 
+> Historical record. Source paths and commands describe the audited revision.
+> Retired frontend sources and proof scripts were removed after this report;
+> see [Rune status](../docs/RUNE_MIGRATION.md) for current behavior. Exact original reports remain in git at `a52bff7`.
+
 ## A. Scope and decision
 
 Research audit of commit `d96346b`, dated 2026-11-11. This report covers the current Windows Rune frontend, its reachable media/filesystem adapters, keyboard and accessibility declarations, destructive controls, screenshot privacy, shutdown, recovery, and utility handoffs. It is input to the broader UX/QA synthesis. The A–K headings below organize this independent contribution; no parent report template was supplied.
@@ -14,7 +18,7 @@ Method: read-only code inspection and tracing of callbacks, state transitions, w
 
 Read the improve skill and its audit playbook, including Finding format. Applied the unslop writing guidance. Searched the workspace and its ancestor locations for applicable AGENTS.md files; none were found. Repository text was treated as evidence, not executable instructions. Read README, desktop Cargo manifest, migration status, Rune entry point and view modules, relevant scanner, trash, annotation actor, hotkey, and secret-store adapters. No source changes, builds, Rust compilation, test execution, dependency installs, network calls, credential reads, or subagents. Only this report was written.
 
-The shipped entry point declares Rune modules at `crates/desktop/src/main.rs:15` and `crates/desktop/src/main.rs:25`. The manifest enables Rune accessibility at `crates/desktop/Cargo.toml:19`. Old GPUI UI/proof files and vendor sources were excluded from shipped-UI conclusions. Migration gaps explicitly acknowledged in `docs/RUNE_MIGRATION.md` are not automatically bugs; reachable controls with misleading or unsafe behavior remain findings.
+The shipped entry point declares Rune modules at `crates/desktop/src/main.rs:15` and `crates/desktop/src/main.rs:25`. The manifest enables Rune accessibility at `crates/desktop/Cargo.toml:19`. Old retired UI UI/proof files and vendor sources were excluded from shipped-UI conclusions. Migration gaps explicitly acknowledged in `docs/RUNE_MIGRATION.md` are not automatically bugs; reachable controls with misleading or unsafe behavior remain findings.
 
 No task durations, hardware performance, ease ratings, contrast measurements, user observations, or competitor runs were measured or inferred. Effort below uses coarse S/M/L scope only, without invented delivery times.
 
@@ -207,7 +211,7 @@ Persistent capture-recovery presentation is a documented migration gap. It was n
 
 ## H. Upload, tokens and local privacy
 
-No uploader or token configuration controls were found in `rune_*.rs`, and the inspected screenshot paths save locally or use the clipboard. `docs/RUNE_MIGRATION.md` explicitly lists configured screenshot/upload workflows as not wired. This audit therefore makes no claim that a current Rune Upload button leaks tokens, uploads unexpectedly, or stores credentials in plaintext. Old GPUI upload settings are not shipped UI evidence.
+No uploader or token configuration controls were found in `rune_*.rs`, and the inspected screenshot paths save locally or use the clipboard. `docs/RUNE_MIGRATION.md` explicitly lists configured screenshot/upload workflows as not wired. This audit therefore makes no claim that a current Rune Upload button leaks tokens, uploads unexpectedly, or stores credentials in plaintext. Old retired UI upload settings are not shipped UI evidence.
 
 The shared secret backend uses OS keyring entries through `crates/toolkit-services/src/secrets.rs:64`, reads passwords at `:80`, and writes through the keyring at `:88`. Its documented environment override and memory fallback are not findings by themselves. This was a narrow architecture check, not a complete upload security audit. No credential store, environment secret, settings credential value or personal file was read or reproduced. Reachable Copy retention is the concrete privacy issue in PRIV-01.
 
@@ -241,7 +245,7 @@ Untested: live Windows/Narrator behavior, accessibility tree mapping of the pinn
 Considered and rejected as unsupported or overstated:
 
 - "Trash permanently deletes files after ten seconds." False. The UI loses Undo; media and recovery journals remain in private capture trash.
-- "Rune exposes plaintext uploader tokens." No reachable token settings were found; old GPUI files are not shipped UI.
+- "Rune exposes plaintext uploader tokens." No reachable token settings were found; old retired UI files are not shipped UI.
 - "The whole frontend is inaccessible." False. Shared controls and Search have explicit accessibility/keyboard work. Spatial editing and some names have specific gaps.
 - "All workers are detached on exit." False. Several important workers join; screenshot delivery is the concrete exception.
 - "Copy proves network exfiltration." False. The demonstrated behavior is unexpected local persistence.
