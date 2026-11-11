@@ -140,12 +140,12 @@ if want render; then
   wineserver -w 2>/dev/null || true
   export exe win_out wine_bin
   xvfb-run -a bash -c '
-    for scene in library capture editor disk tools settings; do
+    for scene in library capture editor disk tools settings cloud-settings-fixture cloud-fixture; do
       "$wine_bin" "$exe" --scene "$scene" --size 1200x800 --scale 1 \
         --snap "$win_out\\$scene.png" 2>&1 | grep -v "^rune:" || true
     done
     wineserver -w'
-  for scene in library capture editor disk tools settings; do
+  for scene in library capture editor disk tools settings cloud-settings-fixture cloud-fixture; do
     [ -s "$out/$scene.png" ] || { echo "Rendering $scene under Wine produced no image" >&2; exit 1; }
   done
   ls -la "$out"

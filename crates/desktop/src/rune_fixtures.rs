@@ -1,8 +1,13 @@
 //! Scripted fixtures over real media, for headless renders and input replays on any
 //! platform: `--scene library-fixture`, `--scene editor-fixture`, and `--shot-fixture` for the
 //! screenshot overlay. Media come from `KIELBOX_FIXTURES` (a folder of captures). They never
-//! read preferences, scan the capture folder, or touch the screen.
-use crate::rune_ui::{Page, State};
+//! read preferences, scan the capture folder, or touch the screen. The two Cloud scenes
+//! (`cloud-settings-fixture`, `cloud-fixture`) are synthetic and need no media.
+use crate::{
+    cloud::{self, Known},
+    rune_cloud::{Activity, Test},
+    rune_ui::{Page, State},
+};
 use std::{
     path::PathBuf,
     time::{Duration, Instant, SystemTime},
@@ -67,4 +72,60 @@ pub fn editor(s: &mut State) {
         s.editor.seek(0);
         s.editor.settle(Duration::from_secs(10));
     }
+}
+
+const CLOUD_URL: &str = "https://cloud.example.com";
+
+/// Settings, Cloud tab: address set, service token saved, connection tested.
+pub fn cloud_settings(s: &mut State) {
+    s.preferences.cloud_url = CLOUD_URL.into();
+    s.preferences.cloud_auto_upload = true;
+    s.cloud.url = rune::TextEdit::new(CLOUD_URL);
+    s.cloud.saved_in = Some("Windows Credential Manager".into());
+    s.cloud.test = Test::Connected("kielbox-desktop".into());
+    s.go(Page::Settings);
+    s.settings_tab = 5;
+}
+
+/// The Library with a card in each cloud state: not uploaded, queued, uploading, uploaded,
+/// failed, and creating a share link. Synthetic captures, so it renders without media.
+pub fn cloud_cards(s: &mut State) {
+    s.go(Page::Library);
+    s.preferences.cloud_url = CLOUD_URL.into();
+    let now = SystemTime::now();
+    let names = [
+        "Screenshot not uploaded.png",
+        "Recording queued.mkv",
+        "Recording uploading.mkv",
+        "Screenshot uploaded.png",
+        "Replay upload failed.mkv",
+        "Recording sharing.mkv",
+    ];
+    for (i, name) in names.iter().enumerate() {
+        let path = PathBuf::from(name);
+        s.file_times
+            .insert(path.clone(), now - Duration::from_secs(60 * (i as u64 + 1)));
+        s.files.push(path);
+    }
+    let path = |i: usize| PathBuf::from(names[i]);
+    s.cloud.activity.insert(path(1), Activity::Queued);
+    s.cloud.activity.insert(
+        path(2),
+        Activity::Uploading {
+            sent: 420,
+            total: 1000,
+        },
+    );
+    s.cloud.known.insert(
+        path(3),
+        Known {
+            item_id: "01FIXTURE".into(),
+            size: 1000,
+            modified_ms: cloud::unix_ms(s.file_times[&path(3)]),
+        },
+    );
+    s.cloud
+        .activity
+        .insert(path(4), Activity::Failed("Cloud: network error".into()));
+    s.cloud.activity.insert(path(5), Activity::Sharing);
 }

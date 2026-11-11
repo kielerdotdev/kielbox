@@ -5,12 +5,17 @@ replace the handful of utilities I install and configure on every machine.
 
 Currently Windows only. macOS and Linux are planned. The Rune frontend is an
 experimental preview with incomplete parity; see [current capabilities and gaps](docs/STATUS.md).
-Configured upload destinations and the former watch/share windows are not wired in Rune.
+Configured upload destinations (the generic uploader library) and the former watch/share
+windows are not wired in Rune. The one upload target that is wired is Kielbox Cloud, a personal
+Cloudflare-hosted library you deploy yourself; see [the setup guide](docs/CLOUD.md). It is new
+and has not yet run on Windows or against a real deployment.
 
 - Screen recording and instant replay, with separate audio tracks.
 - Screenshots and annotations with local image/project output.
 - Clip trimming, audio editing, and video export.
 - A local library with search, filters, favorites and video thumbnails.
+- Optional Kielbox Cloud: upload captures to your own Cloudflare account, browse them on the
+  web and share revocable links ([setup](docs/CLOUD.md)).
 - Disk usage views and a CLI for cleaning old development files.
 
 This is early software. Game recording requires an NVIDIA GPU with AV1 encoding.

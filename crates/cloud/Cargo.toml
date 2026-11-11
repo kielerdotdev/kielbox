@@ -1,0 +1,30 @@
+[package]
+name = "cloud"
+description = "Client for the Kielbox Cloud API: Access service-token auth, presigned R2 single and multipart uploads, shares."
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+publish = false
+
+[dependencies]
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream", "http2", "system-proxy"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros", "fs", "io-util", "net", "time", "sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tracing = { workspace = true }
+upload = { workspace = true, default-features = false }
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

@@ -18,6 +18,7 @@ recording, project, settings and installation formats.
 | Disk | Existing cancellable directory/NTFS scanner, progress, directory navigation and size bars |
 | Utilities | 17 task-specific forms, capture handoff, result-bound copy/save/reveal and format selection |
 | Settings | Capture folder, resolution/FPS, audio flags, replay microphone cleanup, tray behavior, shortcuts and updates |
+| Cloud | Background uploads, Cloud settings, library share links and optional auto-upload to a self-hosted Cloudflare library. See [setup](CLOUD.md); Windows and live deployment validation are pending |
 | Packaging | Application-owned DPI manifest, Rune/font licenses, embedded shader metadata; no separate FXC build step |
 
 Workers own media/filesystem operations. Screenshot failures retain their

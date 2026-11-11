@@ -14,10 +14,17 @@ sha2 = "0.10"
 media-core = { path = "../media-core" }
 toolkit = { path = "../toolkit" }
 editor-core = { path = "../editor-core" }
-image = { version = "0.25", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 rune = { git = "https://github.com/anomalyco/rune", rev = "a9da7e3ebf5a8ab9bf19c3015032674b6e042df2", default-features = false, features = ["accessibility", "native-file-dialog", "svg"] }
 disk = { path = "../disk" }
 screenshot-overlay.workspace = true
+cloud.workspace = true
+toolkit-services.workspace = true
+upload = { workspace = true, default-features = false }
+bytes = "1"
+tokio = { version = "1", features = ["rt", "time", "sync"] }
+tokio-util = "0.7"
+url = "2"
 
 [target.'cfg(windows)'.dependencies]
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
@@ -34,6 +41,8 @@ screenshot-windows.workspace = true
 
 [dev-dependencies]
 media-io = { path = "../media-io" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"
 
 [build-dependencies]
 embed-resource = "=3.0.12"

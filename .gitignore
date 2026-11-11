@@ -34,3 +34,10 @@ __pycache__/
 /crates/image-editor-ui/tests/snapshots/*.png
 /crates/toolkit-settings-ui/docs/*.png
 /crates/toolkit-settings-ui/tests/snapshots/*.png
+
+# Kielbox Cloud (cloud/): dependencies, build output and local secrets.
+/cloud/node_modules/
+/cloud/.wrangler/
+/cloud/dist/
+/cloud/.tanstack/
+/cloud/.dev.vars

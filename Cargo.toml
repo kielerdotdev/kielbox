@@ -34,6 +34,7 @@ toolkit-settings-ui = { path = "crates/toolkit-settings-ui" }
 shell = { path = "crates/shell" }
 image-types = { path = "crates/image-types" }
 upload = { path = "crates/upload" }
+cloud = { path = "crates/cloud" }
 thiserror = "2"
 tracing = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }

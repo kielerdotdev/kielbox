@@ -1,0 +1,72 @@
+/**
+ * Kielbox Cloud Worker. Everything below is a placeholder: real ids, hostnames and routes
+ * belong in the owner's deployment (an untracked wrangler.local.jsonc or `--var` flags), never
+ * in git. See README.md.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "kielbox-cloud",
+	"main": "./src/server.ts",
+	"compatibility_date": "2025-09-02",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	// A *.workers.dev URL would sit outside Cloudflare Access.
+	"workers_dev": false,
+	"preview_urls": false,
+	"assets": {
+		"binding": "ASSETS",
+		// The entry decides per hostname whether a file may be served.
+		"run_worker_first": true
+	},
+	"triggers": { "crons": ["17 3 * * *"] },
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "kielbox-cloud" }],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "kielbox-cloud",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		}
+	],
+	"vars": {
+		"ENVIRONMENT": "production",
+		"APP_HOST": "cloud.example.com",
+		"SHARE_HOST": "share.example.com",
+		"ACCESS_TEAM_DOMAIN": "https://example.cloudflareaccess.com",
+		"ACCESS_AUD": "replace-with-access-application-aud-tag",
+		"R2_ACCOUNT_ID": "replace-with-cloudflare-account-id",
+		"R2_BUCKET_NAME": "kielbox-cloud",
+		"MAX_UPLOAD_BYTES": "21474836480"
+	},
+	// `npm run dev` selects this with CLOUDFLARE_ENV=dev. Local only: the host split, the
+	// Access values and the signing key are throwaway, and the local signer plus the
+	// X-Dev-Identity bypass refuse to run when ENVIRONMENT is "production".
+	"env": {
+		"dev": {
+			"name": "kielbox-cloud-dev",
+			"workers_dev": false,
+			"preview_urls": false,
+			"assets": { "binding": "ASSETS", "run_worker_first": true },
+			"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "kielbox-cloud" }],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "kielbox-cloud",
+					"database_id": "00000000-0000-0000-0000-000000000000",
+					"migrations_dir": "migrations"
+				}
+			],
+			"vars": {
+				"ENVIRONMENT": "dev",
+				"APP_HOST": "localhost",
+				"SHARE_HOST": "127.0.0.1",
+				"ACCESS_TEAM_DOMAIN": "https://dev.invalid",
+				"ACCESS_AUD": "dev-aud",
+				"R2_ACCOUNT_ID": "dev",
+				"R2_BUCKET_NAME": "kielbox-cloud",
+				"MAX_UPLOAD_BYTES": "21474836480",
+				"LOCAL_SIGNING_KEY": "dev-only-signing-key-not-a-secret"
+			}
+		}
+	}
+}
