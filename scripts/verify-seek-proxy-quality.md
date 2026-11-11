@@ -116,8 +116,8 @@ produced 116 changing paints in two seconds, 29.8348/46.4142/48.1233 ms
 median/p95/maximum request-to-paint and a 28.8026 ms exact final response.
 Two further untraced controls also passed, with 111/114 changing paints and
 27.8404/28.7999 ms final responses. These desktop UI paint-call timings exclude GPU
-completion and monitor scanout. See the dated recipe-7 entry in
-`docs/VALIDATION.md` for receipts and the preserved trace-enabled failures.
+completion and monitor scanout. Historical receipts and trace-enabled failures are in the recipe-7 entry of
+`docs/VALIDATION.md` in git history.
 The former 720p/8 Mbps derivative visibly lost text detail. Its 35.543 dB /
 0.896955 SSIM and the earlier 1080p QP-26/GOP-6 score of 41.3973 dB / 0.977515
 use different resized references, so native-pixel crops remain necessary.

@@ -4,7 +4,7 @@ The installation check explains missing media tools and data-location problems w
 
 ## Running it
 
-Use **Settings → Check installation** for a background check with Cancel. The command-line route runs before the graphical application starts:
+The full diagnostics UI is not wired in Rune. Run the command-line check before the graphical application starts:
 
 ```powershell
 .\rcr.exe --diagnose
@@ -14,7 +14,7 @@ Use **Settings → Check installation** for a background check with Cancel. The 
 
 JSON is the default; `--human` prints concise summaries and actions. JSON also includes version, build profile, executable/working-directory paths, per-check status, bounded diagnostic details, and elapsed times. Review paths before sharing a report.
 
-The CLI does not load saved preferences. Its capture-folder check defaults to `recordings` relative to the launch folder; pass `--data-folder` to inspect another location. Settings uses the running application's configured capture folder. Projects/settings remain relative to the launch folder.
+The CLI does not load saved preferences. Its capture-folder check defaults to `recordings` relative to the launch folder; pass `--data-folder` to inspect another location. Projects/settings remain relative to the launch folder.
 
 Exit status is 1 for a blocking missing/unusable dependency, incompatible listed encoder support, conflicting data path, missing required debug shaders, or output failure. Warnings and unverified hardware/DLL checks alone do not make the command fail.
 
@@ -31,15 +31,3 @@ Exit status is 1 for a blocking missing/unusable dependency, incompatible listed
 Only `-version` and the encoder-list command are permitted tool operations. Windows tool candidates must be executable `.exe` files; no shell or script wrapper is invoked. The reused toolkit subprocess supervisor closes stdin, hides child console windows, caps stdout at 64 KiB and stderr at 4 KiB, and stops each command after three seconds. Encoder listings that hit the capture cap without finding the requested token are reported as inconclusive, not falsely missing. Cancellation stops outstanding tool work and skips subsequent data-location checks.
 
 The timeout applies to subprocesses. Filesystem metadata/directory operations remain read-only worker operations; a disconnected or stalled filesystem can impose OS-level latency. The report does not promise a hard wall-clock bound for such filesystem calls.
-
-## Verification checkpoint
-
-All nine setup-diagnostic tests passed in the integrated Desktop checkpoint of 250 passed / 8 ignored. Actual development-executable CLI checks passed for JSON and human output (exit 0), and an intentionally missing explicit FFmpeg override returned exit 1 without falling back to PATH. Reports are under `.downloads/plan-continuation/doctor*`. Two hidden Settings renders at 900×600 and 1440×900 passed measured whole-section viewport checks; visual inspection of the compact report confirmed readable status and actions. These use an explicitly seeded presentation report, not a hardware or asynchronous button-interaction proof. Release clean-folder diagnosis remains a separate gate.
-
-Added regressions cover deterministic PATH resolution, missing explicit overrides, exact encoder-token parsing, cancellation, startup/deadline errors, missing debug checkout files, and preserving conflicting data files. A native test-binary child exercises a hung process, nonzero exit, and oversized stdout/stderr without a shell, media processing, or hardware activation. Run centrally:
-
-```powershell
-cargo test -p desktop setup_diagnostics::tests
-```
-
-Do not treat a successful setup report as a hardware qualification or recording-quality evaluation. Those require separate, explicitly authorized capture/encoder tests.

@@ -1,7 +1,7 @@
 # Development
 
 Kielbox uses Rune for its desktop UI. The current feature inventory and remaining
-work are in [Rune status](RUNE_MIGRATION.md). Older frontend sources, renderer
+work are in [Rune status](STATUS.md). Older frontend sources, renderer
 vendor code and UI proof scripts have been removed; git history retains them.
 
 ## Build and test
@@ -20,7 +20,7 @@ On Linux, run `scripts/ci/build-windows-cross.sh setup test build smoke render`
 on a disposable build VM. This cross-compiles Windows binaries and runs tests
 and six Rune scene renders through Wine. It does not validate Windows hardware,
 physical input, capture, accessibility or game compatibility. See
-[validation scope](RUNE_MIGRATION.md#validation) and [Windows builds](WINDOWS_BUILDS.md).
+[validation scope](STATUS.md#validation-limits) and [Windows builds](WINDOWS_BUILDS.md).
 
 ## Source layout
 
@@ -35,5 +35,4 @@ physical input, capture, accessibility or game compatibility. See
 Workers own long-running operations. Keep UI state changes on the UI thread,
 preserve cancellation and shutdown ownership, and use synthetic media and isolated
 working folders for tests. Do not treat historical native measurements as results
-for the current Rune build. The [QA tracker](../plans/implementation-tracker.md)
-records acceptance gaps.
+for the current Rune build. See [desktop status](STATUS.md) for remaining acceptance gaps.

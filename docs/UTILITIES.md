@@ -1,8 +1,6 @@
 # Local utilities in Rune
 
-Updated after the 11 November 2026 implementation and Boat validation. These are
-current source/build capabilities; native Windows device, clipboard, dialog and
-accessibility acceptance remains open. See the [implementation tracker](../plans/implementation-tracker.md).
+See [desktop status](STATUS.md) for feature gaps and native validation limits.
 
 ## Disk usage
 
@@ -67,11 +65,3 @@ unsaved image queues a recovery checkpoint and requires its acknowledgement
 before close/replacement/quit. Retry the action after the checkpoint completes.
 A crash before a checkpoint is requested is not covered. Recovery sidecars move
 with their source into Trash and are not separate normal Library captures.
-
-## Validation boundary
-
-Boat passed 268 Windows/Wine tests and 19 Linux disk/clean tests; three Windows
-entries were ignored. Release build, smoke and six scene renders passed. Wine
-software rendering is not native GPU, capture, clipboard, Narrator or game
-acceptance. Full commands and ignored-test reasons are in the
-[validation report](../plans/implemented-validation.md).

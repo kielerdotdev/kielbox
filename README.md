@@ -4,7 +4,7 @@ Screen capture, clips, and disk tools in one desktop app. I’m building it to
 replace the handful of utilities I install and configure on every machine.
 
 Currently Windows only. macOS and Linux are planned. The Rune frontend is an
-experimental preview with incomplete parity; see [current capabilities and gaps](docs/RUNE_MIGRATION.md).
+experimental preview with incomplete parity; see [current capabilities and gaps](docs/STATUS.md).
 Configured upload destinations and the former watch/share windows are not wired in Rune.
 
 - Screen recording and instant replay, with separate audio tracks.
@@ -34,7 +34,7 @@ Native installer and migration acceptance remain pending.
 
 Installed builds check for updates in the background. **Settings → App → Updates**
 lets you check, download, and restart to update. Updates and quit wait for capture, jobs and editable recovery checkpoints.
-See the [implementation tracker](plans/implementation-tracker.md) for validation limits. Closing the window leaves the app in the tray; choose **Quit
+See the [desktop status](docs/STATUS.md) for validation limits. Closing the window leaves the app in the tray; choose **Quit
 Kielbox** to exit. Uninstall through Windows **Installed apps** or **Apps & features**.
 
 Kielbox was previously called RCR. Existing data formats keep their older
@@ -59,11 +59,7 @@ installer requires .NET or a PowerShell launcher.
 ## Details
 
 [Utilities](docs/UTILITIES.md) · [Development](docs/DEVELOPMENT.md) ·
-[Validation](docs/VALIDATION.md) · [Dependencies and licenses](THIRD_PARTY.md)
+[Desktop status](docs/STATUS.md) · [Dependencies and licenses](THIRD_PARTY.md)
 
 The desktop app is GPL-3.0-or-later. Original RCR core packages are Apache-2.0.
 See [LICENSE-GPL-3.0](LICENSE-GPL-3.0) and [LICENSE](LICENSE).
-
-The desktop frontend now uses [Rune](https://github.com/anomalyco/rune).
-This migration is in progress; see [migration status and validation](docs/RUNE_MIGRATION.md)
-for the supported workflows and remaining gaps before using this build for daily work.
