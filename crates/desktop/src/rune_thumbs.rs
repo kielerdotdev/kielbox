@@ -175,7 +175,13 @@ fn work(queue: Arc<(Mutex<Queue>, Condvar)>, tx: mpsc::Sender<Done>, wake: rune:
     }
 }
 
-type Image = (u32, u32, Vec<u8>);
+pub(crate) type Image = (u32, u32, Vec<u8>);
+
+/// The cached still for `path` (RGBA and the duration in seconds for videos), if the Library
+/// has already decoded it. Reads one small file; never decodes, so callers run it on a worker.
+pub(crate) fn cached(path: &Path) -> Option<(Image, Option<f64>)> {
+    read_cache(&cache_path(path)?)
+}
 
 fn load(path: &Path, stopped: &dyn Fn() -> bool) -> Option<(Image, Option<f64>)> {
     let cache = cache_path(path);

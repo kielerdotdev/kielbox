@@ -1268,6 +1268,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cloud"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "upload",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "cmov"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1682,6 +1701,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "bytes",
+ "cloud",
  "disk",
  "editor-core",
  "embed-resource",
@@ -1702,10 +1723,15 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toolkit",
+ "toolkit-services",
  "tray-icon",
+ "upload",
+ "url",
  "windows 0.61.3",
  "windows-capture",
+ "wiremock",
 ]
 
 [[package]]

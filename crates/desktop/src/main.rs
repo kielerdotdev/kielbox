@@ -1,4 +1,5 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+mod cloud;
 mod diagnostics_io;
 #[cfg(windows)]
 mod hotkeys;
@@ -15,6 +16,7 @@ mod recordings;
 mod rune_annotation;
 #[cfg(windows)]
 mod rune_capture;
+mod rune_cloud;
 mod rune_editor;
 mod rune_fixtures;
 #[cfg(windows)]
@@ -147,6 +149,8 @@ fn main() {
             ("library", |s| s.go(rune_ui::Page::Library)),
             ("library-fixture", rune_fixtures::library),
             ("editor-fixture", rune_fixtures::editor),
+            ("cloud-settings-fixture", rune_fixtures::cloud_settings),
+            ("cloud-fixture", rune_fixtures::cloud_cards),
             ("capture", |s| s.go(rune_ui::Page::Capture)),
             ("editor", |s| s.page = rune_ui::Page::Editor),
             ("disk", |s| s.go_disk()),

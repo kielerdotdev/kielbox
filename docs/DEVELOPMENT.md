@@ -18,7 +18,7 @@ cargo test --locked -p desktop -p toolkit -p disk -p clean -j1
 
 On Linux, run `scripts/ci/build-windows-cross.sh setup test build smoke render`
 on a disposable build VM. This cross-compiles Windows binaries and runs tests
-and six Rune scene renders through Wine. It does not validate Windows hardware,
+and the Rune scene renders (the six pages plus the two Cloud fixture scenes) through Wine. It does not validate Windows hardware,
 physical input, capture, accessibility or game compatibility. See
 [validation scope](RUNE_MIGRATION.md#validation) and [Windows builds](WINDOWS_BUILDS.md).
 

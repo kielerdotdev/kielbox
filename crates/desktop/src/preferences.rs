@@ -108,6 +108,13 @@ pub struct Preferences {
     pub close_to_tray: bool,
     #[serde(deserialize_with = "deserialize_hotkeys")]
     pub hotkeys: [String; 7],
+    /// Address of Kielbox Cloud; empty = off. The service token is never stored here: it lives
+    /// in the OS credential store.
+    pub cloud_url: String,
+    /// Upload new captures automatically. Existing files are never uploaded in bulk.
+    pub cloud_auto_upload: bool,
+    /// Days a new share link stays valid; 0 = never expires.
+    pub cloud_share_days: u32,
 }
 pub fn default_hotkeys() -> [String; 7] {
     [
@@ -158,6 +165,9 @@ impl Default for Preferences {
             list_view: false,
             close_to_tray: true,
             hotkeys: default_hotkeys(),
+            cloud_url: String::new(),
+            cloud_auto_upload: false,
+            cloud_share_days: 7,
         }
     }
 }
@@ -372,6 +382,32 @@ where
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cloud_settings_default_off_when_an_old_file_lacks_them() {
+        let p: Preferences = serde_json::from_str(r#"{"height":1080,"fps":30}"#).unwrap();
+        assert_eq!(p.height, 1080);
+        assert!(p.cloud_url.is_empty());
+        assert!(!p.cloud_auto_upload);
+        assert_eq!(p.cloud_share_days, 7);
+    }
+
+    #[test]
+    fn cloud_settings_round_trip_without_any_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let mut p = Preferences::default();
+        p.cloud_url = "https://cloud.example.com".into();
+        p.cloud_auto_upload = true;
+        p.cloud_share_days = 0;
+        p.save_to(&path).unwrap();
+        let loaded: Preferences = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(loaded.cloud_url, "https://cloud.example.com");
+        assert!(loaded.cloud_auto_upload);
+        assert_eq!(loaded.cloud_share_days, 0);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.to_lowercase().contains("secret"));
+    }
+
     #[test]
     fn legacy_shortcuts_keep_customizations_when_quick_recorder_is_added() {
         let legacy = ["Ctrl+Alt+F1", "", "Ctrl+F3", "Ctrl+PrintScreen", "Shift+PrintScreen", "Alt+PrintScreen"];

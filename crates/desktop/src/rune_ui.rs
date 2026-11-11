@@ -61,7 +61,7 @@ pub enum Page {
     Tools,
     Settings,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoticeKind {
     Success,
     Error,
@@ -119,6 +119,7 @@ pub struct State {
     notice_seen: String,
     notice_since: Option<std::time::Instant>,
     pub thumbs: crate::rune_thumbs::Thumbs,
+    pub cloud: crate::rune_cloud::State,
     #[cfg(windows)]
     pub shot: Option<rune::OverlayHandle<crate::rune_shot::Shot>>,
     pub handle: Option<AppHandle<State>>,
@@ -148,6 +149,7 @@ impl State {
             recordings::set_root(preferences.folder.clone());
         }
         let hotkey_fields = preferences.hotkeys.iter().map(TextEdit::new).collect();
+        let cloud = crate::rune_cloud::State::new(&preferences, !headless);
         Self {
             page: Page::Library,
             section: Page::Library,
@@ -176,6 +178,7 @@ impl State {
             notice_seen: String::new(),
             notice_since: None,
             thumbs: Default::default(),
+            cloud,
             #[cfg(windows)]
             shot: None,
             handle: None,
@@ -280,6 +283,11 @@ impl State {
         #[cfg(windows)]
         {
             blocked |= self.capture.status().0 != Status::Off;
+        }
+        if !blocked {
+            // An upload in flight never blocks quitting: stop it and let it discard the
+            // half-finished item, within the worker's grace period.
+            self.cloud.shutdown();
         }
         !blocked
     }
@@ -443,6 +451,7 @@ pub fn setup(s: &mut State, wake: rune::Waker) {
     }
     s.scanner = Some(LibraryScanner::new());
     s.refresh();
+    s.cloud.start(s.wake.clone(), &s.preferences);
     if let Some(notice) = crate::preferences::take_startup_notice() {
         s.notice = notice;
     }
@@ -472,6 +481,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
                     format!("Could not scan {}: {:?}", e.root.display(), e.kind),
                 );
             }
+            crate::rune_cloud::scanned(s);
 
             changed = true;
         }
@@ -522,6 +532,7 @@ pub fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
             Err(e) => s.notify(NoticeKind::Error, e),
         }
     }
+    changed |= crate::rune_cloud::poll(s, tx);
     changed |= s.editor.poll();
     let visible: Vec<_> = library_matches(s)
         .into_iter()
@@ -1242,6 +1253,28 @@ fn clip_card(s: &State, i: usize, path: &std::path::Path, title: String, stamp: 
         .to_uppercase();
     let starred = s.preferences.favorites.contains(path);
     let selected = s.editor.path.as_deref() == Some(path);
+    let mut meta = row()
+        .w_full()
+        .gap(6.0)
+        .center_y()
+        .child(
+            text(title.clone())
+                .font(TextStyle500::TITLE)
+                .color(theme::c(theme::T1))
+                .single_line()
+                .truncate()
+                .grow(1.0)
+                .min_w(0.0),
+        )
+        .child(
+            text(stamp)
+                .font(TextStyle500::STAMP)
+                .color(theme::c(theme::T2))
+                .single_line(),
+        );
+    if let Some(button) = crate::rune_cloud::card_button(s, i, path) {
+        meta = meta.child(button);
+    }
     col()
         .key(format!("capture-{i}"))
         .grow(1.0)
@@ -1269,26 +1302,7 @@ fn clip_card(s: &State, i: usize, path: &std::path::Path, title: String, stamp: 
                 }),
         )
         .child(
-            row()
-                .w_full()
-                .gap(6.0)
-                .center_y()
-                .child(
-                    text(title)
-                        .font(TextStyle500::TITLE)
-                        .color(theme::c(theme::T1))
-                        .single_line()
-                        .truncate()
-                        .grow(1.0)
-                        .min_w(0.0),
-                )
-                .child(
-                    text(stamp)
-                        .font(TextStyle500::STAMP)
-                        .color(theme::c(theme::T2))
-                        .single_line(),
-                )
-                .child(
+            meta.child(
                     Btn::icon_only(
                         format!("favorite-{i}"),
                         if starred { "Unfavorite" } else { "Favorite" },
@@ -1352,7 +1366,7 @@ fn capture(s: &State) -> El {
     }
 }
 
-const SETTINGS_TABS: [&str; 5] = ["Capture", "Audio", "Shortcuts", "Storage", "App"];
+const SETTINGS_TABS: [&str; 6] = ["Capture", "Audio", "Shortcuts", "Storage", "App", "Cloud"];
 const SHORTCUTS: [&str; 7] = [
     "Turn replay on or off",
     "Save replay",
@@ -1403,6 +1417,7 @@ fn settings(s: &State) -> El {
         2 => settings_shortcuts(s),
         3 => settings_storage(s),
         4 => settings_app(s),
+        5 => crate::rune_cloud::settings(s),
         _ => settings_capture(s),
     };
     row()
@@ -1425,7 +1440,7 @@ fn settings(s: &State) -> El {
         ))
 }
 
-fn settings_header(title: &str, accessory: Option<El>) -> El {
+pub(crate) fn settings_header(title: &str, accessory: Option<El>) -> El {
     let mut line = row()
         .w_full()
         .pb(6.0)

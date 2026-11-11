@@ -45,6 +45,41 @@ Exact dependency versions are recorded in `Cargo.lock`; each dependency retains 
 The HTML is a visual reference. Its bundled JavaScript and mock recording data are not executed or distributed with the application. `assets/icons` contains locally authored monochrome SVG icons.
 
 
+## Kielbox Cloud
+
+`cloud/` is a TanStack Start application for Cloudflare Workers (not a Cargo member).
+Its direct npm dependencies are pinned in `cloud/package.json` and `cloud/package-lock.json`;
+licenses below are read from the installed packages. Transitive packages keep their own
+licenses and are recorded in the lock file.
+
+| Package | Version | License |
+| --- | --- | --- |
+| `@tanstack/react-start`, `@tanstack/react-router`, `@tanstack/react-query` | 1.169.5, 1.170.46, 5.107.1 | MIT |
+| `react`, `react-dom` | 19.3.1 | MIT |
+| `tailwindcss`, `@tailwindcss/vite` | 4.3.5 | MIT |
+| `@base-ui/react` | 1.9.0 | MIT |
+| `lucide-react` | 1.72.0 | ISC |
+| `hono` | 4.13.18 | MIT |
+| `zod` | 4.6.7 | MIT |
+| `aws4fetch` | 1.0.20 | MIT |
+| `jose` | 6.2.17 | MIT |
+
+Build and test tooling (not shipped): `vite` 8.3.8 (MIT), `@vitejs/plugin-react` 6.3.0 (MIT),
+`@cloudflare/vite-plugin` 1.69.0 (MIT), `@cloudflare/vitest-plugin` 1.8.0 (MIT), `vitest`
+4.1.12 (MIT), `wrangler` 4.160.1 (MIT OR Apache-2.0), `typescript` 6.0.3 (Apache-2.0),
+`@types/node`, `@types/react` and `@types/react-dom` (MIT).
+
+The explorer serves its own copy of Geist and Geist Mono (`cloud/public/fonts`, identical
+to `assets/fonts`) under the SIL Open Font License 1.1, with `OFL.txt` alongside. No font
+or script is loaded from a third-party host.
+
+`crates/cloud` is the Rust client (GPL-3.0-or-later). New direct Cargo dependencies it and
+the desktop's Cloud code add, from `cargo metadata`: `bytes` 1.12.1 (MIT), `futures-util`
+0.3.34 (MIT OR Apache-2.0), `tokio-util` 0.7.20 (MIT), `url` 2.5.8 (MIT OR Apache-2.0), and
+for tests `wiremock` 0.6.5 (MIT/Apache-2.0). `tokio`, `reqwest` and `tempfile` were already
+in the graph. The desktop also enables `image`'s `jpeg` feature for upload thumbnails.
+Cloudflare's services are used through their public APIs; no Cloudflare code is bundled.
+
 ## Screenshot and workflow code origin
 
 The screenshot, annotation, workflow and upload libraries originated in

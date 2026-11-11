@@ -29,7 +29,8 @@ remain in the checkout.
 | Images | Existing annotation actor, all tool choices, drag input, text labels, crop, rotate, undo/redo, image/project save |
 | Disk | Existing cancellable directory/NTFS scanner, progress, directory navigation and size bars |
 | Utilities | 17 task-specific forms, capture handoff, result-bound copy/save/reveal and format selection |
-| Settings | Capture folder, resolution/FPS, audio flags, replay microphone cleanup, tray behavior, shortcuts and updates |
+| Settings | Capture folder, resolution/FPS, audio flags, replay microphone cleanup, tray behavior, shortcuts and updates, and a Cloud tab (address, service token, test connection, auto-upload, share expiry, open web library) |
+| Kielbox Cloud | Optional. A Library card button uploads to the user's own Cloudflare deployment (`cloud/`, see [setup](CLOUD.md)), shows queued/percent/failed states and copies a share link once uploaded. One upload at a time, cancellable; quit cancels an upload in flight and does not wait on it. Local state is `projects/cloud.json`; the service token lives in the system credential store. Built and unit-tested on Linux; the Windows run, the Wine renders of its two scenes and a real deployment are still open |
 | Packaging | Application-owned DPI manifest, Rune/font licenses, embedded shader metadata; no separate FXC build step |
 
 Workers own media/filesystem operations. Screenshot failures retain their
@@ -40,7 +41,8 @@ owned through shutdown. Native lifecycle acceptance is still required.
 ## Remaining parity work
 
 - Custom-name editing, sort controls, grid/list layout,
-  and watch queues. Paging and persistent Trash recovery are now implemented.
+  and watch queues. The Cloud button exists on grid cards only; the Library has no list
+  layout yet, so there is no list-view control to mirror. Paging and persistent Trash recovery are now implemented.
 - Application-audio selectors and capture recovery presentation,
   quick-recorder window/region targets, countdown and floating controls. Existing
   saved recording display and endpoint identities are still honored.
@@ -48,8 +50,9 @@ owned through shutdown. Native lifecycle acceptance is still required.
   multi-clip joining, export presets, native GPU video playback, watch/share/fullscreen
   windows and editor-session caching. Playback currently uses the existing CPU path.
 - Annotation selection overlays, clipboard/IME integration, detailed style controls,
-  insert-image/sticker dialogs and configured screenshot/upload workflows. Source
-  annotation models remain available, but the full former workflow UI is not wired.
+  insert-image/sticker dialogs and configured screenshot/upload workflows (the generic
+  upload destinations; only Kielbox Cloud is wired). Source annotation models remain
+  available, but the full former workflow UI is not wired.
 - Last-region recall, screen ruler/pin/color overlays and radial/treemap disk views.
   OCR/QR capture handoff and utility-specific forms are implemented. Region
   screenshots already freeze the monitor under the pointer; this is not pending.
